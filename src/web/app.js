@@ -15,6 +15,7 @@ let STATE = {
   pollTimer: null,
   qqStatus: null,
   qqLoginTimer: null,
+  ilinkStatus: null,
 };
 
 /* ══════════ 工具 ══════════ */
@@ -285,6 +286,15 @@ async function loadConfig() {
   $('#reply-prob-val').textContent = prob + '%';
   $('#quiet-hours').value = (c.bot.quiet_hours || []).join(',');
 
+  // 官方通道的登录态存在后端文件里，单独取一次
+  if (CHANNELS.wechat && CHANNELS.wechat_type === 'ilink') {
+    try {
+      STATE.ilinkStatus = await api('/api/ilink/status');
+    } catch (_) { STATE.ilinkStatus = null; }
+  } else {
+    STATE.ilinkStatus = null;
+  }
+
   applyChannels();
   updateWizardStatus(c);
 }
@@ -308,11 +318,33 @@ function renderPlatformCards() {
 function applyChannels() {
   const wechatOn = CHANNELS.wechat;
   const qqOn = CHANNELS.qq;
-  const isGeWe = wechatOn && CHANNELS.wechat_type === 'gewechat';
+  const type = CHANNELS.wechat_type;
+  const isGeWe = wechatOn && type === 'gewechat';
+  const isILink = wechatOn && type === 'ilink';
 
+  // GeWe 才需要"配置网关"这一步；官方 iLink 不需要任何网关
   $('#step-2').hidden = !isGeWe;
   $('#step-2-qq').hidden = !qqOn;
   $('#step-3').hidden = !wechatOn;   // 微信需要扫码，QQ 在网关侧登录
+
+  // 官方通道的文案要跟 GeWe 区分开，避免用户以为还要配网关/填 Token
+  const title = $('#step3-title');
+  const sub = $('#step3-sub');
+  const hint = $('#qr-hint');
+  if (isILink) {
+    if (title) title.textContent = '扫码登录（官方通道）';
+    if (sub) sub.textContent = '腾讯官方接口，在应用内直接扫码，无需命令行';
+    if (hint) {
+      hint.textContent = '用手机微信扫描二维码。这是腾讯官方通道，合规零封号，' +
+        '但官方目前只开放私聊。二维码几分钟内有效，过期重新获取即可。';
+    }
+  } else {
+    if (title) title.textContent = '扫码登录微信';
+    if (sub) sub.textContent = '用手机微信扫描二维码完成登录';
+    if (hint) {
+      hint.textContent = '用手机微信扫描二维码。二维码 150 秒内有效，过期后重新获取即可。';
+    }
+  }
 
   // QQ 的反向 WS 地址
   const wsEl = $('#qq-ws-url');
@@ -338,8 +370,12 @@ function updateWizardStatus(cfg) {
   }
   const loginBadge = $('#login-badge');
   if (loginBadge) {
-    const wxid = a.bot_wxid || '';
-    if (wxid) {
+    // 官方 iLink 的凭证存在本地文件里，不看 bot_wxid
+    const isILink = a.wechat_type === 'ilink';
+    const loggedIn = isILink
+      ? !!(STATE.ilinkStatus && STATE.ilinkStatus.loggedIn)
+      : !!a.bot_wxid;
+    if (loggedIn) {
       loginBadge.className = 'wz-status ok';
       loginBadge.textContent = '已登录';
     } else {
@@ -420,7 +456,19 @@ async function saveConfig() {
 async function getQR() {
   const box = $('#qr-box');
   box.innerHTML = '<div class="qr-empty"><span>正在获取二维码…</span></div>';
-  const r = await api('/api/login/qrcode', { method: 'POST' });
+  const isILink = CHANNELS.wechat_type === 'ilink';
+  let r;
+  try {
+    // ⚠️ 先落盘再取二维码：后端是按**保存的配置**判断走 GeWe 还是官方通道的。
+    // 用户可能刚切换了通道但还没点「保存」，不先保存就会拿到另一条通道的提示
+    // （历史现象：选了官方通道却提示"请先填写 GeWe Token"）。
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    r = await api('/api/login/qrcode', { method: 'POST' });
+  } catch (e) {
+    box.innerHTML = `<div class="qr-empty"><span>获取失败：${esc(e.message)}</span></div>`;
+    toast('获取二维码失败：' + e.message, 'err');
+    return;
+  }
   if (!r.ok) {
     let html = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span>`;
     if (r.hint) {
@@ -448,7 +496,8 @@ async function getQR() {
   $('#qr-status').textContent = '等待扫码…';
 
   clearInterval(STATE.qrTimer);
-  STATE.qrTimer = setInterval(checkLogin, 2500);
+  // 官方通道的查询接口会 hold 住连接（最长 35 秒），间隔放宽一点
+  STATE.qrTimer = setInterval(checkLogin, isILink ? 3500 : 2500);
 }
 
 async function checkLogin() {
@@ -456,8 +505,8 @@ async function checkLogin() {
   if (r.status === 'confirmed') {
     clearInterval(STATE.qrTimer);
     $('#qr-status').textContent = '✅ 登录成功';
-    toast('登录成功', 'ok');
-    await loadConfig();
+    toast(r.message || '登录成功', 'ok');
+    await loadConfig();          // 会把官方通道的登录态一起刷出来
     await refreshStatus();
   } else if (r.status === 'failed') {
     clearInterval(STATE.qrTimer);
@@ -938,11 +987,13 @@ async function testGateway() {
 
   try {
     await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    const tok = $('#gewe-token').value.trim();
     const r = await api('/api/gateway/test', {
       method: 'POST',
       body: JSON.stringify({
         base_url: $('#gewe-base').value.trim(),
-        token: $('#gewe-token').value.trim(),
+        // 掩码值不要回传（那会把真实 Token 覆盖成 ••••1234）
+        token: tok.includes('•') ? '' : tok,
       }),
     });
     renderTestResult(r);
