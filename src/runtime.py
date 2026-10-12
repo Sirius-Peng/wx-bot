@@ -52,7 +52,8 @@ class LogEntry:
     content: str
     trigger_layer: str = ""
     trigger_reason: str = ""
-    replied: bool = False   # 这条入站消息最终是否被回复
+    replied: bool = False
+    platform: str = ""      # wechat | qq
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +64,7 @@ class LogEntry:
             "trigger_layer": self.trigger_layer,
             "trigger_reason": self.trigger_reason,
             "replied": self.replied,
+            "platform": self.platform,
             "time": time.strftime("%H:%M:%S", time.localtime(self.ts / 1000)),
         }
 
@@ -116,28 +118,31 @@ class MessageLog:
                     "trigger_layer": entry.trigger_layer,
                     "trigger_reason": entry.trigger_reason,
                     "replied": entry.replied,
+                    "platform": entry.platform,
                 }, ensure_ascii=False) + "\n")
         except Exception:
             log.debug("消息日志写盘失败", exc_info=True)
 
     def add_in(self, msg: WxMessage, layer: str = "", reason: str = "",
-               replied: bool = False) -> None:
+               replied: bool = False, platform: str = "") -> None:
         e = LogEntry(
             ts=msg.timestamp or int(time.time() * 1000), direction="in",
             chat_type=msg.chat_type, chat_id=msg.chat_id,
             chat_name=msg.sender_name if not msg.is_group else "",
             sender=msg.sender_name or msg.sender_id, content=msg.content,
             trigger_layer=layer, trigger_reason=reason, replied=replied,
+            platform=platform or msg.platform,
         )
         self._buf.append(e)
         self._append_file(e)
         self._recount(e)
 
-    def add_out(self, msg: WxMessage, text: str) -> None:
+    def add_out(self, msg: WxMessage, text: str, platform: str = "") -> None:
         e = LogEntry(
             ts=int(time.time() * 1000), direction="out",
             chat_type=msg.chat_type, chat_id=msg.chat_id,
             chat_name="", sender="机器人", content=text,
+            platform=platform or msg.platform,
         )
         self._buf.append(e)
         self._append_file(e)
@@ -182,61 +187,101 @@ class MessageLog:
 # ═══════════════════════════════════════════════════════════════════
 
 class BotRuntime:
-    """机器人运行时。所有对外的启停/状态/登录都从这里走。"""
+    """机器人运行时 —— 支持微信与 QQ 多通道并行。"""
 
     def __init__(self, store: ConfigStore, data_dir: Path):
         self.config_store = store
         self.data_dir = Path(data_dir)
         self.log = MessageLog(self.data_dir / "messages.jsonl")
-        # Docker 环境与网关容器管理（GeWe 恒定走本地 Docker）
         self.docker = DockerManager()
-        # 人格知识库（机器人运行后才有实例）
         self.memory: Optional[PersonaMemory] = None
 
         self.cfg: AppConfig = store.load()
-        self.adapter: Optional[BaseAdapter] = None
-        self.orchestrator: Optional[Orchestrator] = None
+
+        # 双通道（独立适配器 + 独立编排器）
+        self.wechat_adapter: Optional[BaseAdapter] = None
+        self.wechat_orch: Optional[Orchestrator] = None
+        self.qq_adapter: Optional[BaseAdapter] = None
+        self.qq_orch: Optional[Orchestrator] = None
+
         self.running = False
         self.last_error = ""
         self.started_at = 0.0
+        self.platforms_running: set[str] = set()   # {"wechat", "qq"}
 
         self._login: dict = {"status": "idle", "qrcode": "", "image": "",
                              "uuid": "", "app_id": "", "message": ""}
-        self._poll_task: Optional[asyncio.Task] = None
 
     # ── 生命周期 ──────────────────────────────────────────────
 
     async def start(self) -> dict:
         if self.running:
             return {"ok": True, "message": "机器人已在运行"}
-        try:
-            self.cfg = self.config_store.load()
-            self._validate()
-            self.adapter = self._build_adapter()
-            self.orchestrator = self._build_orchestrator(self.adapter)
-            await self.adapter.start()
-            self.running = True
+        self.cfg = self.config_store.load()
+        self._validate()
+
+        results: list[dict] = []
+        a = self.cfg.adapter
+
+        if a.wechat_enabled:
+            try:
+                self.wechat_adapter = self._build_wechat_adapter()
+                self.wechat_orch = self._build_orchestrator(
+                    self.wechat_adapter, platform="wechat"
+                )
+                await self.wechat_adapter.start()
+                self.platforms_running.add("wechat")
+                results.append({"ok": True, "platform": "wechat",
+                                "message": "微信通道已启动"})
+                log.info("微信通道已启动")
+            except Exception as e:
+                log.exception("微信通道启动失败")
+                results.append({"ok": False, "platform": "wechat",
+                                "message": f"微信通道启动失败：{e}"})
+
+        if a.qq_enabled:
+            try:
+                self.qq_adapter = self._build_qq_adapter()
+                self.qq_orch = self._build_orchestrator(
+                    self.qq_adapter, platform="qq"
+                )
+                await self.qq_adapter.start()
+                self.platforms_running.add("qq")
+                results.append({"ok": True, "platform": "qq",
+                                "message": "QQ 通道已启动"})
+                log.info("QQ 通道已启动")
+            except Exception as e:
+                log.exception("QQ 通道启动失败")
+                results.append({"ok": False, "platform": "qq",
+                                "message": f"QQ 通道启动失败：{e}"})
+
+        any_ok = any(r["ok"] for r in results)
+        self.running = any_ok
+        if any_ok:
             self.last_error = ""
             self.started_at = time.time()
-            log.info("机器人已启动 platform=%s", self.adapter.platform)
-            return {"ok": True, "message": f"机器人已启动（{self.adapter.platform}）"}
-        except Exception as e:
-            self.last_error = str(e)
-            self.running = False
-            log.exception("启动失败")
-            return {"ok": False, "message": f"启动失败：{e}"}
+            msgs = [r["message"] for r in results]
+            return {"ok": True, "message": "；".join(msgs),
+                    "details": results}
+        # 全失败了
+        err = "；".join(r["message"] for r in results)
+        self.last_error = err
+        return {"ok": False, "message": err, "details": results}
 
     async def stop(self) -> dict:
-        if not self.running or not self.adapter:
-            self.running = False
-            return {"ok": True, "message": "机器人未在运行"}
-        try:
-            await self.adapter.stop()
-        except Exception:
-            log.warning("关闭适配器异常", exc_info=True)
+        for name, adapter in (("wechat", self.wechat_adapter),
+                               ("qq", self.qq_adapter)):
+            if adapter is not None:
+                try:
+                    await adapter.stop()
+                except Exception:
+                    log.warning("%s 通道关闭异常", name, exc_info=True)
+        self.wechat_adapter = None
+        self.wechat_orch = None
+        self.qq_adapter = None
+        self.qq_orch = None
         self.running = False
-        self.orchestrator = None
-        self.adapter = None
+        self.platforms_running.clear()
         return {"ok": True, "message": "机器人已停止"}
 
     async def restart(self) -> dict:
@@ -245,50 +290,60 @@ class BotRuntime:
         return await self.start()
 
     def status(self) -> dict:
-        return {
+        st = {
             "running": self.running,
-            "platform": self.adapter.platform if self.adapter else "",
-            "supports_group": self.adapter.supports_group if self.adapter else False,
+            "platforms": list(self.platforms_running),
             "uptime": int(time.time() - self.started_at) if self.running else 0,
             "last_error": self.last_error,
             "login": self._login,
             "configured": bool(self.cfg.llm.primary_key),
             "stats": self.log.stats(),
         }
+        # 各通道独立状态
+        for name, adapter in (("wechat", self.wechat_adapter),
+                               ("qq", self.qq_adapter)):
+            if adapter is not None:
+                st[f"{name}_platform"] = adapter.platform
+                st[f"{name}_supports_group"] = adapter.supports_group
+                st[f"{name}_running"] = name in self.platforms_running
+            else:
+                st[f"{name}_running"] = False
+        return st
 
     # ── 构建 ──────────────────────────────────────────────────
 
     def _validate(self) -> None:
         a, l = self.cfg.adapter, self.cfg.llm
-        if a.type == "gewechat" and not a.gewe_token:
-            raise ValueError("未填写 GeWe Token，请到「接入设置」完善")
-        if a.type == "onebot" and not a.onebot_http_url:
-            raise ValueError("未填写 OneBot 网关地址，请到「接入设置」完善")
+        if a.wechat_enabled:
+            if a.wechat_type == "gewechat" and not a.gewe_token:
+                raise ValueError("微信通道：未填写 GeWe Token")
+        if a.qq_enabled and not a.onebot_http_url:
+            raise ValueError("QQ 通道：未填写 OneBot 网关地址")
         if not l.primary_key:
             raise ValueError("未填写大模型 API Key，请到「模型设置」完善")
 
-    def _build_adapter(self) -> BaseAdapter:
+    def _build_wechat_adapter(self) -> BaseAdapter:
         a = self.cfg.adapter
-
-        # QQ：OneBot 11 协议（兼容 NapCat / Lagrange / LLOneBot 等）
-        if a.type == "onebot":
-            return OneBotAdapter(
-                http_url=a.onebot_http_url, access_token=a.onebot_token,
-                bot_qq=a.bot_qq, bot_nickname=a.bot_nickname or self.cfg.bot.name,
-            )
-
         gewe = GewechatAdapter(
             base_url=a.gewe_base_url, token=a.gewe_token, app_id=a.gewe_app_id,
             bot_wxid=a.bot_wxid, bot_nickname=a.bot_nickname or self.cfg.bot.name,
         )
-        if a.type == "ilink" or a.hybrid_enabled:
+        if a.wechat_type == "ilink" or a.hybrid_enabled:
             official = ILinkAdapter(state_dir=a.ilink_state_dir, bot_agent="WxBot/1.0")
-            if a.type == "ilink":
+            if a.wechat_type == "ilink":
                 return official
             return HybridAdapterRouter(private_adapter=official, group_adapter=gewe)
         return gewe
 
-    def _build_orchestrator(self, adapter: BaseAdapter) -> Orchestrator:
+    def _build_qq_adapter(self) -> BaseAdapter:
+        a = self.cfg.adapter
+        return OneBotAdapter(
+            http_url=a.onebot_http_url, access_token=a.onebot_token,
+            bot_qq=a.bot_qq, bot_nickname=a.bot_nickname or self.cfg.bot.name,
+        )
+
+    def _build_orchestrator(self, adapter: BaseAdapter,
+                            platform: str = "") -> Orchestrator:
         cfg = self.cfg
         judge_gw = LLMGateway(ProviderCfg(
             name="judge", base_url=cfg.llm.judge_base, api_key=cfg.llm.judge_key,
@@ -311,7 +366,6 @@ class BotRuntime:
             default_mode=cfg.bot.group_reply_mode or "mention_only",
         )
 
-        # 人格知识库：用便宜模型抽取记忆，随对话不断积累
         memory = PersonaMemory(
             self.data_dir / "memory.json", llm=judge_gw,
             enabled=bool(cfg.bot.memory_enabled),
@@ -325,7 +379,7 @@ class BotRuntime:
             ctx=ContextManager(store), router=router,
             sender=HumanLikeSender(adapter), memory=memory,
         )
-        self._wire_logging(orch, adapter)
+        self._wire_logging(orch, adapter, platform)
         return orch
 
     def _build_store(self) -> MemoryStore:
@@ -348,13 +402,11 @@ class BotRuntime:
             ))
         return store
 
-    def _wire_logging(self, orch: Orchestrator, adapter: BaseAdapter) -> None:
-        """挂日志钩子，让界面能看到每条消息的触发判定结果。
-
-        做法：包一层 TriggerRouter.decide 记录决策，再包一层 _process
-        把「入站消息 + 决策 + 是否真的回复了」写进日志。
-        """
+    def _wire_logging(self, orch: Orchestrator, adapter: BaseAdapter,
+                      platform: str = "") -> None:
+        """挂日志钩子，让界面能看到每条消息的触发判定结果。"""
         last: dict = {"layer": "", "reason": ""}
+        plat = platform or adapter.platform
 
         orig_decide = orch.router.decide
 
@@ -374,7 +426,8 @@ class BotRuntime:
             finally:
                 replied = self.log._stats["out"] > out_before
                 self.log.add_in(msg, last.get("layer", ""),
-                                last.get("reason", ""), replied)
+                                last.get("reason", ""), replied,
+                                platform=plat)
 
         orch._process = process_wrapped             # type: ignore[method-assign]
 
@@ -384,11 +437,11 @@ class BotRuntime:
         async def send_wrapped(chat_id: str, text: str, at=None) -> str:
             mid = await orig_send(chat_id, text, at=at)
             self.log.add_out(WxMessage(
-                msg_id="", platform=adapter.platform,
-                chat_type="group" if "@chatroom" in chat_id else "private",
+                msg_id="", platform=plat,
+                chat_type="group" if "@chatroom" in chat_id or chat_id.startswith("qq:group:") else "private",
                 chat_id=chat_id, sender_id="", sender_name="", bot_id="",
                 content=text,
-            ), text)
+            ), text, platform=plat)
             return mid
 
         adapter.send_text = send_wrapped            # type: ignore[method-assign]
@@ -683,7 +736,7 @@ class BotRuntime:
         接口命名在不同 GeWe 版本间略有差异，这里按候选列表依次尝试。
         """
         a = self.cfg.adapter
-        if a.type == "ilink":
+        if a.wechat_type == "ilink":
             return {"ok": False, "message": "官方通道请用命令行扫码：openclaw channels login"}
         if not a.gewe_base_url:
             return {"ok": False, "message": "请先填写网关地址（可点「自动探测」）"}

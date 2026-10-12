@@ -137,7 +137,7 @@ async def ws_onebot(websocket: WebSocket) -> None:
     await websocket.accept()
 
     cfg = config_store.load()
-    if cfg.adapter.type != "onebot":
+    if not cfg.adapter.qq_enabled:
         await websocket.close(code=1008, reason="当前未启用 QQ 通道")
         return
 
@@ -154,7 +154,7 @@ async def ws_onebot(websocket: WebSocket) -> None:
     try:
         while True:
             raw = await websocket.receive_text()
-            adapter = runtime.adapter
+            adapter = runtime.qq_adapter
             if adapter is None or getattr(adapter, "platform", "") != "onebot":
                 if not warned:
                     log.warning("收到 QQ 消息，但机器人尚未启动，消息将被忽略 —— "
@@ -172,7 +172,7 @@ async def ws_onebot(websocket: WebSocket) -> None:
     except Exception:
         log.debug("OneBot WebSocket 异常", exc_info=True)
     finally:
-        adapter = runtime.adapter
+        adapter = runtime.qq_adapter
         if adapter is not None and hasattr(adapter, "detach_ws"):
             adapter.detach_ws(websocket)
         log.info("OneBot 反向 WebSocket 已断开")
@@ -182,7 +182,7 @@ async def ws_onebot(websocket: WebSocket) -> None:
 async def onebot_event(request: Request) -> Response:
     """OneBot HTTP POST 上报。"""
     cfg = config_store.load()
-    if cfg.adapter.type != "onebot":
+    if not cfg.adapter.qq_enabled:
         return JSONResponse({"status": "failed", "retcode": 100,
                              "message": "当前未启用 QQ 通道"})
 
@@ -198,9 +198,8 @@ async def onebot_event(request: Request) -> Response:
     except Exception:
         return JSONResponse({"status": "failed", "retcode": 100, "message": "无效的 JSON"})
 
-    adapter = runtime.adapter
+    adapter = runtime.qq_adapter
     if adapter is None or getattr(adapter, "platform", "") != "onebot":
-        # 明确告知网关（避免它以为投递成功），但不报错，网关会按自己的策略重试
         return JSONResponse({"status": "failed", "retcode": 100,
                              "message": "机器人尚未启动，请先在管理界面点「启动机器人」"})
 
@@ -385,6 +384,9 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     cfg.adapter.gewe_token = keep_masked(
         incoming.get("adapter", {}).get("gewe_token", ""), old.adapter.gewe_token
     )
+    cfg.adapter.onebot_token = keep_masked(
+        incoming.get("adapter", {}).get("onebot_token", ""), old.adapter.onebot_token
+    )
     # 群配置：合并而非覆盖，避免前端未提交的群被删掉
     for cid, item in old.groups.items():
         cfg.groups.setdefault(cid, item)
@@ -466,14 +468,14 @@ async def webhook(request: Request) -> Response:
 
     必须快速返回 —— 网关有重试机制，慢响应会触发重复推送。
     """
-    if not runtime.adapter:
+    if not runtime.wechat_adapter:
         return JSONResponse({"ret": 200, "msg": "bot not running"})
     try:
         payload = await request.json()
     except Exception:
         return JSONResponse({"ret": 200, "msg": "bad payload"})
 
-    handler = getattr(runtime.adapter, "handle_webhook", None)
+    handler = getattr(runtime.wechat_adapter, "handle_webhook", None)
     if handler is None:
         return JSONResponse({"ret": 200, "msg": "adapter has no webhook"})
     try:

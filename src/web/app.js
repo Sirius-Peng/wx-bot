@@ -129,12 +129,18 @@ async function refreshStatus() {
   $('#hero-pulse').classList.toggle('on', running);
   $('#hero-title').textContent = running ? '机器人正在运行' : '机器人未运行';
   $('#hero-desc').textContent = running
-    ? '正在监听微信消息，按触发策略智能回复'
+    ? '正在监听消息，按触发策略智能回复'
     : (s.last_error || '完成接入设置后点击「启动机器人」即可开始工作');
-  $('#hero-platform').textContent = s.platform || '—';
-  $('#hero-groupcap').textContent = running
-    ? (s.supports_group ? '支持群聊' : '仅私聊')
-    : '—';
+
+  const platforms = s.platforms || [];
+  const platNames = platforms.map(p => p === 'wechat' ? '微信' : 'QQ').join(' · ');
+  $('#hero-platform').textContent = platNames || '—';
+
+  const caps = [];
+  if (s.wechat_running) caps.push(s.wechat_supports_group ? '微信群聊' : '微信私聊');
+  if (s.qq_running) caps.push('QQ群聊');
+  $('#hero-groupcap').textContent = running ? (caps.join(' · ') || '—') : '—';
+
   $('#hero-uptime').textContent = fmtUptime(s.uptime);
 
   // 统计
@@ -217,29 +223,40 @@ function applyGroupMode(mode) {
 
 /* ══════════ 接入设置 ══════════ */
 
-let adapterType = 'gewechat';
+const CHANNELS = { wechat: true, qq: false, wechat_type: 'gewechat' };
 
 async function loadConfig() {
   const c = await api('/api/config');
   STATE.config = c;
+  const a = c.adapter || {};
 
-  // 通道（单选卡片）
-  adapterType = c.adapter.type || 'gewechat';
+  // 通道复选
+  CHANNELS.wechat = !!a.wechat_enabled;
+  CHANNELS.qq = !!a.qq_enabled;
+  CHANNELS.wechat_type = a.wechat_type || 'gewechat';
+
   $$('#adapter-type .choice').forEach(el => {
-    const radio = el.querySelector('input');
-    if (radio) radio.checked = el.dataset.value === adapterType;
+    const cb = el.querySelector('input[type=checkbox]');
+    if (!cb) return;
+    if (cb.value === 'wechat') cb.checked = CHANNELS.wechat;
+    if (cb.value === 'qq') cb.checked = CHANNELS.qq;
   });
-  $('#hybrid-enabled').checked = !!c.adapter.hybrid_enabled;
-  $('#gewe-base').value = c.adapter.gewe_base_url || '';
-  $('#gewe-token').value = c.adapter.gewe_token || '';
-  $('#gewe-appid').value = c.adapter.gewe_app_id || '';
-  $('#bot-wxid').value = c.adapter.bot_wxid || '';
-  $('#bot-nickname').value = c.adapter.bot_nickname || '';
+  // 微信子选项
+  $$('#wechat-sub input[name=wechat_type]').forEach(r => {
+    r.checked = r.value === CHANNELS.wechat_type;
+  });
+  $('#hybrid-enabled').checked = !!a.hybrid_enabled;
+
+  $('#gewe-base').value = a.gewe_base_url || '';
+  $('#gewe-token').value = a.gewe_token || '';
+  $('#gewe-appid').value = a.gewe_app_id || '';
+  $('#bot-wxid').value = a.bot_wxid || '';
+  $('#bot-nickname').value = a.bot_nickname || '';
   // QQ / OneBot
-  $('#onebot-http').value = c.adapter.onebot_http_url || '';
-  $('#onebot-token').value = c.adapter.onebot_token || '';
-  $('#bot-qq').value = c.adapter.bot_qq || '';
-  $('#qq-nickname').value = c.adapter.bot_nickname || '';
+  $('#onebot-http').value = a.onebot_http_url || '';
+  $('#onebot-token').value = a.onebot_token || '';
+  $('#bot-qq').value = a.bot_qq || '';
+  $('#qq-nickname').value = a.bot_nickname || '';
 
   // 模型
   $('#primary-base').value = c.llm.primary_base || '';
@@ -262,22 +279,22 @@ async function loadConfig() {
   $('#reply-prob-val').textContent = prob + '%';
   $('#quiet-hours').value = (c.bot.quiet_hours || []).join(',');
 
-  applyAdapterType(adapterType);
+  applyChannels();
   updateWizardStatus(c);
 }
 
-/** 根据接入方式显示/隐藏对应步骤 */
-function applyAdapterType(type) {
-  adapterType = type;
-  const isGeWe = type === 'gewechat';
-  const isQQ = type === 'onebot';
+/** 根据通道勾选状态显示/隐藏对应步骤 */
+function applyChannels() {
+  const wechatOn = CHANNELS.wechat;
+  const qqOn = CHANNELS.qq;
+  const isGeWe = wechatOn && CHANNELS.wechat_type === 'gewechat';
 
+  $('#wechat-sub').hidden = !wechatOn;
   $('#step-2').hidden = !isGeWe;
-  $('#step-2-qq').hidden = !isQQ;
-  $('#step-3').hidden = isQQ;          // QQ 不需要扫码（在网关侧登录）
-  $('#hybrid-row').hidden = !isGeWe;
+  $('#step-2-qq').hidden = !qqOn;
+  $('#step-3').hidden = !wechatOn;   // 微信需要扫码，QQ 在网关侧登录
 
-  // QQ 的反向 WS 地址要显示成当前实际地址，方便用户直接复制
+  // QQ 的反向 WS 地址
   const wsEl = $('#qq-ws-url');
   if (wsEl) {
     wsEl.textContent = `ws://${location.hostname}:${location.port}/ws/onebot`;
@@ -330,7 +347,10 @@ function updateWizardStatus(cfg) {
 
 function collectConfig() {
   const c = JSON.parse(JSON.stringify(STATE.config));
-  c.adapter.type = adapterType;
+  // 通道
+  c.adapter.wechat_enabled = CHANNELS.wechat;
+  c.adapter.qq_enabled = CHANNELS.qq;
+  c.adapter.wechat_type = CHANNELS.wechat_type;
   c.adapter.hybrid_enabled = $('#hybrid-enabled').checked;
   c.adapter.gewe_base_url = $('#gewe-base').value.trim();
   c.adapter.gewe_token = $('#gewe-token').value.trim();
@@ -1043,9 +1063,20 @@ function bind() {
     toast('已刷新');
   });
 
-  // 接入方式（单选卡片）
-  $$('#adapter-type input[type=radio]').forEach(r =>
-    r.addEventListener('change', () => applyAdapterType(r.value)));
+  // 通道复选卡片
+  $$('#adapter-type input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      CHANNELS[cb.value] = cb.checked;
+      applyChannels();
+    });
+  });
+  // 微信子选项
+  $$('#wechat-sub input[name=wechat_type]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (r.checked) CHANNELS.wechat_type = r.value;
+      applyChannels();
+    });
+  });
 
   $('#btn-save-connect').addEventListener('click', async () => {
     await saveConfig();

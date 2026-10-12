@@ -144,52 +144,59 @@
           </div>
           <div class="wz-body">
             <div class="choice-list" id="adapter-type">
-              <label class="choice" data-value="gewechat">
-                <input type="radio" name="adapter" value="gewechat" checked>
+              <!-- 微信通道 -->
+              <label class="choice" data-value="wechat">
+                <input type="checkbox" name="channel" value="wechat" checked>
                 <div class="choice-main">
                   <div class="choice-title">
-                    微信 · GeWe 协议
+                    微信
                     <span class="tag on">推荐</span>
                   </div>
                   <div class="choice-desc">
-                    支持<b>私聊 + 群聊</b>，能力完整。网关会自动帮你装好（需要 Docker）。
+                    支持<b>私聊 + 群聊</b>。可选 GeWe 协议（能力完整）或官方 iLink（零封号）。
                   </div>
                 </div>
               </label>
-              <label class="choice" data-value="onebot">
-                <input type="radio" name="adapter" value="onebot">
+
+              <!-- 微信子选项（仅在勾选微信时显示）-->
+              <div class="sub-choices" id="wechat-sub">
+                <label class="sub-choice" data-value="gewechat">
+                  <input type="radio" name="wechat_type" value="gewechat" checked>
+                  <div>
+                    <strong>GeWe 协议</strong>
+                    <span>私聊 + 群聊，功能完整。网关自动安装。</span>
+                  </div>
+                </label>
+                <label class="sub-choice" data-value="ilink">
+                  <input type="radio" name="wechat_type" value="ilink">
+                  <div>
+                    <strong>官方 iLink</strong>
+                    <span>零封号，仅私聊。需命令行登录。</span>
+                  </div>
+                </label>
+                <label class="switch-row" style="margin-top:8px;padding-left:28px;">
+                  <div>
+                    <strong>混合模式</strong>
+                    <span>私聊走官方 iLink，群聊走 GeWe —— 风险最小</span>
+                  </div>
+                  <input type="checkbox" id="hybrid-enabled">
+                </label>
+              </div>
+
+              <!-- QQ 通道 -->
+              <label class="choice" data-value="qq">
+                <input type="checkbox" name="channel" value="qq">
                 <div class="choice-main">
                   <div class="choice-title">
-                    QQ · OneBot 协议
+                    QQ
                     <span class="tag on">私聊 + 群聊</span>
                   </div>
                   <div class="choice-desc">
-                    通过标准 OneBot 11 协议接入，兼容 <b>NapCat</b>、<b>Lagrange</b> 等实现。
-                    换实现不用改配置。
-                  </div>
-                </div>
-              </label>
-              <label class="choice" data-value="ilink">
-                <input type="radio" name="adapter" value="ilink">
-                <div class="choice-main">
-                  <div class="choice-title">
-                    微信 · 官方 iLink
-                    <span class="tag info">合规</span>
-                  </div>
-                  <div class="choice-desc">
-                    腾讯官方接口，<b>零封号风险</b>，但<b>不支持群聊</b>，且需用命令行登录。
+                    通过标准 <b>OneBot 11</b> 协议接入，兼容 NapCat、Lagrange 等实现。
                   </div>
                 </div>
               </label>
             </div>
-
-            <label class="switch-row" id="hybrid-row">
-              <div>
-                <strong>混合模式</strong>
-                <span>私聊走官方 iLink（合规），群聊走 GeWe 协议 —— 把风险压到最小</span>
-              </div>
-              <input type="checkbox" id="hybrid-enabled">
-            </label>
           </div>
         </div>
 

@@ -691,6 +691,24 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
 .choice-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
 .choice-desc b { color: var(--text); font-weight: 600; }
 
+/* ── 子选项（在 choice 内部展开）── */
+.sub-choices {
+  margin: -4px 0 8px 40px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.sub-choice {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.sub-choice input { margin-top: 2px; flex-shrink: 0; accent-color: var(--primary); }
+.sub-choice div { flex: 1; }
+.sub-choice strong { font-size: 12.5px; display: block; }
+.sub-choice span { font-size: 11.5px; color: var(--text-2); }
+
 /* ── 帮助面板 ── */
 
 .help-panel {
