@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
@@ -114,6 +115,56 @@ async def api_stop() -> dict:
 @app.post("/api/bot/restart")
 async def api_restart() -> dict:
     return await runtime.restart()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Docker 环境与网关容器（GeWe 恒定走本地 Docker）
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/docker/status")
+async def api_docker_status() -> dict:
+    """Docker 与网关的完整状态，前端轮询它来展示进度。"""
+    return runtime.docker_status()
+
+
+@app.post("/api/docker/prepare")
+async def api_docker_prepare() -> dict:
+    """一键准备 Docker：未装则下载安装包，装了没启动则启动。"""
+    return await runtime.docker_prepare()
+
+
+@app.post("/api/docker/start")
+async def api_docker_start() -> dict:
+    return await runtime.docker_start()
+
+
+@app.post("/api/gateway/setup")
+async def api_gateway_setup() -> dict:
+    """拉取并启动网关容器，成功后自动回填网关地址。"""
+    r = await runtime.gateway_setup()
+    # 容器起来后立刻把地址写进配置，用户不用手填
+    asyncio.create_task(_apply_url_when_ready())
+    return r
+
+
+async def _apply_url_when_ready() -> None:
+    """等网关端口就绪后回填地址（最多等 3 分钟）。"""
+    for _ in range(90):
+        await asyncio.sleep(2)
+        from .core.docker import port_open
+        if port_open(2531):
+            runtime.apply_gateway_url()
+            return
+
+
+@app.post("/api/gateway/stop")
+async def api_gateway_stop() -> dict:
+    return await runtime.gateway_stop()
+
+
+@app.get("/api/gateway/logs")
+async def api_gateway_logs(lines: int = 100) -> dict:
+    return await runtime.gateway_logs(lines)
 
 
 # ═══════════════════════════════════════════════════════════════════

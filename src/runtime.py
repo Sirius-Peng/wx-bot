@@ -23,6 +23,7 @@ from .adapters.hybrid import HybridAdapterRouter
 from .adapters.ilink import ILinkAdapter
 from .config_store import AppConfig, ConfigStore, GroupConfigItem
 from .core.context import ContextManager
+from .core.docker import DockerManager, GATEWAY_URL
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.sender import HumanLikeSender
@@ -185,6 +186,8 @@ class BotRuntime:
         self.config_store = store
         self.data_dir = Path(data_dir)
         self.log = MessageLog(self.data_dir / "messages.jsonl")
+        # Docker 环境与网关容器管理（GeWe 恒定走本地 Docker）
+        self.docker = DockerManager()
 
         self.cfg: AppConfig = store.load()
         self.adapter: Optional[BaseAdapter] = None
@@ -367,6 +370,49 @@ class BotRuntime:
 
         adapter.send_text = send_wrapped            # type: ignore[method-assign]
 
+    # ══ Docker 环境与网关容器 ═════════════════════════════════
+    #
+    # GeWe 接入恒定走本地 Docker：不引导用户去用云端服务，
+    # 也不要求用户自己敲 docker 命令。用户只需点「一键配置」。
+
+    def docker_status(self) -> dict:
+        """Docker + 网关的完整状态快照。"""
+        d = self.docker.detect()
+        gw = self.docker.gateway_status()
+        return {
+            "docker": d.to_dict(),
+            "gateway": gw,
+            "task": dict(self.docker.task),
+            "plan": self.docker.install_plan() if not d.running else {"needed": False},
+            "gatewayUrl": GATEWAY_URL,
+        }
+
+    async def docker_prepare(self) -> dict:
+        """一键准备 Docker 环境（按需安装 / 启动）。"""
+        return await self.docker.prepare()
+
+    async def docker_start(self) -> dict:
+        """仅启动 Docker 服务。"""
+        return await self.docker.start_daemon()
+
+    async def gateway_setup(self) -> dict:
+        """拉取并启动网关容器，成功后自动回填网关地址。"""
+        return await self.docker.ensure_gateway()
+
+    async def gateway_stop(self) -> dict:
+        return await self.docker.stop_gateway()
+
+    async def gateway_logs(self, lines: int = 100) -> dict:
+        return await self.docker.gateway_logs(lines)
+
+    def apply_gateway_url(self) -> None:
+        """把网关地址回填到配置（用户无需手填）。"""
+        cfg = self.config_store.load()
+        if cfg.adapter.gewe_base_url != GATEWAY_URL:
+            cfg.adapter.gewe_base_url = GATEWAY_URL
+            self.config_store.save(cfg)
+            self.cfg = cfg
+
     # ══ 网关连接：自动探测 + 连通性测试 ═══════════════════════
     #
     # 对非技术用户来说，"填写网关地址和 Token"是最容易卡住的一步。
@@ -374,12 +420,11 @@ class BotRuntime:
     #   · detect_gateway()  自动探测常见地址，告诉用户"哪个能用"
     #   · test_gateway()    验证连通性与 Token，出错时给出人话解释
 
-    # 常见网关地址，按"最可能可用"排序
+    # 恒定使用本地 Docker 网关，只探测本机地址
     GATEWAY_CANDIDATES = [
-        ("http://127.0.0.1:2531", "本机自建网关", "自建部署的默认端口"),
-        ("http://localhost:2531", "本机自建网关", "自建部署的默认端口"),
-        ("http://127.0.0.1:2532", "本机自建网关（备用端口）", "部分部署方式用 2532"),
-        ("https://api.geweapi.com/gewe", "GeWe 云端服务", "无需自己部署，按量付费"),
+        (GATEWAY_URL, "本机 Docker 网关", "容器默认端口 2531"),
+        ("http://localhost:2531", "本机 Docker 网关", "等价写法"),
+        ("http://127.0.0.1:2532", "本机 Docker 网关（备用端口）", "部分部署用 2532"),
     ]
 
     async def _gateway_call(self, endpoint: str, body: dict,

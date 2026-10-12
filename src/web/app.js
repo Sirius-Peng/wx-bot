@@ -77,6 +77,23 @@ function switchPage(name) {
   if (name === 'groups') loadGroups();
   if (name === 'messages') loadMessages();
   if (name === 'settings' || name === 'connect') loadConfig();
+
+  // 接入设置页需要持续刷新 Docker 状态
+  if (name === 'connect') startDockerPolling();
+  else stopDockerPolling();
+}
+
+function startDockerPolling() {
+  stopDockerPolling();
+  refreshDockerStatus();
+  dockerPollTimer = setInterval(refreshDockerStatus, 3000);
+}
+
+function stopDockerPolling() {
+  if (dockerPollTimer) {
+    clearInterval(dockerPollTimer);
+    dockerPollTimer = null;
+  }
 }
 
 window.addEventListener('hashchange', () => {
@@ -495,50 +512,236 @@ async function stopBot() {
   await refreshStatus();
 }
 
-/* ══════════ 网关探测与测试 ══════════ */
+/* ══════════ Docker 环境与网关（自动化配置）══════════════ */
 
-async function detectGateway() {
-  const btn = $('#btn-detect');
-  const box = $('#detect-result');
-  btn.disabled = true;
-  btn.textContent = '探测中…';
-  box.hidden = false;
-  box.innerHTML = '<div class="detect-empty">正在检查常见网关地址…</div>';
+let dockerPollTimer = null;
+
+/** 拉取状态并渲染整块面板 */
+async function refreshDockerStatus() {
+  let st;
   try {
-    const r = await api('/api/gateway/detect', { method: 'POST' });
-    renderDetectResult(r);
-  } catch (e) {
-    box.innerHTML = `<div class="detect-empty">探测失败：${esc(e.message)}</div>`;
+    st = await api('/api/docker/status');
+  } catch (_) {
+    return null;
   }
-  btn.disabled = false;
-  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg> 自动探测可用网关';
+  STATE.dockerStatus = st;
+  renderChecklist(st);
+  renderProgress(st.task);
+  renderPlan(st);
+  return st;
 }
 
-function renderDetectResult(r) {
-  const box = $('#detect-result');
-  if (!r.found || !r.found.length) {
-    box.innerHTML = `<div class="detect-empty">
-      <strong>没有探测到正在运行的网关</strong><br>
-      如果你还没部署，展开上方的「还没有网关服务？」看指引；<br>
-      如果已经部署在其他地址，直接在下面手动填写即可。
-    </div>`;
-    return;
-  }
-  box.innerHTML =
-    `<div class="detect-empty" style="margin-bottom:4px">找到 ${r.found.length} 个可用地址，点一下即可填入：</div>` +
-    r.found.map(x => `
-      <div class="detect-item" data-url="${esc(x.url)}">
-        <span class="dot"></span>
-        <span class="detect-item-url">${esc(x.url)}</span>
-        <span class="detect-item-label">${esc(x.label)}</span>
-      </div>`).join('');
+function renderChecklist(st) {
+  const d = st.docker || {};
+  const gw = st.gateway || {};
+  const task = st.task || {};
 
-  $$('#detect-result .detect-item').forEach(el =>
-    el.addEventListener('click', () => {
-      $('#gewe-base').value = el.dataset.url;
-      toast('已填入网关地址，接着点「测试连接」');
-      testGateway();
-    }));
+  // ① Docker 环境
+  setCheck('docker',
+    d.installed ? 'ok' : 'err',
+    d.installed ? `已安装${d.version ? ' · v' + d.version : ''}` : '未安装',
+    d.installed ? null : { label: '自动安装', action: installDocker });
+
+  // ② Docker 服务
+  const daemonBusy = task.running && (task.stage === 'daemon' || task.stage === 'install');
+  setCheck('daemon',
+    d.running ? 'ok' : (daemonBusy ? 'busy' : (d.installed ? 'err' : '')),
+    d.running ? '运行中' : (d.installed ? '未启动' : '等待 Docker 安装'),
+    (!d.running && d.installed && !daemonBusy) ? { label: '启动服务', action: startDaemon } : null);
+
+  // ③ 网关
+  const gwBusy = task.running && task.stage === 'gateway';
+  setCheck('gateway',
+    gw.running ? 'ok' : (gwBusy ? 'busy' : (d.running ? 'err' : '')),
+    gw.running ? '已就绪 · 127.0.0.1:2531' : (gw.message || '等待中'),
+    (!gw.running && d.running && !gwBusy) ? { label: '启动网关', action: startGateway } : null);
+
+  // 全部就绪时更新徽标
+  const badge = $('#gw-badge');
+  if (badge) {
+    if (gw.running) { badge.className = 'wz-status ok'; badge.textContent = '已就绪'; }
+    else if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '配置中…'; }
+    else if (task.needsUser) { badge.className = 'wz-status warn'; badge.textContent = '待你操作'; }
+    else { badge.className = 'wz-status'; badge.textContent = '待配置'; }
+  }
+}
+
+function setCheck(key, state, desc, btn) {
+  const item = document.querySelector(`.check-item[data-key="${key}"]`);
+  if (!item) return;
+  item.className = 'check-item' + (state ? ' ' + state : '');
+  const icon = item.querySelector('.check-icon');
+  icon.textContent = state === 'ok' ? '✓' : state === 'err' ? '✕' : state === 'busy' ? '…' : '○';
+  const d = item.querySelector('.check-desc');
+  if (d) d.textContent = desc || '';
+
+  // 行内按钮：只有需要时才显示
+  const inlineBtn = item.querySelector('button');
+  if (inlineBtn) {
+    if (btn) {
+      inlineBtn.hidden = false;
+      inlineBtn.textContent = btn.label;
+      inlineBtn.onclick = btn.action;
+    } else {
+      inlineBtn.hidden = true;
+      inlineBtn.onclick = null;
+    }
+  }
+}
+
+function renderProgress(task) {
+  const box = $('#progress-box');
+  const fill = $('#progress-fill');
+  const text = $('#progress-text');
+  if (!task) { box.hidden = true; return; }
+
+  const active = task.running;
+  if (!active && !task.stage) { box.hidden = true; return; }
+
+  box.hidden = false;
+  fill.style.width = (task.progress || 0) + '%';
+  text.textContent = task.message || task.stage || '';
+
+  if (task.stage === 'error' && task.error) {
+    text.textContent = task.message || task.error;
+    text.style.color = 'var(--danger)';
+  } else {
+    text.style.color = '';
+  }
+}
+
+/** 需要用户操作 / 手动安装步骤 */
+function renderPlan(st) {
+  const plan = st.plan || {};
+  const task = st.task || {};
+  const needBox = $('#action-needed');
+  const anBody = $('#an-body');
+  const stepsPanel = $('#install-steps');
+  const stepsBody = $('#install-steps-body');
+  const stepsTitle = $('#install-steps-title');
+
+  // 只在「不在跑任务」且「需要用户介入」时显示
+  const showAction = !task.running && (task.needsUser || plan.needed);
+  needBox.hidden = !showAction;
+
+  if (showAction) {
+    const steps = plan.steps || [];
+    const manual = steps.filter(s => !s.auto);
+    if (manual.length) {
+      anBody.innerHTML = '请按下面几步完成，完成后点「我已完成，继续」：<ol>' +
+        manual.map(s => `<li>${esc(s.text)}</li>`).join('') + '</ol>';
+    } else if (task.message) {
+      anBody.textContent = task.message;
+    } else {
+      anBody.textContent = plan.message || '请完成环境准备后继续。';
+    }
+  }
+
+  // 完整步骤指引
+  const steps = plan.steps || [];
+  if (steps.length && plan.needed) {
+    stepsPanel.hidden = false;
+    stepsTitle.textContent = `查看完整步骤（${plan.title || '安装指引'}）`;
+    stepsBody.innerHTML =
+      (plan.message ? `<p class="help-lead">${esc(plan.message)}</p>` : '') +
+      `<div class="help-option"><ol style="margin:0 0 0 18px;font-size:12.5px;line-height:1.9;color:var(--text-2)">` +
+      steps.map(s => `<li>${esc(s.text)}${s.auto ? ' <span class="tag on">自动</span>' : ''}</li>`).join('') +
+      `</ol></div>` +
+      (plan.command ? `<div class="code-block">
+          <code>${esc(plan.command)}</code>
+          <button class="btn btn-ghost btn-sm" data-copy="${esc(plan.command)}">复制</button>
+        </div>` : '') +
+      (plan.url ? `<p class="help-note">官方下载地址：<a href="#" data-ext="${esc(plan.url)}">${esc(plan.url)}</a></p>` : '');
+    $$('#install-steps-body [data-copy]').forEach(b =>
+      b.addEventListener('click', (e) => { e.preventDefault(); copyText(b.dataset.copy, b); }));
+    $$('#install-steps-body [data-ext]').forEach(a =>
+      a.addEventListener('click', (e) => { e.preventDefault(); window.open(a.dataset.ext, '_blank'); }));
+  } else {
+    stepsPanel.hidden = true;
+  }
+}
+
+/** 轮询任务直到结束 */
+async function pollTask(maxMs = 30 * 60 * 1000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    const st = await refreshDockerStatus();
+    if (!st) break;
+    const task = st.task || {};
+    if (!task.running) return st;
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  return await refreshDockerStatus();
+}
+
+/** 一键：准备 Docker → 启动网关 → 回填地址 */
+async function runOneClick() {
+  const btn = $('#btn-oneclick');
+  btn.disabled = true;
+  $('#setup-hint').textContent = '正在自动配置，请稍候…';
+
+  try {
+    // ① 准备 Docker 环境
+    await api('/api/docker/prepare', { method: 'POST' });
+    let st = await pollTask();
+
+    // 中途需要用户操作 → 停下来提示
+    if (st && st.task && st.task.needsUser) {
+      toast('需要你手动完成一步操作', 'err');
+      return;
+    }
+
+    // ② Docker 就绪 → 启动网关
+    if (st && st.docker && st.docker.running && !(st.gateway && st.gateway.running)) {
+      await api('/api/gateway/setup', { method: 'POST' });
+      st = await pollTask();
+    }
+
+    // ③ 检查结果
+    if (st && st.gateway && st.gateway.running) {
+      await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+      await loadConfig();
+      toast('配置完成，可以扫码登录了', 'ok');
+      $('#setup-hint').textContent = '配置完成。下一步：扫码登录。';
+    } else {
+      toast('还没配置完成，请看下方提示', 'err');
+    }
+  } catch (e) {
+    toast('配置失败：' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    if (!($('#setup-hint').textContent.includes('完成'))) {
+      $('#setup-hint').textContent = '自动检测并安装 Docker、启动服务、拉起网关';
+    }
+  }
+}
+
+async function installDocker() {
+  const p = (STATE.dockerStatus && STATE.dockerStatus.plan) || {};
+  if (p.action === 'brew' || p.action === 'download-mac' || p.action === 'download-win') {
+    toast('已开始自动安装，请留意弹出的窗口');
+  } else {
+    toast('请按下方步骤手动安装');
+  }
+  await api('/api/docker/prepare', { method: 'POST' });
+  await pollTask();
+}
+
+async function startDaemon() {
+  toast('正在启动 Docker 服务…');
+  await api('/api/docker/start', { method: 'POST' });
+  await pollTask();
+}
+
+async function startGateway() {
+  toast('正在启动网关（首次需拉取镜像）…');
+  await api('/api/gateway/setup', { method: 'POST' });
+  const st = await pollTask();
+  if (st && st.gateway && st.gateway.running) {
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    await loadConfig();
+    toast('网关已就绪', 'ok');
+  }
 }
 
 async function testGateway() {
@@ -550,7 +753,6 @@ async function testGateway() {
   box.innerHTML = '<div class="ts-line">正在连接…</div>';
 
   try {
-    // 先把当前填写的内容存下来，测试用的就是即将保存的值
     await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
     const r = await api('/api/gateway/test', {
       method: 'POST',
@@ -585,12 +787,32 @@ function renderTestResult(r) {
   }
 }
 
+/** 网关日志折叠面板 */
+async function toggleGatewayLogs() {
+  const box = $('#gw-logview');
+  const btn = $('#btn-gw-logs');
+  if (!box.hidden) {
+    box.hidden = true;
+    btn.textContent = '查看网关日志';
+    return;
+  }
+  btn.textContent = '加载中…';
+  try {
+    const r = await api('/api/gateway/logs?lines=120');
+    box.textContent = r.log || '(暂无日志)';
+  } catch (e) {
+    box.textContent = '读取日志失败：' + e.message;
+  }
+  box.hidden = false;
+  box.scrollTop = box.scrollHeight;
+  btn.textContent = '收起日志';
+}
+
 /** 复制文本到剪贴板 */
 async function copyText(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    // 剪贴板 API 不可用时退回旧方案
     const ta = document.createElement('textarea');
     ta.value = text;
     document.body.appendChild(ta);
@@ -629,9 +851,11 @@ function bind() {
     toast('已保存，可以继续下一步了', 'ok');
   });
 
-  // 网关探测与连接测试
-  $('#btn-detect').addEventListener('click', detectGateway);
+  // 自动化配置
+  $('#btn-oneclick').addEventListener('click', runOneClick);
+  $('#btn-continue').addEventListener('click', runOneClick);
   $('#btn-test-gw').addEventListener('click', testGateway);
+  $('#btn-gw-logs').addEventListener('click', toggleGatewayLogs);
 
   // 代码块复制按钮
   $$('[data-copy]').forEach(b =>
