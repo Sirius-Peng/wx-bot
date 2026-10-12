@@ -218,7 +218,12 @@ class BotRuntime:
         if self.running:
             return {"ok": True, "message": "机器人已在运行"}
         self.cfg = self.config_store.load()
-        self._validate()
+        try:
+            self._validate()
+        except ValueError as e:
+            self.last_error = str(e)
+            log.warning("启动验证未通过：%s", e)
+            return {"ok": False, "message": str(e)}
 
         results: list[dict] = []
         a = self.cfg.adapter
