@@ -18,9 +18,22 @@
 
 | 方式 | 适合谁 | 怎么开始 |
 |---|---|---|
-| **桌面应用** | 不想碰命令行 | 下载 `.dmg` / `.exe` 安装包，双击运行 |
+| **桌面应用** | 不想碰命令行 | [下载安装包](https://github.com/Sirius-Peng/wx-bot/releases/latest)，双击运行 |
 | **一键脚本** | 会双击文件就行 | 双击 `start-mac.command` / `start-windows.bat` |
 | **Docker / 命令行** | 有运维经验 | `docker compose up -d` 或 `python -m src.server` |
+
+### 📦 下载安装包
+
+前往 [**Releases**](https://github.com/Sirius-Peng/wx-bot/releases/latest) 页面下载：
+
+| 平台 | 文件 |
+|---|---|
+| macOS（Apple Silicon） | `WxBot-1.0.0-macOS-arm64.dmg` |
+| Windows | 需自行构建：`cd desktop && npm run build:backend && npm run pack:win` |
+
+> **首次打开提示"无法验证开发者"**：应用未配置代码签名证书。
+> 右键点应用 → 打开 → 再点"打开"即可（只需一次）。
+> 若提示已损坏，执行 `xattr -cr "/Applications/微信AI助手.app"`
 
 ### 桌面应用版
 
