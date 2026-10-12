@@ -677,6 +677,21 @@ async function pollTask(maxMs = 30 * 60 * 1000) {
 /** 一键：准备 Docker → 启动网关 → 回填地址 */
 async function runOneClick() {
   const btn = $('#btn-oneclick');
+  const st0 = STATE.dockerStatus || {};
+  const dk = st0.docker || {};
+
+  // 要动系统（装 Docker）之前先确认 —— 不能点一下就改用户的电脑
+  if (!dk.installed) {
+    const steps = ((st0.plan || {}).steps || []).filter(s => !s.auto).map(s => '· ' + s.text);
+    const ok = confirm(
+      '即将在你的电脑上安装 Docker。\n\n' +
+      '过程中需要你操作的地方：\n' +
+      (steps.length ? steps.join('\n') : '· 按提示完成安装') +
+      '\n\n安装包约 600MB，是否继续？'
+    );
+    if (!ok) return;
+  }
+
   btn.disabled = true;
   $('#setup-hint').textContent = '正在自动配置，请稍候…';
 
@@ -718,6 +733,16 @@ async function runOneClick() {
 
 async function installDocker() {
   const p = (STATE.dockerStatus && STATE.dockerStatus.plan) || {};
+  const steps = (p.steps || []).filter(s => !s.auto).map(s => '· ' + s.text);
+
+  const ok = confirm(
+    '即将在你的电脑上安装 Docker。\n\n' +
+    '过程中需要你操作的地方：\n' +
+    (steps.length ? steps.join('\n') : '· 按提示完成安装') +
+    '\n\n安装包约 600MB，是否继续？'
+  );
+  if (!ok) return;
+
   if (p.action === 'brew' || p.action === 'download-mac' || p.action === 'download-win') {
     toast('已开始自动安装，请留意弹出的窗口');
   } else {
