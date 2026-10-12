@@ -582,6 +582,7 @@ input[type="checkbox"]:checked::after { transform: translateX(17px); }
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 .toast.ok  { background: #10804A; }
 .toast.err { background: #C0343A; }
 .toast::before {
