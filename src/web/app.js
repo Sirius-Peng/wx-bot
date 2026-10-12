@@ -16,6 +16,8 @@ let STATE = {
   qqStatus: null,
   qqLoginTimer: null,
   ilinkStatus: null,
+  wppStatus: null,
+  wppLoginTimer: null,
 };
 
 /* ══════════ 工具 ══════════ */
@@ -91,9 +93,11 @@ function switchPage(name) {
 function startDockerPolling() {
   stopDockerPolling();
   refreshDockerStatus();
+  refreshWppStatus();
   refreshQQStatus();
   dockerPollTimer = setInterval(() => {
-    refreshDockerStatus();
+    if (CHANNELS.wechat_type === 'wechatpadpro') refreshWppStatus();
+    else refreshDockerStatus();
     refreshQQStatus();
   }, 3000);
 }
@@ -105,6 +109,7 @@ function stopDockerPolling() {
   }
   // 离开「接入设置」页要停掉扫码轮询，避免定时器泄漏
   stopQQLoginPolling();
+  stopWppLoginPolling();
 }
 
 window.addEventListener('hashchange', () => {
@@ -232,7 +237,7 @@ function applyGroupMode(mode) {
 
 /* ══════════ 接入设置 ══════════ */
 
-const CHANNELS = { wechat: true, qq: false, wechat_type: 'gewechat' };
+const CHANNELS = { wechat: true, qq: false, wechat_type: 'wechatpadpro' };
 
 async function loadConfig() {
   const c = await api('/api/config');
@@ -242,7 +247,7 @@ async function loadConfig() {
   // 通道复选
   CHANNELS.wechat = !!a.wechat_enabled;
   CHANNELS.qq = !!a.qq_enabled;
-  CHANNELS.wechat_type = a.wechat_type || 'gewechat';
+  CHANNELS.wechat_type = a.wechat_type || 'wechatpadpro';
 
   $$('#adapter-type .pcard').forEach(el => {
     const cb = el.querySelector('input[type=checkbox]');
@@ -254,6 +259,9 @@ async function loadConfig() {
   $('#hybrid-enabled').checked = !!a.hybrid_enabled;
   renderPlatformCards();
 
+  $('#wpp-base').value = a.wpp_base_url || 'http://127.0.0.1:1238';
+  $('#wpp-admin').value = a.wpp_admin_key || '';
+  $('#wpp-authkey').value = a.wpp_auth_key || '';
   $('#gewe-base').value = a.gewe_base_url || '';
   $('#gewe-token').value = a.gewe_token || '';
   $('#gewe-appid').value = a.gewe_app_id || '';
@@ -285,6 +293,11 @@ async function loadConfig() {
   $('#reply-prob').value = prob;
   $('#reply-prob-val').textContent = prob + '%';
   $('#quiet-hours').value = (c.bot.quiet_hours || []).join(',');
+
+  // 协议端状态（进程/授权码/登录态）
+  if (CHANNELS.wechat && CHANNELS.wechat_type === 'wechatpadpro') {
+    await refreshWppStatus();
+  }
 
   // 官方通道的登录态存在后端文件里，单独取一次
   if (CHANNELS.wechat && CHANNELS.wechat_type === 'ilink') {
@@ -320,12 +333,40 @@ function applyChannels() {
   const qqOn = CHANNELS.qq;
   const type = CHANNELS.wechat_type;
   const isGeWe = wechatOn && type === 'gewechat';
+  const isWPP = wechatOn && type === 'wechatpadpro';
   const isILink = wechatOn && type === 'ilink';
+  const needsGateway = isGeWe || isWPP;
 
-  // GeWe 才需要"配置网关"这一步；官方 iLink 不需要任何网关
-  $('#step-2').hidden = !isGeWe;
+  // GeWe / 协议端都需要"配置网关"这一步；官方 iLink 不需要任何网关
+  $('#step-2').hidden = !needsGateway;
+
+  // GeWe 已停服 —— 明确告知，别让用户对着死通道排查
+  const dep = $('#gewe-deprecated');
+  if (dep) dep.hidden = !isGeWe;
+
+  // 两套配置面板按通道切换（协议端 / GeWe）
+  const wppPanel = $('#wpp-panel');
+  const gewePanel = $('#gewe-panel');
+  const wppFoot = $('#wpp-foot');
+  const geweFoot = $('#gewe-foot');
+  if (wppPanel) wppPanel.hidden = !isWPP;
+  if (gewePanel) gewePanel.hidden = !isGeWe;
+  if (wppFoot) wppFoot.hidden = !isWPP;
+  if (geweFoot) geweFoot.hidden = !isGeWe;
   $('#step-2-qq').hidden = !qqOn;
   $('#step-3').hidden = !wechatOn;   // 微信需要扫码，QQ 在网关侧登录
+
+  // 步骤 2 的文案随通道变化（协议端 / GeWe 的配置方式不同）
+  const s2title = $('#step2-title');
+  const s2sub = $('#step2-sub');
+  if (s2title) {
+    s2title.textContent = isWPP ? '启动微信协议端' : '配置网关';
+  }
+  if (s2sub) {
+    s2sub.textContent = isWPP
+      ? '本机跑一个协议端进程，私聊群聊都能用'
+      : '点一下按钮，剩下的交给程序';
+  }
 
   // 官方通道的文案要跟 GeWe 区分开，避免用户以为还要配网关/填 Token
   const title = $('#step3-title');
@@ -410,6 +451,9 @@ function collectConfig() {
   c.adapter.qq_enabled = CHANNELS.qq;
   c.adapter.wechat_type = CHANNELS.wechat_type;
   c.adapter.hybrid_enabled = $('#hybrid-enabled').checked;
+  c.adapter.wpp_base_url = $('#wpp-base').value.trim() || 'http://127.0.0.1:1238';
+  c.adapter.wpp_admin_key = $('#wpp-admin').value.trim();
+  c.adapter.wpp_auth_key = $('#wpp-authkey').value.trim();
   c.adapter.gewe_base_url = $('#gewe-base').value.trim();
   c.adapter.gewe_token = $('#gewe-token').value.trim();
   c.adapter.gewe_app_id = $('#gewe-appid').value.trim();
@@ -896,6 +940,131 @@ async function runOneClick() {
       $('#setup-hint').textContent = '自动检测并安装 Docker、启动服务、拉起网关';
     }
   }
+}
+
+/* ══════════ 微信协议端（WeChatPadPro）══════════ */
+
+/** 刷新协议端状态并渲染检查清单 */
+async function refreshWppStatus() {
+  let st;
+  try {
+    st = await api('/api/wpp/status');
+  } catch (_) {
+    return null;
+  }
+  STATE.wppStatus = st;
+
+  setCheck('wpp-proc',
+    st.reachable ? 'ok' : 'err',
+    st.reachable
+      ? `运行中 · ${st.baseUrl.replace(/^https?:\/\//, '')}`
+      : (st.binaryFound ? '未运行（已找到程序，请手动启动）' : '未运行，且没找到协议端程序'));
+
+  setCheck('wpp-auth',
+    st.authValid ? 'ok' : (st.hasAuthKey ? 'err' : ''),
+    st.hasAuthKey
+      ? (st.authValid ? '已就绪' : (st.message || '授权码无效'))
+      : (st.hasAdminKey ? '还没有授权码，点右侧按钮生成' : '请先填管理员密钥'));
+
+  setCheck('wpp-login',
+    st.loggedIn ? 'ok' : (st.reachable && st.authValid ? 'err' : ''),
+    st.loggedIn
+      ? `已登录${st.wxid ? ' · ' + st.wxid : ''}`
+      : (st.message || '未登录'));
+
+  // 扫码区已经展示二维码时，状态文案由扫码轮询负责，别被这里盖掉
+  const qrStatus = $('#wpp-qr-status');
+  const qrShown = !$('#wpp-qr-wrap').hidden;
+  if (qrShown && !st.loggedIn && !STATE.wppLoginTimer) {
+    if (qrStatus) qrStatus.textContent = st.message || '尚未登录';
+  }
+
+  const badge = $('#gw-badge');
+  if (badge && CHANNELS.wechat_type === 'wechatpadpro') {
+    if (st.loggedIn) { badge.className = 'wz-status ok'; badge.textContent = '已就绪'; }
+    else if (st.authValid && st.reachable) { badge.className = 'wz-status warn'; badge.textContent = '待扫码'; }
+    else if (st.reachable) { badge.className = 'wz-status warn'; badge.textContent = '待授权'; }
+    else { badge.className = 'wz-status'; badge.textContent = '未启动'; }
+  }
+  return st;
+}
+
+/** 生成 / 复用授权码 */
+async function fetchWppAuthKey() {
+  const btn = $('#btn-wpp-auth');
+  btn.disabled = true; btn.textContent = '处理中…';
+  try {
+    // 先保存，让后端拿到最新的管理员密钥
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    const r = await api('/api/wpp/authkey', { method: 'POST' });
+    if (r.ok) {
+      toast(r.message || '授权码已就绪', 'ok');
+      await loadConfig();
+      await refreshWppStatus();
+    } else {
+      toast(r.message || '获取授权码失败', 'err');
+      const box = $('#wchk-auth');
+      if (box && r.hint) box.textContent = `${r.message || ''} ${r.hint}`;
+    }
+  } catch (e) {
+    toast('获取授权码失败：' + e.message, 'err');
+  }
+  btn.disabled = false; btn.textContent = '获取授权码';
+}
+
+/** 取协议端登录二维码 */
+async function getWppQr() {
+  const box = $('#wpp-qr-box');
+  const wrap = $('#wpp-qr-wrap');
+  wrap.hidden = false;
+  box.innerHTML = '<div class="qr-empty"><span>正在获取二维码…</span></div>';
+  try {
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    const r = await api('/api/wpp/login/qrcode', { method: 'POST' });
+    if (!r.ok) {
+      box.innerHTML = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span>` +
+        (r.hint ? `<p style="margin-top:8px;font-size:12px;color:var(--text-2);line-height:1.6;">${esc(r.hint)}</p>` : '') +
+        '</div>';
+      $('#wpp-qr-status').textContent = r.message || '获取失败';
+      toast(r.message || '获取二维码失败', 'err');
+      return;
+    }
+    box.innerHTML = `<img src="${esc(r.image)}" alt="微信登录二维码">`;
+    $('#wpp-qr-status').textContent = '等待扫码…';
+    startWppLoginPolling();
+  } catch (e) {
+    box.innerHTML = `<div class="qr-empty"><span>获取失败：${esc(e.message)}</span></div>`;
+    toast('获取二维码失败：' + e.message, 'err');
+  }
+}
+
+/** 扫码轮询：3 秒一次、上限 5 分钟；切页/异常都停表 */
+function startWppLoginPolling() {
+  stopWppLoginPolling();
+  const t0 = Date.now();
+  STATE.wppLoginTimer = setInterval(async () => {
+    if (Date.now() - t0 > 5 * 60 * 1000) {
+      stopWppLoginPolling();
+      $('#wpp-qr-status').textContent = '二维码已过期，请重新获取';
+      return;
+    }
+    if (STATE.page !== 'connect') { stopWppLoginPolling(); return; }
+    try {
+      const r = await api('/api/wpp/login/check');
+      if (r.loggedIn) {
+        stopWppLoginPolling();
+        $('#wpp-qr-status').textContent = '✅ 登录成功' + (r.wxid ? `（${r.wxid}）` : '');
+        toast('微信协议端登录成功', 'ok');
+        await loadConfig();
+      } else {
+        $('#wpp-qr-status').textContent = r.message || '等待扫码…';
+      }
+    } catch (_) { /* 单次失败不打断轮询 */ }
+  }, 3000);
+}
+
+function stopWppLoginPolling() {
+  if (STATE.wppLoginTimer) { clearInterval(STATE.wppLoginTimer); STATE.wppLoginTimer = null; }
 }
 
 /** 自动获取 GeWe Token（也可由用户手动点按钮触发） */
@@ -1529,6 +1698,13 @@ function bind() {
   $('#btn-test-gw').addEventListener('click', testGateway);
   $('#btn-gw-logs').addEventListener('click', toggleGatewayLogs);
   $('#btn-fetch-token').addEventListener('click', () => fetchGeweToken());
+  $('#btn-wpp-auth').addEventListener('click', fetchWppAuthKey);
+  $('#btn-wpp-qr').addEventListener('click', getWppQr);
+  $('#btn-save-wpp').addEventListener('click', async () => {
+    await saveConfig();
+    toast('已保存', 'ok');
+    await refreshWppStatus();
+  });
 
   // QQ / OneBot
   $('#btn-setup-qq').addEventListener('click', setupQQ);

@@ -787,7 +787,15 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
 
 /* ── 分段选择（微信接入方式）── */
 .seg {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;
+}
+.seg-item-off { opacity: .72; }
+.seg-item-off.is-selected { border-color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.seg-warn {
+  margin: 9px 0 0; padding: 8px 11px;
+  font-size: 11.5px; line-height: 1.65;
+  color: var(--warn); background: var(--warn-soft);
+  border: 1px solid #F5DFAE; border-radius: 8px;
 }
 .seg-item {
   display: block; position: relative;

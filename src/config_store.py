@@ -30,7 +30,11 @@ class AdapterConfig:
 
     # ── 微信通道 ──────────────────────────────────────────────
     wechat_enabled: bool = True       # 是否启用微信
-    wechat_type: str = "gewechat"     # gewechat | ilink | hybrid
+    # 微信接入方式：
+    #   wechatpadpro —— iPad 协议，私聊+群聊（默认；接替已停服的 GeWe）
+    #   ilink        —— 腾讯官方，仅私聊，零封号
+    #   gewechat     —— **已停止维护**，仅保留旧配置兼容，不要在新部署里用
+    wechat_type: str = "wechatpadpro"
 
     # GeWe / Gewechat
     gewe_base_url: str = "http://127.0.0.1:2531"
@@ -51,6 +55,13 @@ class AdapterConfig:
     # NapCat WebUI Token：一键部署时自动生成并写进容器，
     # 保存下来是为了重启后还能登录同一个容器的 WebUI 拿二维码
     napcat_webui_token: str = ""
+
+    # ── WeChatPadPro（接替已停服的 GeWe，用于微信群聊）────────
+    # 首选：本地协议端进程（原生 macOS arm64 二进制，无需 Docker）
+    wpp_base_url: str = "http://127.0.0.1:1238"
+    wpp_admin_key: str = ""      # 管理员密钥，用来生成授权码
+    wpp_auth_key: str = ""       # 授权码，业务接口的 ?key= 就是它
+    wpp_binary: str = ""         # 协议端可执行文件路径（留空则自动探测）
 
 
 @dataclass
@@ -155,6 +166,12 @@ class ConfigStore:
         cfg.adapter = AdapterConfig(**{k: v for k, v in a.items()
                                        if k in AdapterConfig.__dataclass_fields__})
 
+        # ⚠️ gewechat 上游已停止维护（README 首行即「技术归档」，
+        # 运行服务 / Docker 镜像 / 技术支持全部不再提供）。
+        # 旧配置里指向它的，自动迁到 WeChatPadPro，避免用户对着死通道排查。
+        if cfg.adapter.wechat_type == "gewechat" and not cfg.adapter.wpp_auth_key:
+            cfg.adapter.wechat_type = "wechatpadpro"
+
         l = raw.get("llm") or {}
         cfg.llm = LLMConfig(**{k: v for k, v in l.items()
                                if k in LLMConfig.__dataclass_fields__})
@@ -218,6 +235,8 @@ class ConfigStore:
         d["adapter"]["napcat_webui_token"] = _mask(
             d["adapter"].get("napcat_webui_token", "")
         )
+        for k in ("wpp_admin_key", "wpp_auth_key"):
+            d["adapter"][k] = _mask(d["adapter"].get(k, ""))
         return d
 
 
