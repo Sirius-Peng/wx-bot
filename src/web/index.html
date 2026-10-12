@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微信 AI 助手</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════ 侧边栏 ══════════ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9.2 3C5.2 3 2 5.7 2 9c0 1.9 1.1 3.6 2.8 4.7l-.7 2.1 2.5-1.3c.8.2 1.7.4 2.6.4h.4a5.7 5.7 0 0 1-.2-1.5c0-3.2 3-5.8 6.8-5.8h.4C15.9 5 12.9 3 9.2 3Z" fill="currentColor"/>
+          <path d="M22 13.4c0-2.7-2.6-4.9-5.8-4.9s-5.8 2.2-5.8 4.9 2.6 4.9 5.8 4.9c.7 0 1.4-.1 2-.3l2.1 1.1-.6-1.7c1.4-.9 2.3-2.4 2.3-4Z" fill="currentColor" opacity=".55"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <strong>微信 AI 助手</strong>
+        <span>WeChat LLM Bot</span>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-page="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+        <span>概览</span>
+      </button>
+      <button class="nav-item" data-page="connect">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v6"/><rect x="4" y="8" width="16" height="13" rx="3"/><circle cx="12" cy="15" r="2"/></svg>
+        <span>接入设置</span>
+      </button>
+      <button class="nav-item" data-page="groups">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M15 20a5 5 0 0 1 6.5-4.8"/></svg>
+        <span>群聊管理</span>
+        <em class="nav-badge" id="nav-group-count" hidden>0</em>
+      </button>
+      <button class="nav-item" data-page="messages">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12Z"/></svg>
+        <span>消息记录</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.5 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15.9H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9.5l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9.3a1.6 1.6 0 0 0 1-1.5V5a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
+        <span>模型与行为</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="status-chip" id="side-status">
+        <i class="dot"></i><span>未运行</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════════ 主区域 ══════════ -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="page-title">概览</h1>
+        <p id="page-sub">查看机器人运行状态与今日数据</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btn-refresh" title="刷新">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <button class="btn btn-danger" id="btn-stop" hidden>停止</button>
+        <button class="btn btn-primary" id="btn-start">启动机器人</button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ─────── 概览 ─────── -->
+      <section class="page active" id="page-overview">
+        <div class="hero" id="hero">
+          <div class="hero-main">
+            <div class="hero-status">
+              <span class="pulse" id="hero-pulse"></span>
+              <div>
+                <h2 id="hero-title">机器人未运行</h2>
+                <p id="hero-desc">完成接入设置后点击「启动机器人」即可开始工作</p>
+              </div>
+            </div>
+          </div>
+          <div class="hero-meta">
+            <div><span>接入通道</span><strong id="hero-platform">—</strong></div>
+            <div><span>群聊能力</span><strong id="hero-groupcap">—</strong></div>
+            <div><span>运行时长</span><strong id="hero-uptime">—</strong></div>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <span class="stat-label">收到消息</span>
+            <strong class="stat-value" id="st-in">0</strong>
+            <span class="stat-foot" id="st-in-foot">群 0 · 私聊 0</span>
+          </div>
+          <div class="stat-card accent">
+            <span class="stat-label">已回复</span>
+            <strong class="stat-value" id="st-out">0</strong>
+            <span class="stat-foot" id="st-out-foot">回复率 0%</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">主动沉默</span>
+            <strong class="stat-value" id="st-silent">0</strong>
+            <span class="stat-foot">被触发漏斗拦下</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">活跃会话</span>
+            <strong class="stat-value" id="st-chats">0</strong>
+            <span class="stat-foot" id="st-chats-foot">群 0 · 私聊 0</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>最近动态</h3>
+            <button class="link" data-goto="messages">查看全部 →</button>
+          </div>
+          <div id="recent-list" class="feed"></div>
+        </div>
+      </section>
+
+      <!-- ─────── 接入设置 ─────── -->
+      <section class="page" id="page-connect">
+        <div class="notice notice-info">
+          <strong>两种接入方式</strong>
+          <p><b>GeWe 协议</b>：支持私聊 + 群聊，需自行部署网关（推荐，功能完整）。<br>
+             <b>官方 iLink</b>：腾讯官方接口，合规零封号，但<b>仅支持私聊</b>，不支持群聊。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>通道类型</h3></div>
+          <div class="segmented" id="adapter-type">
+            <button data-value="gewechat" class="active">GeWe 协议（私聊 + 群聊）</button>
+            <button data-value="ilink">官方 iLink（仅私聊）</button>
+          </div>
+          <label class="switch-row">
+            <div>
+              <strong>混合模式</strong>
+              <span>私聊走官方 iLink（合规），群聊走 GeWe 协议 —— 把风险压到最小</span>
+            </div>
+            <input type="checkbox" id="hybrid-enabled">
+          </label>
+        </div>
+
+        <div class="card" id="card-gewe">
+          <div class="card-head"><h3>GeWe 网关</h3></div>
+          <div class="field-grid">
+            <label class="field">
+              <span>网关地址</span>
+              <input type="text" id="gewe-base" placeholder="http://127.0.0.1:2531">
+              <em>GeWe 服务所在地址，本机部署填 127.0.0.1</em>
+            </label>
+            <label class="field">
+              <span>Token</span>
+              <input type="password" id="gewe-token" placeholder="X-GEWE-TOKEN">
+              <em>GeWe 控制台获取</em>
+            </label>
+            <label class="field">
+              <span>设备 ID (appId)</span>
+              <input type="text" id="gewe-appid" placeholder="登录后自动填充">
+            </label>
+            <label class="field">
+              <span>机器人微信号</span>
+              <input type="text" id="bot-wxid" placeholder="扫码登录后自动填充">
+            </label>
+            <label class="field">
+              <span>机器人群昵称</span>
+              <input type="text" id="bot-nickname" placeholder="小助手">
+              <em>群里的 @ 名称，需与群昵称一致</em>
+            </label>
+          </div>
+          <div class="card-foot">
+            <button class="btn btn-primary" id="btn-save-connect">保存</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>扫码登录</h3></div>
+          <div class="qr-wrap">
+            <div class="qr-box" id="qr-box">
+              <div class="qr-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v3M17 20h3"/></svg>
+                <span>点击下方按钮获取二维码</span>
+              </div>
+            </div>
+            <div class="qr-info">
+              <p id="qr-status">尚未登录</p>
+              <button class="btn btn-primary" id="btn-get-qr">获取登录二维码</button>
+              <button class="btn btn-ghost" id="btn-check-login">我已扫码，检查状态</button>
+              <p class="hint">用手机微信扫描二维码即可完成登录。登录后微信号会自动填入上方表单。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─────── 群聊管理 ─────── -->
+      <section class="page" id="page-groups">
+        <div class="notice notice-warn">
+          <strong>群聊如何工作</strong>
+          <p>机器人不是「有问必答」，而是通过<b>五层漏斗</b>判断该不该插话：@机器人 / 唤醒词 → 黑名单与静默时段 → 启发式打分 → 小模型判定 → 冷却与配额。
+             最终只有约 <b>1~2%</b> 的群消息会被回复，避免刷屏惹人反感。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>群列表</h3>
+            <div class="head-actions">
+              <button class="btn btn-ghost btn-sm" id="btn-refresh-groups">刷新</button>
+              <button class="btn btn-ghost btn-sm" id="btn-add-group">手动添加群</button>
+            </div>
+          </div>
+          <div id="groups-list" class="groups"></div>
+        </div>
+      </section>
+
+      <!-- ─────── 消息记录 ─────── -->
+      <section class="page" id="page-messages">
+        <div class="card">
+          <div class="card-head">
+            <h3>消息记录</h3>
+            <div class="head-actions">
+              <div class="segmented segmented-sm" id="msg-filter">
+                <button data-value="" class="active">全部</button>
+                <button data-value="group">群聊</button>
+                <button data-value="private">私聊</button>
+                <button data-value="out">仅回复</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="btn-clear-msgs">清空</button>
+            </div>
+          </div>
+          <div id="messages-list" class="feed feed-lg"></div>
+        </div>
+      </section>
+
+      <!-- ─────── 模型与行为 ─────── -->
+      <section class="page" id="page-settings">
+        <div class="card">
+          <div class="card-head"><h3>主模型</h3></div>
+          <div class="field-grid">
+            <label class="field">
+              <span>接口地址</span>
+              <input type="text" id="primary-base" placeholder="https://api.deepseek.com">
+            </label>
+            <label class="field">
+              <span>模型名称</span>
+              <input type="text" id="primary-model" placeholder="deepseek-chat">
+            </label>
+            <label class="field field-full">
+              <span>API Key</span>
+              <input type="password" id="primary-key" placeholder="sk-...">
+            </label>
+          </div>
+          <p class="hint">推荐 DeepSeek-V4-Flash（约 ¥1/百万 token，缓存命中再省 98%）。所有国内主流模型都兼容 OpenAI 接口格式。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>兜底模型</h3></div>
+          <div class="field-grid">
+            <label class="field"><span>接口地址</span><input type="text" id="fallback-base"></label>
+            <label class="field"><span>模型名称</span><input type="text" id="fallback-model"></label>
+            <label class="field field-full"><span>API Key</span><input type="password" id="fallback-key"></label>
+          </div>
+          <p class="hint">主模型异常时自动切换，保证服务不中断。留空则不启用。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>判定模型</h3></div>
+          <div class="field-grid">
+            <label class="field"><span>接口地址</span><input type="text" id="judge-base"></label>
+            <label class="field"><span>模型名称</span><input type="text" id="judge-model"></label>
+            <label class="field field-full"><span>API Key</span><input type="password" id="judge-key"></label>
+          </div>
+          <p class="hint">用于群聊「该不该插话」的快速判定。建议用 <b>GLM-4.7-Flash（免费）</b>，判定成本可降到 0。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>群聊回复策略</h3></div>
+          <div class="segmented" id="group-mode">
+            <button data-value="mention_only" class="active">仅 @ 机器人时回复</button>
+            <button data-value="smart">智能判断（自动找时机插话）</button>
+          </div>
+          <div class="notice notice-info" id="mode-hint" style="margin:0 20px 18px">
+            <strong>仅 @ 机器人时回复</strong>
+            <p>私聊<b>一律回复</b>；群聊<b>只有 @ 了机器人才回复</b>，其余消息一概不回。<br>
+               最省心、最不容易打扰群友，推荐绝大多数场景使用。</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>机器人行为</h3></div>
+          <div class="field-grid">
+            <label class="field"><span>机器人名称</span><input type="text" id="bot-name"></label>
+            <label class="field field-full">
+              <span>人设描述</span>
+              <textarea id="bot-persona" rows="3" placeholder="友好、简洁、乐于助人的群聊助手"></textarea>
+              <em>决定机器人的说话风格与边界</em>
+            </label>
+          </div>
+          <label class="switch-row">
+            <div><strong>群聊回复时 @ 提问者</strong><span>让群成员知道这条回复是给谁的</span></div>
+            <input type="checkbox" id="group-at-sender">
+          </label>
+          <div class="field-grid" id="smart-only-fields" hidden>
+            <label class="field">
+              <span>回复概率 <b id="reply-prob-val">70%</b></span>
+              <input type="range" id="reply-prob" min="0" max="100" step="5">
+              <em>即使判定该回复，也按此概率回复，避免「必答」的机器感</em>
+            </label>
+            <label class="field">
+              <span>静默时段</span>
+              <input type="text" id="quiet-hours" placeholder="0,1,2,3,4,5,6">
+              <em>这些小时内不主动插话（24 小时制，逗号分隔）</em>
+            </label>
+          </div>
+          <div class="card-foot">
+            <button class="btn btn-primary" id="btn-save-settings">保存设置</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ══════════ 群配置弹窗 ══════════ -->
+<div class="modal-mask" id="group-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="gm-title">群聊设置</h3>
+      <button class="icon-btn" id="gm-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <label class="switch-row">
+        <div><strong>启用机器人</strong><span>关闭后该群完全不响应</span></div>
+        <input type="checkbox" id="gm-enabled">
+      </label>
+
+      <div class="field">
+        <span>响应模式</span>
+        <div class="segmented segmented-sm" id="gm-mode">
+          <button data-value="">跟随全局</button>
+          <button data-value="mention_only">仅 @ 时响应</button>
+          <button data-value="smart">智能判断</button>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>唤醒词</span>
+        <input type="text" id="gm-wake" placeholder="小助手, bot">
+        <em>逗号分隔。仅「智能判断」模式下生效；「仅 @」模式不看唤醒词</em>
+      </label>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>冷却时间（秒）</span>
+          <input type="number" id="gm-cooldown" min="0" max="600">
+          <em>两次回复的最小间隔，填 0 表示不限速</em>
+        </label>
+        <label class="field">
+          <span>每小时上限</span>
+          <input type="number" id="gm-hourly" min="1" max="200">
+          <em>防止刷屏</em>
+        </label>
+      </div>
+
+      <label class="field" id="gm-prob-field">
+        <span>回复概率 <b id="gm-prob-val">70%</b></span>
+        <input type="range" id="gm-prob" min="0" max="100" step="5">
+        <em>仅「智能判断」模式下生效</em>
+      </label>
+
+      <label class="field">
+        <span>该群专属人设（可选）</span>
+        <textarea id="gm-persona" rows="2" placeholder="留空则使用全局人设"></textarea>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="gm-cancel">取消</button>
+      <button class="btn btn-primary" id="gm-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

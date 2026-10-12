@@ -1,0 +1,86 @@
+# 微信 LLM 对话机器人 · 部署配置
+# 使用：cp deploy/.env.example deploy/.env && 填入密钥 && docker compose up -d
+services:
+
+  # ── 协议网关（iPad 协议，主推路径）─────────────────────────
+  # 以 Gewechat 为例；也可替换为 WeChatPadPro 或商业托管网关
+  gateway:
+    image: registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest
+    container_name: wx-gateway
+    ports:
+      - "2531:2531"
+      - "2532:2532"
+    volumes:
+      - ./data/gewechat:/root/.gewechat
+    environment:
+      - TZ=Asia/Shanghai
+    restart: always
+
+  # ── 编排服务 ─────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: wx-orchestrator
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  # ── 热数据：上下文窗口 / 冷却 / 限流 / 幂等 ────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: wx-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  # ── 温数据 + 冷数据：归档 / 配置 / 向量记忆 ────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wx-postgres
+    environment:
+      POSTGRES_USER: ${PG_USER:-bot}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-bot}
+      POSTGRES_DB: ${PG_DB:-wxbot}
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-bot}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  # ── 可观测性 ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: wx-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: always
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: wx-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    restart: always
