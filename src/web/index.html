@@ -143,59 +143,75 @@
             </div>
           </div>
           <div class="wz-body">
-            <div class="choice-list" id="adapter-type">
+            <div class="platform-picker" id="adapter-type">
               <!-- 微信通道 -->
-              <label class="choice" data-value="wechat">
-                <input type="checkbox" name="channel" value="wechat" checked>
-                <div class="choice-main">
-                  <div class="choice-title">
-                    微信
-                    <span class="tag on">推荐</span>
-                  </div>
-                  <div class="choice-desc">
-                    支持<b>私聊 + 群聊</b>。可选 GeWe 协议（能力完整）或官方 iLink（零封号）。
-                  </div>
-                </div>
-              </label>
+              <div class="pcard pcard-wechat is-selected" data-value="wechat">
+                <label class="pcard-head">
+                  <input type="checkbox" name="channel" value="wechat" checked>
+                  <span class="pcard-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.7 3C4.9 3 1.8 5.6 1.8 8.8c0 1.8 1 3.4 2.6 4.5l-.7 2.1 2.4-1.2c.8.2 1.7.4 2.6.4h.6a5.6 5.6 0 0 1-.2-1.5c0-3.1 3-5.6 6.7-5.6h.6C15.7 4.8 12.5 3 8.7 3Zm-2.3 3.1a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm4.6 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Z"/><path d="M22.2 13.1c0-2.7-2.6-4.9-5.8-4.9s-5.8 2.2-5.8 4.9 2.6 4.9 5.8 4.9c.7 0 1.4-.1 2-.3l2 1-.5-1.7c1.4-.9 2.3-2.3 2.3-3.9Zm-7.7-1.5a.8.8 0 1 1 0-1.5.8.8 0 0 1 0 1.5Zm3.8 0a.8.8 0 1 1 0-1.5.8.8 0 0 1 0 1.5Z"/></svg>
+                  </span>
+                  <span class="pcard-main">
+                    <span class="pcard-title">
+                      微信
+                      <span class="tag on">私聊 + 群聊</span>
+                    </span>
+                    <span class="pcard-desc">
+                      可选 <b>GeWe 协议</b>（能力完整，网关自动安装）或
+                      <b>官方 iLink</b>（零封号，仅私聊）。
+                    </span>
+                  </span>
+                  <span class="pcard-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg>
+                  </span>
+                </label>
 
-              <!-- 微信子选项（仅在勾选微信时显示）-->
-              <div class="sub-choices" id="wechat-sub">
-                <label class="sub-choice" data-value="gewechat">
-                  <input type="radio" name="wechat_type" value="gewechat" checked>
-                  <div>
-                    <strong>GeWe 协议</strong>
-                    <span>私聊 + 群聊，功能完整。网关自动安装。</span>
+                <!-- 微信子选项（仅勾选微信时可用） -->
+                <div class="pcard-body" id="wechat-sub">
+                  <div class="seg" role="radiogroup" aria-label="微信接入方式">
+                    <label class="seg-item" data-value="gewechat">
+                      <input type="radio" name="wechat_type" value="gewechat" checked>
+                      <span class="seg-title">GeWe 协议</span>
+                      <span class="seg-desc">私聊 + 群聊，功能完整</span>
+                    </label>
+                    <label class="seg-item" data-value="ilink">
+                      <input type="radio" name="wechat_type" value="ilink">
+                      <span class="seg-title">官方 iLink</span>
+                      <span class="seg-desc">零封号，仅私聊</span>
+                    </label>
                   </div>
-                </label>
-                <label class="sub-choice" data-value="ilink">
-                  <input type="radio" name="wechat_type" value="ilink">
-                  <div>
-                    <strong>官方 iLink</strong>
-                    <span>零封号，仅私聊。需命令行登录。</span>
-                  </div>
-                </label>
-                <label class="switch-row" style="margin-top:8px;padding-left:28px;">
-                  <div>
-                    <strong>混合模式</strong>
-                    <span>私聊走官方 iLink，群聊走 GeWe —— 风险最小</span>
-                  </div>
-                  <input type="checkbox" id="hybrid-enabled">
-                </label>
+                  <label class="switch-row pcard-sub">
+                    <span>
+                      <strong>混合模式</strong>
+                      <em>私聊走官方 iLink、群聊走 GeWe，把合规风险压到最小</em>
+                    </span>
+                    <input type="checkbox" id="hybrid-enabled">
+                  </label>
+                </div>
               </div>
 
               <!-- QQ 通道 -->
-              <label class="choice" data-value="qq">
-                <input type="checkbox" name="channel" value="qq">
-                <div class="choice-main">
-                  <div class="choice-title">
-                    QQ
-                    <span class="tag on">私聊 + 群聊</span>
-                  </div>
-                  <div class="choice-desc">
-                    通过标准 <b>OneBot 11</b> 协议接入，兼容 NapCat、Lagrange 等实现。
-                  </div>
-                </div>
-              </label>
+              <div class="pcard pcard-qq" data-value="qq">
+                <label class="pcard-head">
+                  <input type="checkbox" name="channel" value="qq">
+                  <span class="pcard-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c3.3 0 5.4 2.4 5.6 5.6.1 1 .6 1.6 1.2 2.3.9 1 1.6 2.2 1.6 3.6 0 1-.4 1.7-1 2.2.3 1.8.7 3.2 1.3 4.2.3.5 0 1.1-.6 1.1h-3c-.5 0-1-.3-1.2-.8l-.4-1c-1 .3-2.1.5-3.5.5s-2.5-.2-3.5-.5l-.4 1c-.2.5-.7.8-1.2.8H4.9c-.6 0-.9-.6-.6-1.1.6-1 1-2.4 1.3-4.2-.6-.5-1-1.2-1-2.2 0-1.4.7-2.6 1.6-3.6.6-.7 1.1-1.3 1.2-2.3C7.6 4.4 9.7 2 12 2Z"/></svg>
+                  </span>
+                  <span class="pcard-main">
+                    <span class="pcard-title">
+                      QQ
+                      <span class="tag on">私聊 + 群聊</span>
+                    </span>
+                    <span class="pcard-desc">
+                      走标准 <b>OneBot 11</b> 协议，兼容 NapCat、Lagrange 等实现，
+                      网关一样可以自动安装。
+                    </span>
+                  </span>
+                  <span class="pcard-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg>
+                  </span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -273,6 +289,20 @@
               <div class="help-body" id="install-steps-body"></div>
             </details>
 
+            <!-- 网关凭证（始终可见：用户最常卡在这里）-->
+            <div class="cred-row" id="gewe-cred">
+              <div class="cred-main">
+                <span class="cred-label">网关凭证 Token</span>
+                <div class="cred-input">
+                  <input type="password" id="gewe-token" placeholder="点右侧按钮自动获取，或手动粘贴">
+                  <button class="btn btn-ghost btn-sm" id="btn-fetch-token">自动获取 Token</button>
+                </div>
+                <p class="cred-hint" id="gewe-token-hint">
+                  一键配置完成后，程序会尝试直接从本地网关取回 Token，无需你去控制台复制。
+                </p>
+              </div>
+            </div>
+
             <!-- 手动覆盖（高级）-->
             <details class="help-panel help-panel-sm">
               <summary>网关已在别处运行？手动指定地址</summary>
@@ -284,10 +314,6 @@
                   <label class="field field-full">
                     <span>网关地址</span>
                     <input type="text" id="gewe-base" placeholder="http://127.0.0.1:2531">
-                  </label>
-                  <label class="field field-full">
-                    <span>Token</span>
-                    <input type="password" id="gewe-token" placeholder="从 GeWe 控制台复制">
                   </label>
                   <label class="field">
                     <span>设备 ID（appId）</span>
@@ -318,102 +344,98 @@
           </div>
         </div>
 
-        <!-- 步骤 2（QQ）：配置 OneBot 网关 -->
+        <!-- 步骤 2（QQ）：一键部署 NapCat -->
         <div class="card wizard-step" id="step-2-qq" hidden>
           <div class="wz-head">
             <span class="wz-num">2</span>
             <div class="wz-title">
-              <h3>连接 QQ 网关</h3>
-              <p>自动探测或手动填写 OneBot 网关信息</p>
+              <h3>配置 QQ 网关</h3>
+              <p>点一下按钮，程序自动装好 NapCat 并出二维码</p>
             </div>
             <span class="wz-status" id="qq-badge">待配置</span>
           </div>
           <div class="wz-body">
 
-            <!-- 自动探测 -->
-            <div class="setup-action" style="margin-bottom:16px;">
-              <button class="btn btn-primary btn-lg" id="btn-detect-qq">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                自动探测 QQ 网关
+            <!-- 环境检查 -->
+            <div class="checklist" id="qq-checklist">
+              <div class="check-item" data-key="qq-docker">
+                <span class="check-icon">○</span>
+                <div class="check-main">
+                  <div class="check-title">Docker 环境</div>
+                  <div class="check-desc" id="qchk-docker">正在检测…</div>
+                </div>
+              </div>
+              <div class="check-item" data-key="qq-container">
+                <span class="check-icon">○</span>
+                <div class="check-main">
+                  <div class="check-title">NapCat 网关</div>
+                  <div class="check-desc" id="qchk-napcat">等待中</div>
+                </div>
+              </div>
+              <div class="check-item" data-key="qq-login">
+                <span class="check-icon">○</span>
+                <div class="check-main">
+                  <div class="check-title">QQ 登录</div>
+                  <div class="check-desc" id="qchk-login">未登录</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-qq-qr">扫码登录</button>
+              </div>
+            </div>
+
+            <!-- 主操作 -->
+            <div class="setup-action">
+              <button class="btn btn-primary btn-lg" id="btn-setup-qq">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2L4.5 13H11l-1 9L19.5 11H13l0-9z"/></svg>
+                一键部署 QQ 网关
               </button>
+              <button class="btn btn-ghost" id="btn-detect-qq">探测已有网关</button>
               <span class="setup-hint" id="qq-detect-hint">
-                探测本机 3000/3001 等常见端口，自动填充地址并测试连接
+                自动拉取 NapCat 镜像、写好网络配置并启动，全程无需你操作
               </span>
             </div>
 
-            <details class="help-panel" open>
-              <summary>还没装 QQ 网关？点这里看指引</summary>
-              <div class="help-body">
-                <p class="help-lead">
-                  需要一个实现了 <b>OneBot 11 协议</b>的网关程序。推荐
-                  <b>NapCat</b>（最活跃），也可用 Lagrange 等其它实现。
-                </p>
+            <!-- 进度 -->
+            <div class="progress-box" id="qq-progress" hidden>
+              <div class="progress-bar"><div class="progress-fill" id="qq-progress-fill"></div></div>
+              <div class="progress-text" id="qq-progress-text">准备中…</div>
+            </div>
 
-                <div class="help-option">
-                  <div class="help-option-head">
-                    <strong>方式 A · NapCat Docker 一键启动</strong>
-                    <span class="tag on">推荐</span>
-                  </div>
-                  <p>如果你已装 Docker，复制下面命令运行即可启动 NapCat：</p>
-                  <div class="code-block">
-                    <code id="napcat-docker-cmd">docker run -d --name napcat --restart always -p 3000:3000 -p 3001:3001 mlikiowa/napcat-docker</code>
-                    <button class="btn btn-ghost btn-sm" id="btn-copy-napcat">复制</button>
-                  </div>
-                  <p class="help-note">
-                    启动后需要扫码登录 QQ。然后在本页点「自动探测」即可自动识别。
-                  </p>
-                </div>
-
-                <div class="help-option">
-                  <div class="help-option-head"><strong>方式 B · 手动安装 NapCat</strong></div>
-                  <p>下载 NapCat 后启动，扫码登录 QQ，然后在 NapCat 的网络配置里添加一个
-                    <b>反向 WebSocket</b>，地址填下方这个：</p>
-                  <div class="code-block">
-                    <code id="qq-ws-url">ws://127.0.0.1:8000/ws/onebot</code>
-                    <button class="btn btn-ghost btn-sm" id="btn-copy-ws">复制</button>
-                  </div>
-                  <p class="help-note">
-                    同时把 NapCat 的 <b>HTTP 服务</b>打开（默认端口 3000），
-                    本程序用它来发消息。
-                  </p>
-                </div>
-
-                <div class="help-option">
-                  <div class="help-option-head"><strong>方式 C · Lagrange</strong></div>
-                  <p>同样是 OneBot 11 实现，配置方式类似：填反向 WS 地址 + 开启 HTTP API。
-                    本程序对两者完全兼容，换实现不用改代码。</p>
-                </div>
-
-                <div class="help-option">
-                  <div class="help-option-head"><strong>注意</strong></div>
-                  <p>NapCat / Lagrange 都是<b>非官方协议实现</b>，存在账号被风控的可能，
-                    请使用小号。QQ 官方开放平台也可接入，但需要企业认证与审核，门槛较高。</p>
+            <!-- 扫码区 -->
+            <div class="qr-wrap" id="qq-qr-wrap" hidden>
+              <div class="qr-box" id="qq-qr-box">
+                <div class="qr-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v3M17 20h3"/></svg>
+                  <span>点右侧按钮获取二维码</span>
                 </div>
               </div>
-            </details>
-
-            <div class="field-grid">
-              <label class="field field-full">
-                <span>HTTP 接口地址</span>
-                <input type="text" id="onebot-http" placeholder="http://127.0.0.1:3000">
-                <em>用于发送消息，通常是网关的 HTTP 服务端口</em>
-              </label>
-              <label class="field field-full">
-                <span>Access Token（可选）</span>
-                <input type="password" id="onebot-token" placeholder="若网关没设 Token 则留空">
-                <em>需与网关配置里的一致</em>
-              </label>
+              <div class="qr-info">
+                <p id="qq-qr-status">尚未登录</p>
+                <button class="btn btn-primary" id="btn-qq-get-qr">获取登录二维码</button>
+                <p class="hint">
+                  用手机 QQ 扫描。若提示二维码过期，重新点一次即可。
+                  登录成功后本页会自动识别。
+                </p>
+              </div>
             </div>
 
-            <div class="test-row">
-              <button class="btn btn-ghost" id="btn-test-qq">测试连接</button>
-              <div class="test-status" id="qq-test-status"></div>
-            </div>
-
+            <!-- 手动覆盖 -->
             <details class="help-panel help-panel-sm">
-              <summary>高级设置（通常不用改）</summary>
+              <summary>网关已在别处运行？手动指定地址</summary>
               <div class="help-body">
+                <p class="help-lead">
+                  如果你已经把 NapCat / Lagrange 等网关部署在其他机器或端口上，
+                  在这里填地址即可跳过自动部署。
+                </p>
                 <div class="field-grid">
+                  <label class="field field-full">
+                    <span>HTTP 接口地址</span>
+                    <input type="text" id="onebot-http" placeholder="http://127.0.0.1:3000">
+                    <em>用于发送消息，通常是网关的 HTTP 服务端口</em>
+                  </label>
+                  <label class="field field-full">
+                    <span>Access Token（可选）</span>
+                    <input type="password" id="onebot-token" placeholder="若网关没设 Token 则留空">
+                  </label>
                   <label class="field">
                     <span>机器人 QQ 号</span>
                     <input type="text" id="bot-qq" placeholder="连接后自动获取">
@@ -424,12 +446,23 @@
                     <em>群里 @ 它时用的名字</em>
                   </label>
                 </div>
+                <div class="test-row">
+                  <button class="btn btn-ghost" id="btn-test-qq">测试连接</button>
+                  <div class="test-status" id="qq-test-status"></div>
+                </div>
+                <p class="help-note">
+                  自建网关的反向 WebSocket 地址填：
+                  <code id="qq-ws-url">ws://127.0.0.1:8000/ws/onebot</code>
+                  <button class="btn btn-ghost btn-sm" id="btn-copy-ws">复制</button>
+                </p>
               </div>
             </details>
 
             <div class="wz-foot">
+              <button class="btn btn-ghost" id="btn-qq-logs">查看网关日志</button>
               <button class="btn btn-primary" id="btn-save-qq">保存并继续</button>
             </div>
+            <pre class="log-view" id="qq-logview" hidden></pre>
           </div>
         </div>
 

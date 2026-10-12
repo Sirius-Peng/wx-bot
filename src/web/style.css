@@ -665,6 +665,149 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 
+/* ── 网关凭证行（始终可见）── */
+
+.cred-row {
+  border: 1.5px solid var(--primary-line);
+  background: var(--primary-soft);
+  border-radius: var(--r);
+  padding: 12px 14px;
+}
+.cred-label {
+  display: block;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--text); margin-bottom: 7px;
+}
+.cred-input { display: flex; gap: 8px; align-items: center; }
+.cred-input input {
+  flex: 1; min-width: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.cred-input .btn { flex-shrink: 0; }
+.cred-hint {
+  margin: 7px 0 0;
+  font-size: 11.5px; line-height: 1.6;
+  color: var(--text-2);
+}
+.cred-hint.ok  { color: #06874A; }
+.cred-hint.err { color: var(--danger); }
+
+/* ── 平台选择卡片 ──
+   两张卡平铺、等高，选中态用显式 .is-selected 类驱动
+   （不依赖 :has()，也避免全局 input 样式叠加导致"选中样式混乱"）*/
+
+.platform-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  align-items: stretch;   /* 两张卡等高，避免"一高一矮"看着凌乱 */
+}
+
+.pcard {
+  display: flex; flex-direction: column;
+  --pc-accent: var(--primary);
+  --pc-soft: var(--primary-soft);
+  --pc-line: var(--primary-line);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.pcard-qq { --pc-accent: #1E88E5; --pc-soft: #EAF3FD; --pc-line: #C7E0F8; }
+
+.pcard.is-selected {
+  border-color: var(--pc-accent);
+  background: var(--pc-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pc-accent) 12%, transparent);
+}
+
+.pcard-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  position: relative;
+}
+.pcard-head input[type="checkbox"] {
+  position: absolute; opacity: 0; width: 1px; height: 1px;
+}
+.pcard-head:focus-within { outline: 2px solid var(--pc-accent); outline-offset: -3px; }
+
+.pcard-logo {
+  flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 9px;
+  display: grid; place-items: center;
+  background: #fff; color: var(--pc-accent);
+  border: 1px solid var(--pc-line);
+}
+.pcard-logo svg { width: 20px; height: 20px; }
+
+.pcard-main { flex: 1; min-width: 0; }
+.pcard-title {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 14px; font-weight: 600; margin-bottom: 3px;
+}
+.pcard-desc { display: block; font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
+.pcard-desc b { color: var(--text); font-weight: 600; }
+
+/* 勾选角标：只有选中时才出现 */
+.pcard-check {
+  flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  display: grid; place-items: center;
+  color: #fff;
+  transition: background .15s, border-color .15s;
+}
+.pcard-check svg { width: 12px; height: 12px; opacity: 0; transition: opacity .15s; }
+.pcard.is-selected .pcard-check {
+  background: var(--pc-accent); border-color: var(--pc-accent);
+}
+.pcard.is-selected .pcard-check svg { opacity: 1; }
+
+/* 子选项区：未勾选时整体禁用（而不是隐藏，避免布局跳动） */
+.pcard-body {
+  padding: 0 16px 14px;
+  border-top: 1px dashed var(--pc-line);
+  margin-top: 2px;
+  padding-top: 12px;
+}
+.pcard.is-disabled .pcard-body { opacity: .45; pointer-events: none; }
+
+.pcard-sub {
+  margin-top: 10px; padding: 0;
+  align-items: flex-start;
+}
+.pcard-sub strong { display: block; font-size: 12.5px; }
+.pcard-sub em {
+  display: block; font-style: normal;
+  font-size: 11.5px; color: var(--text-2); line-height: 1.5;
+}
+
+/* ── 分段选择（微信接入方式）── */
+.seg {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.seg-item {
+  display: block; position: relative;
+  padding: 9px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.seg-item input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.seg-item:focus-within { outline: 2px solid var(--pc-accent); outline-offset: 1px; }
+.seg-item.is-selected {
+  border-color: var(--pc-accent);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--pc-accent);
+}
+.seg-title { display: block; font-size: 12.5px; font-weight: 600; }
+.seg-desc { display: block; font-size: 11.5px; color: var(--text-2); margin-top: 2px; }
+
 /* ── 选择卡片 ── */
 
 .choice-list { display: flex; flex-direction: column; gap: 10px; }

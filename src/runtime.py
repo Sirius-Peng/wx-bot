@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import secrets
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -24,7 +26,9 @@ from .adapters.ilink import ILinkAdapter
 from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore, GroupConfigItem
 from .core.context import ContextManager
-from .core.docker import DockerManager, GATEWAY_URL
+from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
+                          NAPCAT_WEBUI_PORT, DockerManager, GATEWAY_URL)
+from .core.napcat import NapCatWebUI
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.memory import CATEGORIES, SCOPE_GROUP, SCOPE_USER, PersonaMemory
@@ -194,6 +198,8 @@ class BotRuntime:
         self.data_dir = Path(data_dir)
         self.log = MessageLog(self.data_dir / "messages.jsonl")
         self.docker = DockerManager()
+        self._napcat_webui_token = ""        # 由部署流程生成
+        self._napcat_webui: Optional[NapCatWebUI] = None
         self.memory: Optional[PersonaMemory] = None
 
         self.cfg: AppConfig = store.load()
@@ -557,6 +563,98 @@ class BotRuntime:
             ),
         }
 
+    # ══ QQ / NapCat 一键部署 ══════════════════════════════════
+    #
+    # 与 GeWe 一样：用户只点一个按钮，程序负责拉镜像、灌配置、起容器、扫码。
+    # 差别在于 NapCat 还要过 WebUI 鉴权（见 core/napcat.py）。
+
+    def _napcat_ws_url(self) -> str:
+        """NapCat 反向连过来的地址。
+
+        容器内访问宿主机必须用 `host.docker.internal`（127.0.0.1 是容器自己）。
+        macOS / Windows 的 Docker Desktop 自带这个域名；
+        Linux 由 `ensure_napcat(extra_hosts=True)` 加 `--add-host` 映射。
+        """
+        port = int(os.environ.get("WXBOT_PORT", "8000"))
+        return f"ws://host.docker.internal:{port}/ws/onebot"
+
+    def _ensure_napcat_webui_token(self) -> str:
+        """WebUI Token 持久化在配置里，重启后仍能登录同一个容器。"""
+        cfg = self.config_store.load()
+        tok = getattr(cfg.adapter, "napcat_webui_token", "") or ""
+        if not tok:
+            tok = secrets.token_hex(16)
+            cfg.adapter.napcat_webui_token = tok
+            self.config_store.save(cfg)
+            self.cfg = cfg
+        self._napcat_webui_token = tok
+        return tok
+
+    def _webui_client(self) -> NapCatWebUI:
+        if self._napcat_webui is None:
+            self._napcat_webui = NapCatWebUI(
+                token=self._ensure_napcat_webui_token(), port=NAPCAT_WEBUI_PORT,
+            )
+        return self._napcat_webui
+
+    async def qq_status(self) -> dict:
+        """QQ 通道状态：容器 + WebUI 登录态。供前端轮询。"""
+        cfg = self.config_store.load()
+        napcat = self.docker.napcat_status()
+        st = {
+            "docker": self.docker.detect().to_dict(),
+            "napcat": napcat,
+            "task": dict(self.docker.task),
+            "onebotUrl": cfg.adapter.onebot_http_url,
+            "botQq": cfg.adapter.bot_qq,
+            "stage": "idle",
+            "loggedIn": False,
+            "loginMessage": "",
+        }
+        # 只读状态接口不要每次都去登录 WebUI（慢且会触发限速），
+        # 只有容器在跑、且确实需要判断登录态时才查。
+        if napcat.get("running") and cfg.adapter.onebot_http_url:
+            try:
+                r = await self.test_onebot(cfg.adapter.onebot_http_url,
+                                           cfg.adapter.onebot_token)
+                st["loggedIn"] = bool(r.get("ok"))
+                st["loginMessage"] = r.get("message", "")
+                st["stage"] = "ready" if r.get("ok") else "waiting_login"
+            except Exception:
+                log.debug("查询 QQ 登录态失败", exc_info=True)
+        return st
+
+    async def qq_setup(self) -> dict:
+        """一键部署 QQ 网关（非阻塞，前端轮询 `/api/qq/status`）。"""
+        token = self._ensure_napcat_webui_token()
+        ws = self._napcat_ws_url()
+        cfg = self.config_store.load()
+        if not cfg.adapter.onebot_http_url:
+            cfg.adapter.onebot_http_url = f"http://127.0.0.1:{NAPCAT_HTTP_PORT}"
+            self.config_store.save(cfg)
+            self.cfg = cfg
+        return await self.docker.ensure_napcat(token, ws)
+
+    async def qq_login_qrcode(self) -> dict:
+        """取 QQ 登录二维码（SVG data URL）。"""
+        return await self._webui_client().qrcode()
+
+    async def qq_login_check(self) -> dict:
+        """查 QQ 扫码状态；登录成功后顺手把 QQ 号回填到配置。"""
+        r = await self._webui_client().check_login()
+        if r.get("loggedIn"):
+            info = await self.test_onebot()
+            if info.get("ok") and info.get("qq"):
+                r["qq"] = info["qq"]
+                r["nickname"] = info.get("nickname", "")
+        return r
+
+    async def qq_stop(self) -> dict:
+        return await self.docker.stop_napcat()
+
+    async def qq_logs(self, lines: int = 100) -> dict:
+        return await self.docker.napcat_logs(lines)
+
     # ══ 人格知识库 ════════════════════════════════════════════
 
     def _ensure_memory(self) -> PersonaMemory:
@@ -612,9 +710,18 @@ class BotRuntime:
     # 也不要求用户自己敲 docker 命令。用户只需点「一键配置」。
 
     def docker_status(self) -> dict:
-        """Docker + 网关的完整状态快照。"""
+        """Docker + 网关的完整状态快照。
+
+        ⚠️ `gateway.running`（端口通）只代表容器起来了，
+        **不代表配置完成** —— Token 仍可能是空的。
+        所以额外给一个 `tokenConfigured`，前端不要自己从"网关在跑"推断可用。
+        """
         d = self.docker.detect()
         gw = self.docker.gateway_status()
+        cfg = self.config_store.load()
+        gw = dict(gw)
+        gw["tokenConfigured"] = bool(cfg.adapter.gewe_token)
+        gw["baseUrl"] = cfg.adapter.gewe_base_url or GATEWAY_URL
         return {
             "docker": d.to_dict(),
             "gateway": gw,
@@ -665,12 +772,16 @@ class BotRuntime:
 
     async def _gateway_call(self, endpoint: str, body: dict,
                             base_url: str = "", token: str = "",
-                            timeout: float = 25.0) -> dict:
+                            timeout: float = 25.0,
+                            allow_empty_token: bool = False) -> dict:
         """调用 GeWe 网关。
 
         统一处理两件容易出错的事：
           1. **代理绕过** —— 本机地址若走系统代理会返回 502（见 core/http.py）
           2. **错误翻译** —— 把技术异常转成用户能看懂并知道怎么处理的话
+
+        `allow_empty_token=True` 用于 `tools/getTokenId` 这类**换取 Token 的接口**
+        —— 它们本来就还没 Token，不能提前拦下来。
 
         返回 {"ok": bool, "data": dict, "error": str, "status": int}
         """
@@ -679,7 +790,7 @@ class BotRuntime:
         tok = token or a.gewe_token
         if not base:
             return {"ok": False, "status": 0, "error": "还没有填写网关地址"}
-        if not tok:
+        if not tok and not allow_empty_token:
             return {"ok": False, "status": 0, "error": "还没有填写 Token"}
 
         url = f"{base}/v2/api/{endpoint}"
@@ -701,6 +812,74 @@ class BotRuntime:
                     "error": explain_error(e, url)}
         except Exception as e:
             return {"ok": False, "status": 0, "error": explain_error(e, url)}
+
+    # ══ GeWe Token 自动获取 ══════════════════════════════════
+    #
+    # 接口：POST {base}/v2/api/tools/getTokenId   body {}
+    # 响应：{"ret":200,"msg":"操作成功","data":"<token>"}
+    #
+    # ⚠️ 诚实提示：上游 Devo919/Gewechat 仓库已声明停止提供运行服务与镜像，
+    # 只作技术归档。本地已部署的旧镜像仍可能可用，但不保证 ——
+    # 所以这里失败时要把原因说清楚，不能承诺"一定拿得到"。
+
+    async def fetch_gewe_token(self, base_url: str = "") -> dict:
+        """向本地网关换取 Token，并写回配置。"""
+        base = (base_url or self.cfg.adapter.gewe_base_url or "").rstrip("/")
+        if not base:
+            return {"ok": False, "message": "请先填写网关地址"}
+
+        r = await self._gateway_call(
+            "tools/getTokenId", {}, base_url=base, timeout=15.0,
+            allow_empty_token=True,
+        )
+        if not r.get("ok"):
+            if r.get("status", 0) == 0:
+                return {
+                    "ok": False, "stage": "connect",
+                    "message": f"连不上网关 {base}",
+                    "detail": r.get("error", ""),
+                    "hint": "请先确认网关容器已启动（可以点「一键完成配置」）。",
+                }
+            return {
+                "ok": False, "stage": "http",
+                "message": f"网关返回 HTTP {r.get('status')}",
+                "detail": r.get("error", ""),
+                "hint": "这个网关镜像可能不支持自动获取 Token，"
+                        "请到 GeWe 控制台手动复制后填到输入框里。",
+            }
+
+        body = r.get("data") or {}
+        ret = body.get("ret")
+        token = body.get("data")
+        if ret not in (200, 0) or not isinstance(token, str) or not token.strip():
+            return {
+                "ok": False, "stage": "api",
+                "message": "网关没有返回 Token",
+                "detail": f"ret={ret} msg={body.get('msg') or ''} data={token!r}",
+                "hint": "部分网关版本未开放该接口，"
+                        "请到 GeWe 控制台手动复制 Token 填入输入框。",
+            }
+
+        token = token.strip()
+        cfg = self.config_store.load()
+        cfg.adapter.gewe_base_url = base
+        cfg.adapter.gewe_token = token
+        self.config_store.save(cfg)
+        self.cfg = cfg
+
+        # 顺手验一下这个 Token 是否真的能用
+        check = await self._gateway_call(
+            "login/checkLogin", {"appId": cfg.adapter.gewe_app_id},
+            base_url=base, token=token, timeout=10.0,
+        )
+        verified = bool(check.get("ok")) and (check.get("data") or {}).get("ret") in (200, 0)
+        return {
+            "ok": True,
+            "tokenConfigured": True,
+            "verified": verified,
+            "message": "Token 已自动获取并保存" + ("，且验证有效" if verified else ""),
+            "hint": "" if verified else "Token 已保存，但暂时没能验证有效性，可稍后点「测试连接」确认。",
+        }
 
     async def detect_gateway(self) -> dict:
         """自动探测可用的网关地址。

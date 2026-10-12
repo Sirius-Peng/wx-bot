@@ -235,6 +235,46 @@ async def api_qq_detect() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  QQ / NapCat 一键部署 + 扫码登录
+#
+#  与 GeWe 一样：点一个按钮，程序拉镜像、灌配置、起容器、出二维码。
+#  部署是**非阻塞**的，前端轮询 /api/qq/status 看进度。
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/qq/status")
+async def api_qq_status() -> dict:
+    """QQ 通道状态：Docker + NapCat 容器 + 登录态。前端轮询它。"""
+    return await runtime.qq_status()
+
+
+@app.post("/api/qq/setup")
+async def api_qq_setup() -> dict:
+    """一键部署 QQ 网关（NapCat Docker）。"""
+    return await runtime.qq_setup()
+
+
+@app.post("/api/qq/stop")
+async def api_qq_stop() -> dict:
+    return await runtime.qq_stop()
+
+
+@app.get("/api/qq/logs")
+async def api_qq_logs(lines: int = 100) -> dict:
+    return await runtime.qq_logs(lines)
+
+
+@app.post("/api/qq/login/qrcode")
+async def api_qq_login_qrcode() -> dict:
+    """获取 QQ 登录二维码（返回 SVG data URL，离线生成）。"""
+    return await runtime.qq_login_qrcode()
+
+
+@app.get("/api/qq/login/check")
+async def api_qq_login_check() -> dict:
+    return await runtime.qq_login_check()
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  人格知识库
 # ═══════════════════════════════════════════════════════════════════
 
@@ -323,6 +363,21 @@ async def api_gateway_logs(lines: int = 100) -> dict:
 #  网关连接（自动探测 + 连通性测试）
 # ═══════════════════════════════════════════════════════════════════
 
+@app.post("/api/gateway/token")
+async def api_gateway_token(request: Request) -> dict:
+    """向本地网关自动换取 GeWe Token，省去用户去控制台复制。
+
+    ⚠️ 部分网关版本未开放该接口（上游仓库已声明停止提供镜像），
+    失败时会返回可操作的提示，前端要照实展示、不能承诺"一定拿得到"。
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    return await runtime.fetch_gewe_token(base_url=body.get("base_url", ""))
+
+
 @app.post("/api/gateway/detect")
 async def api_gateway_detect() -> dict:
     """自动探测常见的网关地址，省去用户自己猜地址。"""
@@ -397,6 +452,10 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     )
     cfg.adapter.onebot_token = keep_masked(
         incoming.get("adapter", {}).get("onebot_token", ""), old.adapter.onebot_token
+    )
+    cfg.adapter.napcat_webui_token = keep_masked(
+        incoming.get("adapter", {}).get("napcat_webui_token", ""),
+        old.adapter.napcat_webui_token,
     )
     # 群配置：合并而非覆盖，避免前端未提交的群被删掉
     for cid, item in old.groups.items():

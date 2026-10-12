@@ -48,6 +48,9 @@ class AdapterConfig:
     onebot_http_url: str = "http://127.0.0.1:3000"
     onebot_token: str = ""
     bot_qq: str = ""
+    # NapCat WebUI Token：一键部署时自动生成并写进容器，
+    # 保存下来是为了重启后还能登录同一个容器的 WebUI 拿二维码
+    napcat_webui_token: str = ""
 
 
 @dataclass
@@ -212,6 +215,9 @@ class ConfigStore:
             d["llm"][k] = _mask(d["llm"].get(k, ""))
         d["adapter"]["gewe_token"] = _mask(d["adapter"].get("gewe_token", ""))
         d["adapter"]["onebot_token"] = _mask(d["adapter"].get("onebot_token", ""))
+        d["adapter"]["napcat_webui_token"] = _mask(
+            d["adapter"].get("napcat_webui_token", "")
+        )
         return d
 
 
