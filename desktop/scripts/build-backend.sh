@@ -40,7 +40,8 @@ echo -e "  ${DIM}检查打包依赖…${NC}"
   "$PY" -m pip install -q pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ── 3. 清理旧产物 ────────────────────────────────────────────
-rm -rf "$DESKTOP_DIR/build" "$DESKTOP_DIR/dist" "$OUT_DIR"
+# 只清后端自己的产物；dist/ 是应用打包的输出，不归这里管
+rm -rf "$DESKTOP_DIR/build" "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 # PyInstaller 默认把缓存放在 ~/Library，某些受限环境会拦截其清理动作。
