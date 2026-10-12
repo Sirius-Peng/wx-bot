@@ -29,6 +29,7 @@ from .core.context import ContextManager
 from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
                           NAPCAT_WEBUI_PORT, DockerManager, GATEWAY_URL)
 from .core.napcat import NapCatWebUI
+from .core.qr import QRDataTooLong, data_url
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.memory import CATEGORIES, SCOPE_GROUP, SCOPE_USER, PersonaMemory
@@ -216,7 +217,8 @@ class BotRuntime:
         self.platforms_running: set[str] = set()   # {"wechat", "qq"}
 
         self._login: dict = {"status": "idle", "qrcode": "", "image": "",
-                             "uuid": "", "app_id": "", "message": ""}
+                             "uuid": "", "app_id": "", "message": "",
+                             "channel": ""}      # gewechat | ilink
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -326,8 +328,11 @@ class BotRuntime:
     def _validate(self) -> None:
         a, l = self.cfg.adapter, self.cfg.llm
         if a.wechat_enabled:
+            # 只有 GeWe 通道需要 Token；官方 iLink **完全不需要 GeWe Token**
             if a.wechat_type == "gewechat" and not a.gewe_token:
                 raise ValueError("微信通道：未填写 GeWe Token")
+            if a.wechat_type == "ilink" and not self.ilink_status().get("loggedIn"):
+                raise ValueError("官方通道还没扫码登录，请到「接入设置」点「获取登录二维码」")
         if a.qq_enabled and not a.onebot_http_url:
             raise ValueError("QQ 通道：未填写 OneBot 网关地址")
         if not l.primary_key:
@@ -340,7 +345,8 @@ class BotRuntime:
             bot_wxid=a.bot_wxid, bot_nickname=a.bot_nickname or self.cfg.bot.name,
         )
         if a.wechat_type == "ilink" or a.hybrid_enabled:
-            official = ILinkAdapter(state_dir=a.ilink_state_dir, bot_agent="WxBot/1.0")
+            official = ILinkAdapter(state_dir=str(self._ilink_state_dir()),
+                                    bot_agent="WxBot/1.0")
             if a.wechat_type == "ilink":
                 return official
             return HybridAdapterRouter(private_adapter=official, group_adapter=gewe)
@@ -966,11 +972,165 @@ class BotRuntime:
 
     # ── 扫码登录 ──────────────────────────────────────────────
 
+    # ══ 官方 iLink 扫码登录（应用内完成，无需命令行）══════════
+    #
+    # 接口（已对官方服务实测）：
+    #   GET /ilink/bot/get_bot_qrcode?bot_type=3
+    #       → {ret:0, qrcode:"<id>", qrcode_img_content:"<URL>"}
+    #         `qrcode_img_content` 是**二维码内容 URL**，需要自己转成二维码图片
+    #   GET /ilink/bot/get_qrcode_status?qrcode=<id>
+    #       → 服务端会 hold 住连接（最长 35 秒），所以超时要放宽
+    #         status: confirmed | binded_redirect | expired | cancelled
+    #
+    # ⚠️ 官方通道**不需要 GeWe Token**，这里绝不能去碰 GeWe 的任何配置。
+
+    def _ilink_state_dir(self) -> Path:
+        """官方 iLink 的凭证目录。
+
+        ⚠️ 配置里的默认值是相对路径 `./data/ilink`，但**相对的是进程工作目录**，
+        而桌面版会从任意目录启动进程（数据实际在应用数据目录里）。
+        所以这里要把它归一到 `self.data_dir` 下，否则会出现
+        "明明扫码成功了，重启后又提示未登录"。
+        """
+        raw = (self.cfg.adapter.ilink_state_dir or "").strip()
+        if not raw:
+            return self.data_dir / "ilink"
+        d = Path(raw).expanduser()
+        if d.is_absolute():
+            # 只有在"配置里显式写了绝对路径"时才原样使用
+            return d
+        # 相对路径一律以数据目录为基准（去掉可能残留的前缀 ./data/）
+        name = d.name or "ilink"
+        return self.data_dir / name
+
+    async def ilink_qrcode(self) -> dict:
+        """取官方 iLink 登录二维码（返回 SVG data URL）。"""
+        base = "https://ilinkai.weixin.qq.com"
+        url = f"{base}/ilink/bot/get_bot_qrcode"
+        try:
+            async with make_client(base, timeout=20.0) as c:
+                r = await c.get(url, params={"bot_type": 3})
+                if r.status_code >= 400:
+                    return {"ok": False, "stage": "http",
+                            "message": f"官方接口返回 HTTP {r.status_code}",
+                            "hint": "请稍后重试；若持续失败，可能是官方服务临时不可用。"}
+                body = r.json()
+        except Exception as e:
+            return {"ok": False, "stage": "connect",
+                    "message": "连不上微信官方接口",
+                    "detail": explain_error(e, url),
+                    "hint": "请检查本机网络；官方接口在公网，需要能访问 "
+                            "ilinkai.weixin.qq.com。"}
+
+        if body.get("ret") not in (0, None):
+            return {"ok": False, "stage": "api",
+                    "message": f"官方接口返回 ret={body.get('ret')}",
+                    "detail": str(body.get("errmsg") or ""),
+                    "hint": "请稍后重试。"}
+
+        qid = body.get("qrcode") or ""
+        content = (body.get("qrcode_img_content") or "").strip()
+        if not qid or not content:
+            return {"ok": False, "message": "官方接口没有返回二维码内容"}
+
+        # 二维码内容是一段 URL，离线转成 SVG（不依赖任何第三方服务）
+        try:
+            image = data_url(content, ec="M", scale=6, border=4)
+        except QRDataTooLong:
+            return {"ok": False, "message": "二维码内容过长，无法生成"}
+        except Exception:
+            log.exception("生成官方二维码失败")
+            return {"ok": False, "message": "生成二维码失败"}
+
+        self._login = {
+            "status": "waiting", "channel": "ilink",
+            "qrcode": qid, "image": image, "uuid": "", "app_id": "",
+            "message": "请用微信扫码（二维码几分钟内有效）",
+        }
+        return {"ok": True, **self._login,
+                "hint": "这是腾讯官方通道，只能用于私聊，零封号风险。"}
+
+    async def ilink_login_check(self) -> dict:
+        """轮询官方扫码状态；成功后把凭证落到本地。"""
+        if self._login.get("channel") != "ilink" or not self._login.get("qrcode"):
+            return {"ok": False, "status": "idle", "message": "请先获取二维码"}
+
+        base = "https://ilinkai.weixin.qq.com"
+        url = f"{base}/ilink/bot/get_qrcode_status"
+        try:
+            # 服务端会 hold 住连接最长 35 秒，超时必须比它大
+            async with make_client(base, timeout=50.0) as c:
+                r = await c.get(url, params={"qrcode": self._login["qrcode"]})
+                if r.status_code >= 400:
+                    return {"ok": False, "status": "failed",
+                            "message": f"查询失败：HTTP {r.status_code}"}
+                st = r.json()
+        except Exception as e:
+            # 长轮询偶发超时属正常，前端下一轮会再查
+            return {"ok": True, "status": self._login.get("status", "waiting"),
+                    "message": self._login.get("message") or "等待扫码…",
+                    "detail": explain_error(e, url)}
+
+        status = st.get("status") or ""
+        if status == "confirmed":
+            ok = self._save_ilink_credentials(st)
+            self._login.update({"status": "confirmed", "message": "登录成功"})
+            return {"ok": True, "status": "confirmed", "message": "登录成功",
+                    "saved": ok}
+        if status == "binded_redirect":
+            # 该账号此前已绑定过，本地凭证通常仍然有效
+            self._login.update({"status": "confirmed",
+                                "message": "该账号已连接过，凭证可继续使用"})
+            return {"ok": True, "status": "confirmed",
+                    "message": "该账号已连接过，凭证可继续使用"}
+        if status in ("expired", "cancelled"):
+            self._login.update({"status": "failed", "message": "二维码已失效，请重新获取"})
+            return {"ok": True, "status": "failed",
+                    "message": "二维码已失效，请重新获取"}
+
+        return {"ok": True, "status": "waiting", "message": "等待扫码…"}
+
+    def _save_ilink_credentials(self, st: dict) -> bool:
+        """把官方返回的凭证写入 state_dir（iLinkAdapter 启动时会读它）。"""
+        token = st.get("bot_token")
+        if not token:
+            log.warning("官方接口未返回 bot_token，凭证未保存")
+            return False
+        try:
+            d = Path(self._ilink_state_dir())
+            d.mkdir(parents=True, exist_ok=True)
+            f = d / "account.json"
+            f.write_text(json.dumps({
+                "bot_token": token,
+                "base_url": st.get("baseurl") or "https://ilinkai.weixin.qq.com",
+                "bot_user_id": st.get("bot_user_id") or st.get("ilink_user_id") or "",
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.chmod(f, 0o600)
+            log.info("官方 iLink 凭证已保存到 %s", f)
+            return True
+        except Exception:
+            log.exception("保存官方凭证失败")
+            return False
+
+    def ilink_status(self) -> dict:
+        """官方通道是否已有可用凭证（决定"已登录"徽标）。"""
+        f = Path(self._ilink_state_dir()) / "account.json"
+        if not f.exists():
+            return {"loggedIn": False}
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            return {"loggedIn": False}
+        return {"loggedIn": bool(d.get("bot_token")),
+                "botUserId": d.get("bot_user_id") or ""}
+
+    # ── 扫码登录（按通道分流）─────────────────────────────────
+
     async def login_qrcode(self) -> dict:
-        """获取登录二维码。"""
+        """获取登录二维码。官方 iLink 与 GeWe 走完全不同的路径。"""
         a = self.cfg.adapter
         if a.wechat_type == "ilink":
-            return {"ok": False, "message": "官方通道请用命令行扫码：openclaw channels login"}
+            return await self.ilink_qrcode()
         if not a.gewe_base_url:
             return {"ok": False, "message": "请先填写网关地址（可点「自动探测」）"}
         if not a.gewe_token:
@@ -1022,6 +1182,8 @@ class BotRuntime:
         返回 data.status：1 = 已扫码待确认；成功时 data 里会带 wxid / nickName。
         若返回 data.url，表示需要人脸/滑块验证。
         """
+        if self._login.get("channel") == "ilink":
+            return await self.ilink_login_check()
         if not self._login.get("uuid"):
             return {"ok": False, "message": "请先获取二维码"}
 

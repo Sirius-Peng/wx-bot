@@ -403,6 +403,12 @@ async def api_gateway_test(request: Request) -> dict:
 #  扫码登录
 # ═══════════════════════════════════════════════════════════════════
 
+@app.get("/api/ilink/status")
+async def api_ilink_status() -> dict:
+    """官方 iLink 通道是否已有可用凭证（前端用它显示"已登录"徽标）。"""
+    return runtime.ilink_status()
+
+
 @app.post("/api/login/qrcode")
 async def api_login_qrcode() -> dict:
     return await runtime.login_qrcode()

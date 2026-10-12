@@ -1,6 +1,6 @@
 {
   "name": "wxbot-desktop",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
   "main": "src/main/index.js",
   "author": "Sirius-Peng",
