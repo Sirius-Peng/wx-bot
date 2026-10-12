@@ -5,11 +5,11 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import defaultdict
 from typing import Optional
 
-from .core.trigger import MODE_MENTION_ONLY, GroupConfig, default_group_config
 from .core.types import WxMessage
 
 
@@ -20,18 +20,8 @@ class MemoryStore:
         self.window_size = window_size
         self._seen: dict[str, float] = {}
         self._ctx: dict[str, list[dict]] = defaultdict(list)
-        self._recent_msgs: dict[str, list[WxMessage]] = defaultdict(list)
         self._summary: dict[str, str] = {}
-        self._cooldown: dict[str, float] = {}
-        self._cooldown_sec: dict[str, int] = {}
-        self._hourly: dict[str, int] = defaultdict(int)
-        self._configs: dict[str, GroupConfig] = {}
         self._archive: list[dict] = []
-        # 未单独配置的群使用的默认策略
-        self.default_mode: str = MODE_MENTION_ONLY
-
-    def set_default_mode(self, mode: str) -> None:
-        self.default_mode = mode
 
     # ── 幂等 ──────────────────────────────────────────────────
 
@@ -52,17 +42,6 @@ class MemoryStore:
     async def get_recent(self, key: str) -> list[dict]:
         """返回上下文问答对（供 ContextManager 装配 messages）。"""
         return list(self._ctx.get(key, []))
-
-    async def get_recent_msgs(self, chat_id: str, limit: int = 10) -> list[WxMessage]:
-        """返回最近的原始消息（供 TriggerRouter 判断是否处于对话中）。"""
-        return list(self._recent_msgs.get(chat_id, []))[-limit:]
-
-    async def remember_msg(self, msg: WxMessage) -> None:
-        """把入站原始消息追加到滑动窗口。"""
-        bucket = self._recent_msgs[msg.chat_id]
-        bucket.append(msg)
-        if len(bucket) > self.window_size:
-            del bucket[: len(bucket) - self.window_size]
 
     async def push(self, key: str, turn: dict) -> None:
         self._ctx[key].append(turn)
@@ -87,34 +66,7 @@ class MemoryStore:
         old, self._ctx[key] = turns[:-keep], turns[-keep:]
         return old
 
-    # ── 触发控制 ──────────────────────────────────────────────
-
-    async def in_cooldown(self, chat_id: str) -> bool:
-        """冷却是否生效。cooldown_sec = 0 表示不限速。"""
-        window = self._cooldown_sec.get(chat_id, 0)
-        if window <= 0:
-            return False
-        last = self._cooldown.get(chat_id, 0)
-        return time.time() - last < window
-
-    async def set_cooldown(self, chat_id: str, sec: int) -> None:
-        self._cooldown[chat_id] = time.time()
-        self._cooldown_sec[chat_id] = sec
-
-    async def over_hourly_quota(self, chat_id: str, limit: int) -> bool:
-        return self._hourly.get(chat_id, 0) >= limit
-
-    async def bump_hourly(self, chat_id: str) -> None:
-        self._hourly[chat_id] += 1
-
-    # ── 配置 / 归档 / 统计 ────────────────────────────────────
-
-    async def get_group_config(self, chat_id: str) -> GroupConfig:
-        """取群配置。未配置过的群使用全局默认策略。"""
-        return self._configs.get(chat_id) or default_group_config(chat_id, self.default_mode)
-
-    def set_group_config(self, cfg: GroupConfig) -> None:
-        self._configs[cfg.chat_id] = cfg
+    # ── 归档 / 统计 ───────────────────────────────────────────
 
     async def archive(self, msg: WxMessage, direction: str = "in") -> None:
         self._archive.append({
@@ -135,4 +87,4 @@ class MemoryStore:
     async def flush_loop(self) -> None:
         """占位：生产环境定期把 Redis 热数据刷盘到 PostgreSQL。"""
         while True:
-            await __import__("asyncio").sleep(300)
+            await asyncio.sleep(300)

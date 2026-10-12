@@ -13,7 +13,7 @@ from typing import Optional
 from .core.context import ContextManager
 from .core.llm import LLMGateway, JudgeLLM, ProviderCfg
 from .core.sender import HumanLikeSender
-from .core.trigger import GroupConfig, TriggerRouter
+from .core.trigger import TriggerRouter
 from .core.types import WxMessage
 
 log = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 class Orchestrator:
     def __init__(self, adapter, store, llm: LLMGateway, judge: JudgeLLM,
                  ctx: ContextManager, router: TriggerRouter, sender: HumanLikeSender,
-                 memory=None):
+                 memory=None, group_reply_at_sender: bool = True):
         self.adapter = adapter
         self.store = store
         self.llm = llm
@@ -31,8 +31,9 @@ class Orchestrator:
         self.router = router
         self.sender = sender
         self.memory = memory              # 人格知识库（可选）
+        # 群聊回复时是否 @ 提问者（界面上可关，配置必须真正生效）
+        self.group_reply_at_sender = bool(group_reply_at_sender)
         self._locks: dict[str, asyncio.Lock] = {}
-        self._configs: dict[str, GroupConfig] = {}
         self._turn_counter: dict[str, int] = {}
         adapter.on_message(self.handle)
 
@@ -53,16 +54,9 @@ class Orchestrator:
                 log.exception("process failed for msg %s", msg.msg_id)
 
     async def _process(self, msg: WxMessage) -> None:
-        cfg = self._configs.get(msg.chat_id) or await self._load_config(msg.chat_id)
-        # 触发判定需要的是"最近的原始消息"，而不是上下文问答对
-        recent = await self.store.get_recent_msgs(msg.chat_id)
-
-        decision = await self.router.decide(msg, recent, cfg)
+        decision = await self.router.decide(msg)
         log.info("trigger layer=%s reply=%s reason=%s",
                  decision.layer, decision.should_reply, decision.reason)
-
-        # 无论是否回复，入站消息都要进入滑动窗口，供后续判定参考
-        await self.store.remember_msg(msg)
 
         if not decision.should_reply:
             await self.store.archive(msg, direction="in")
@@ -82,7 +76,9 @@ class Orchestrator:
         messages = await self.ctx.build(msg, memory_context=mem_ctx)
 
         # 群聊回复时 @ 提问者 —— 否则群里没人知道这条回复是给谁的
-        reply_at = [msg.sender_id] if (msg.is_group and msg.sender_id) else None
+        reply_at = ([msg.sender_id]
+                    if (msg.is_group and msg.sender_id and self.group_reply_at_sender)
+                    else None)
 
         # 流式生成 + 分段发送（微信无原生流式，分段是最接近的体验）
         try:
@@ -93,12 +89,10 @@ class Orchestrator:
             reply = "稍等一下，我这边有点忙不过来，你再说一遍？"
             await self.sender.send(msg.chat_id, reply, at=reply_at)
 
-        # 落库 + 更新上下文 + 记录冷却
+        # 落库 + 更新上下文
         await self.ctx.append(msg, reply)
         await self.store.archive(msg, direction="in")
         await self.store.archive_reply(msg, reply)
-        await self.store.set_cooldown(msg.chat_id, cfg.cooldown_sec)
-        await self.store.bump_hourly(msg.chat_id)
 
         # 人格知识库：按间隔抽取记忆（每轮都抽太费 token）
         await self._maybe_learn(msg, reply)
@@ -125,11 +119,6 @@ class Orchestrator:
         except Exception:
             log.debug("知识库抽取失败", exc_info=True)
 
-    async def _load_config(self, chat_id: str) -> GroupConfig:
-        cfg = await self.store.get_group_config(chat_id)
-        self._configs[chat_id] = cfg
-        return cfg
-
     # ── 后台任务 ──────────────────────────────────────────────
 
     async def health_loop(self, interval: int = 30) -> None:
@@ -150,37 +139,3 @@ class Orchestrator:
             self.health_loop(),
             self.store.flush_loop(),   # 定期把 Redis 热数据刷盘到 PG
         )
-
-
-def build_default(orchestrator_cls=Orchestrator, **env):
-    """装配默认实例（示意，实际从环境变量读取密钥）。"""
-    import os
-
-    adapter = env["adapter"]
-    store = env["store"]
-
-    judge_gateway = LLMGateway(
-        primary=ProviderCfg(
-            name="judge", base_url=os.environ.get("LLM_JUDGE_BASE", "https://open.bigmodel.cn/api/paas/v4"),
-            api_key=os.environ["LLM_JUDGE_KEY"], model=os.environ.get("LLM_JUDGE_MODEL", "glm-4.7-flash"),
-            timeout=3.0, max_tokens=8,
-        )
-    )
-    chat_gateway = LLMGateway(
-        primary=ProviderCfg(
-            name="deepseek", base_url=os.environ.get("LLM_PRIMARY_BASE", "https://api.deepseek.com"),
-            api_key=os.environ["LLM_PRIMARY_KEY"], model=os.environ.get("LLM_PRIMARY_MODEL", "deepseek-chat"),
-            timeout=60.0,
-        ),
-        fallback=ProviderCfg(
-            name="qwen", base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            api_key=os.environ.get("LLM_FALLBACK_KEY", ""), model="qwen-plus",
-        ),
-        usage_sink=store.record_usage,
-    )
-
-    judge = JudgeLLM(judge_gateway, timeout=3.0)
-    ctx = ContextManager(store, compactor=None)
-    router = TriggerRouter(store, judge, persona=os.environ.get("BOT_PERSONA", ""))
-    sender = HumanLikeSender(adapter)
-    return orchestrator_cls(adapter, store, chat_gateway, judge, ctx, router, sender)

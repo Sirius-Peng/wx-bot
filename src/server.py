@@ -5,10 +5,14 @@
     或双击 start.command / start.bat
 
 浏览器自动打开 http://127.0.0.1:8000
+
+两条通道：
+  · 微信：腾讯官方 iLink Bot API（合规、零封号，仅私聊）
+          —— 消息靠后端长轮询拉取，不需要任何回调接口
+  · QQ ：OneBot 11（NapCat 等），支持反向 WebSocket 与 HTTP POST 两种上报
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -213,7 +217,7 @@ async def onebot_event(request: Request) -> Response:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  QQ / OneBot 连接测试
+#  QQ / OneBot 连接测试与探测
 # ═══════════════════════════════════════════════════════════════════
 
 @app.post("/api/qq/test")
@@ -237,7 +241,7 @@ async def api_qq_detect() -> dict:
 # ═══════════════════════════════════════════════════════════════════
 #  QQ / NapCat 一键部署 + 扫码登录
 #
-#  与 GeWe 一样：点一个按钮，程序拉镜像、灌配置、起容器、出二维码。
+#  点一个按钮，程序拉镜像、灌配置、起容器、出二维码。
 #  部署是**非阻塞**的，前端轮询 /api/qq/status 看进度。
 # ═══════════════════════════════════════════════════════════════════
 
@@ -272,6 +276,29 @@ async def api_qq_login_qrcode() -> dict:
 @app.get("/api/qq/login/check")
 async def api_qq_login_check() -> dict:
     return await runtime.qq_login_check()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  微信官方 iLink 通道
+#
+#  消息由后端长轮询拉取（见 runtime._start_ilink_poller），
+#  这里只负责登录与登录态查询。
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/ilink/status")
+async def api_ilink_status() -> dict:
+    """官方 iLink 通道是否已有可用凭证（前端用它显示"已登录"徽标）。"""
+    return runtime.ilink_status()
+
+
+@app.post("/api/login/qrcode")
+async def api_login_qrcode() -> dict:
+    return await runtime.login_qrcode()
+
+
+@app.get("/api/login/check")
+async def api_login_check(captcha: str = "") -> dict:
+    return await runtime.login_check(captcha)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -310,12 +337,12 @@ async def api_memory_clear(scope: str = "", owner_id: str = "") -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Docker 环境与网关容器（GeWe 恒定走本地 Docker）
+#  Docker 环境（QQ 网关一键部署要用）
 # ═══════════════════════════════════════════════════════════════════
 
 @app.get("/api/docker/status")
 async def api_docker_status() -> dict:
-    """Docker 与网关的完整状态，前端轮询它来展示进度。"""
+    """Docker 环境状态，前端轮询它来展示安装进度。"""
     return runtime.docker_status()
 
 
@@ -323,126 +350,6 @@ async def api_docker_status() -> dict:
 async def api_docker_prepare() -> dict:
     """一键准备 Docker：未装则下载安装包，装了没启动则启动。"""
     return await runtime.docker_prepare()
-
-
-@app.post("/api/docker/start")
-async def api_docker_start() -> dict:
-    return await runtime.docker_start()
-
-
-@app.post("/api/gateway/setup")
-async def api_gateway_setup() -> dict:
-    """拉取并启动网关容器，成功后自动回填网关地址。"""
-    r = await runtime.gateway_setup()
-    # 容器起来后立刻把地址写进配置，用户不用手填
-    asyncio.create_task(_apply_url_when_ready())
-    return r
-
-
-async def _apply_url_when_ready() -> None:
-    """等网关端口就绪后回填地址（最多等 3 分钟）。"""
-    for _ in range(90):
-        await asyncio.sleep(2)
-        from .core.docker import port_open
-        if port_open(2531):
-            runtime.apply_gateway_url()
-            return
-
-
-@app.post("/api/gateway/stop")
-async def api_gateway_stop() -> dict:
-    return await runtime.gateway_stop()
-
-
-@app.get("/api/gateway/logs")
-async def api_gateway_logs(lines: int = 100) -> dict:
-    return await runtime.gateway_logs(lines)
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  网关连接（自动探测 + 连通性测试）
-# ═══════════════════════════════════════════════════════════════════
-
-@app.post("/api/gateway/token")
-async def api_gateway_token(request: Request) -> dict:
-    """向本地网关自动换取 GeWe Token，省去用户去控制台复制。
-
-    ⚠️ 部分网关版本未开放该接口（上游仓库已声明停止提供镜像），
-    失败时会返回可操作的提示，前端要照实展示、不能承诺"一定拿得到"。
-    """
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-    return await runtime.fetch_gewe_token(base_url=body.get("base_url", ""))
-
-
-@app.post("/api/gateway/detect")
-async def api_gateway_detect() -> dict:
-    """自动探测常见的网关地址，省去用户自己猜地址。"""
-    return await runtime.detect_gateway()
-
-
-@app.post("/api/gateway/test")
-async def api_gateway_test(request: Request) -> dict:
-    """测试网关连通性与 Token 有效性，失败时给出可操作的提示。"""
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-    return await runtime.test_gateway(
-        base_url=body.get("base_url", ""),
-        token=body.get("token", ""),
-        app_id=body.get("app_id", ""),
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  扫码登录
-# ═══════════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════
-#  WeChatPadPro 微信协议端（群聊通道，接替已停服的 GeWe）
-# ═══════════════════════════════════════════════════════════════════
-
-@app.get("/api/wpp/status")
-async def api_wpp_status() -> dict:
-    """协议端状态：可执行文件、可达性、授权码、登录态。"""
-    return await runtime.wpp_status()
-
-
-@app.post("/api/wpp/authkey")
-async def api_wpp_authkey() -> dict:
-    """用管理员密钥生成授权码（调用业务接口的前置步骤）。"""
-    return await runtime.wpp_generate_auth_key()
-
-
-@app.post("/api/wpp/login/qrcode")
-async def api_wpp_login_qrcode() -> dict:
-    return await runtime.wpp_login_qrcode()
-
-
-@app.get("/api/wpp/login/check")
-async def api_wpp_login_check() -> dict:
-    return await runtime.wpp_login_check()
-
-
-@app.get("/api/ilink/status")
-async def api_ilink_status() -> dict:
-    """官方 iLink 通道是否已有可用凭证（前端用它显示"已登录"徽标）。"""
-    return runtime.ilink_status()
-
-
-@app.post("/api/login/qrcode")
-async def api_login_qrcode() -> dict:
-    return await runtime.login_qrcode()
-
-
-@app.get("/api/login/check")
-async def api_login_check(captcha: str = "") -> dict:
-    return await runtime.login_check(captcha)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -476,75 +383,14 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     def keep_masked(new_val: str, old_val: str) -> str:
         return old_val if (not new_val or "•" in new_val) else new_val
 
-    cfg.llm.primary_key = keep_masked(incoming.get("llm", {}).get("primary_key", ""), old.llm.primary_key)
-    cfg.llm.fallback_key = keep_masked(incoming.get("llm", {}).get("fallback_key", ""), old.llm.fallback_key)
-    cfg.llm.judge_key = keep_masked(incoming.get("llm", {}).get("judge_key", ""), old.llm.judge_key)
-    cfg.adapter.gewe_token = keep_masked(
-        incoming.get("adapter", {}).get("gewe_token", ""), old.adapter.gewe_token
-    )
-    cfg.adapter.onebot_token = keep_masked(
-        incoming.get("adapter", {}).get("onebot_token", ""), old.adapter.onebot_token
-    )
-    cfg.adapter.napcat_webui_token = keep_masked(
-        incoming.get("adapter", {}).get("napcat_webui_token", ""),
-        old.adapter.napcat_webui_token,
-    )
-    for f in ("wpp_admin_key", "wpp_auth_key"):
-        setattr(cfg.adapter, f, keep_masked(
-            incoming.get("adapter", {}).get(f, ""), getattr(old.adapter, f, "")))
-    # 群配置：合并而非覆盖，避免前端未提交的群被删掉
-    for cid, item in old.groups.items():
-        cfg.groups.setdefault(cid, item)
+    inc_llm = incoming.get("llm") or {}
+    inc_ad = incoming.get("adapter") or {}
+    for f in ("primary_key", "fallback_key", "judge_key"):
+        setattr(cfg.llm, f, keep_masked(inc_llm.get(f, ""), getattr(old.llm, f, "")))
+    for f in ("onebot_token", "napcat_webui_token"):
+        setattr(cfg.adapter, f,
+                keep_masked(inc_ad.get(f, ""), getattr(old.adapter, f, "")))
     return cfg
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  群管理
-# ═══════════════════════════════════════════════════════════════════
-
-@app.get("/api/groups")
-async def api_groups() -> dict:
-    cfg = config_store.load()
-    # 从消息日志里发现"实际见过"的群，方便用户直接开启
-    seen: dict[str, str] = {}
-    for e in runtime.log.query(limit=2000, chat_type="group"):
-        seen.setdefault(e["chat_id"], e.get("chat_name") or "")
-    groups = []
-    for cid, name in seen.items():
-        item = cfg.groups.get(cid)
-        groups.append({
-            "chat_id": cid,
-            "name": name or (item.name if item else "") or cid,
-            "configured": item is not None,
-            "enabled": item.enabled if item else False,
-            "mode": item.mode if item else "smart",
-            "wake_words": item.wake_words if item else ["小助手"],
-            "cooldown_sec": item.cooldown_sec if item else 60,
-            "hourly_limit": item.hourly_limit if item else 8,
-            "reply_prob": item.reply_prob if item else 0.7,
-            "persona": item.persona if item else "",
-        })
-    # 已配置但还没收到消息的群也列出来
-    for cid, item in cfg.groups.items():
-        if cid not in seen:
-            groups.append({
-                "chat_id": cid, "name": item.name or cid, "configured": True,
-                "enabled": item.enabled, "mode": item.mode,
-                "wake_words": item.wake_words, "cooldown_sec": item.cooldown_sec,
-                "hourly_limit": item.hourly_limit, "reply_prob": item.reply_prob,
-                "persona": item.persona,
-            })
-    return {"groups": groups}
-
-
-@app.put("/api/groups/{chat_id}")
-async def api_put_group(chat_id: str, request: Request) -> dict:
-    return runtime.upsert_group(chat_id, await request.json())
-
-
-@app.delete("/api/groups/{chat_id}")
-async def api_delete_group(chat_id: str) -> dict:
-    return runtime.remove_group(chat_id)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -561,34 +407,6 @@ async def api_messages(limit: int = 100, chat_id: str = "",
 async def api_clear_messages() -> dict:
     runtime.log.clear()
     return {"ok": True}
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  协议网关回调
-# ═══════════════════════════════════════════════════════════════════
-
-@app.post("/webhook")
-async def webhook(request: Request) -> Response:
-    """接收 GeWe 网关推送的消息。
-
-    必须快速返回 —— 网关有重试机制，慢响应会触发重复推送。
-    """
-    if not runtime.wechat_adapter:
-        return JSONResponse({"ret": 200, "msg": "bot not running"})
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ret": 200, "msg": "bad payload"})
-
-    handler = getattr(runtime.wechat_adapter, "handle_webhook", None)
-    if handler is None:
-        return JSONResponse({"ret": 200, "msg": "adapter has no webhook"})
-    try:
-        result = await handler(payload)
-        return JSONResponse(result or {"ret": 200})
-    except Exception:
-        log.exception("webhook 处理异常")
-        return JSONResponse({"ret": 200, "msg": "error logged"})
 
 
 @app.get("/healthz")

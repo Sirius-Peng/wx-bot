@@ -1,34 +1,19 @@
 # ═══════════════════════════════════════════════════════════════
-#  微信 AI 助手 · Docker 一键部署
+#  微信 AI 助手 · Docker 部署（仅主程序）
 #
 #  用法：
 #      docker compose up -d
 #      然后打开 http://127.0.0.1:8000
 #
 #  说明：
-#      本应用自身零外部依赖（配置存 JSON、消息存本地文件），
-#      无需数据库，因此只需要「协议网关 + 主程序」两个容器。
+#      主程序自身零外部依赖（配置存 JSON、消息存本地文件），无需数据库。
+#      微信走腾讯官方 iLink，扫码即用，**不需要任何网关容器**。
+#      QQ 通道的 NapCat 网关由程序在界面上「一键部署」，
+#      因此只有用 QQ 时才需要挂载 Docker socket（见下方注释）。
 # ═══════════════════════════════════════════════════════════════
 
 services:
 
-  # ── 微信协议网关（iPad 协议，支持私聊 + 群聊）────────────────
-  # 如果你使用 GeWe 云端 SaaS，可以删掉这个容器，
-  # 并在管理界面把「网关地址」改成 https://api.geweapi.com/gewe
-  gateway:
-    image: registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest
-    container_name: wxbot-gateway
-    privileged: true
-    ports:
-      - "2531:2531"
-      - "2532:2532"
-    volumes:
-      - ./data/gateway:/root/temp
-    environment:
-      - TZ=Asia/Shanghai
-    restart: unless-stopped
-
-  # ── 主程序（管理界面 + 机器人引擎）──────────────────────────
   app:
     build:
       context: .
@@ -42,10 +27,11 @@ services:
       - WXBOT_PORT=8000
       - WXBOT_DATA_DIR=/app/data
       - WXBOT_NO_BROWSER=1
-      # 让容器内的「网关地址」默认指向 gateway 服务
-      - WXBOT_DEFAULT_GATEWAY=http://gateway:2531
     volumes:
-      - ./data/app:/app/data
-    depends_on:
-      - gateway
+      - ./data:/app/data
+      # ── 要用「一键部署 QQ 网关」时再打开下面这行 ──────────────
+      # 程序需要调用宿主机的 Docker 来启动 NapCat 容器。
+      # 挂载 Docker socket 等同于把宿主机 root 权限交给该容器，
+      # 请自行评估；不想挂就用桌面版或命令行方式运行。
+      # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

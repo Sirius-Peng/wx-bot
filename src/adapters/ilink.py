@@ -10,7 +10,8 @@
    capabilities.chatTypes = ["direct"]   ← 只支持一对一私聊
    inbound.ts 硬编码 ChatType = "direct"
    CHANGELOG 全量 26 个版本从未提及群聊
-   → 群聊不受支持。若需群聊，必须使用 iPad 协议适配器（gewechat.py）。
+   → 官方协议不支持群聊。本项目的微信通道因此只有私聊；
+     QQ 群聊走 OneBot 适配器。
 
 协议特征：
    · HTTP/JSON，无 SDK 依赖，可直接 fetch
@@ -71,8 +72,6 @@ class ILinkAdapter(BaseAdapter):
     """腾讯官方 iLink Bot API 适配器。"""
 
     platform = "ilink"
-    supports_private = True
-    supports_group = False        # ← 官方协议当前不支持群聊
 
     def __init__(self, state_dir: str = "./data/ilink", bot_agent: str = "OpenClaw",
                  base_url: str = DEFAULT_BASE_URL):
@@ -87,6 +86,8 @@ class ILinkAdapter(BaseAdapter):
         self.typing_ticket: Optional[str] = None
 
         self._get_updates_buf: str = ""
+        # 每个会话最近一条入站消息的 context_token —— 回复时必须原样带回
+        self._ctx_tokens: dict[str, str] = {}
         # 官方域名是公网地址，走系统代理没问题；make_client 会自动判断
         self._client = make_client(self.base_url, timeout=40.0)
         self._handler: Optional[MessageHandler] = None
@@ -206,10 +207,19 @@ class ILinkAdapter(BaseAdapter):
                 self._get_updates_buf = resp["get_updates_buf"]
                 self._save_cursor()
 
-            for raw in resp.get("msgs") or []:
+            msgs = resp.get("msgs") or []
+            if not msgs and not resp.get("get_updates_buf"):
+                # 服务端没有 hold 住连接（异常网关/限流时会立刻返回空），
+                # 必须自己退避，否则会把接口刷成 429
+                await asyncio.sleep(1.0)
+
+            for raw in msgs:
                 msg = self._normalize(raw)
                 if msg is None:
                     continue
+                # ★ 必须在下发之前记住 context_token：
+                #   官方协议回复时要求原样带回，否则 sendmessage 关联不到会话
+                self.remember_context(msg)
                 if self._handler:
                     # 单条消息处理异常不能拖垮整个轮询循环
                     try:
@@ -260,7 +270,6 @@ class ILinkAdapter(BaseAdapter):
                 content=text.strip(),
                 raw_content=text,
                 msg_type=msg_type,  # type: ignore[arg-type]
-                mentions=[],
                 timestamp=int(raw.get("create_time_ms") or 0),
                 is_at_me=False,     # 私聊无需 @
                 context_token=raw.get("context_token"),
@@ -322,9 +331,6 @@ class ILinkAdapter(BaseAdapter):
         此处仅留接口，实现见 cdn/ 目录设计。
         """
         raise NotImplementedError("图片上传需实现 CDN AES-128-ECB 加密链路")
-
-    async def get_group_member(self, chat_id: str, user_id: str) -> dict:
-        raise NotImplementedError("官方协议不支持群聊，无群成员接口")
 
     # ── 内部：HTTP 与凭证 ─────────────────────────────────────
 
@@ -413,8 +419,6 @@ class ILinkAdapter(BaseAdapter):
         )
 
     # ── context_token 缓存（发送时必填）───────────────────────
-
-    _ctx_tokens: dict[str, str] = {}
 
     def remember_context(self, msg: WxMessage) -> None:
         """记录每个会话最近的 context_token，供回复时使用。"""

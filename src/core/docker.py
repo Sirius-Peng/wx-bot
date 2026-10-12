@@ -1,4 +1,4 @@
-"""Docker 环境管理 —— 检测、安装引导、启动守护进程、拉起网关容器。
+"""Docker 环境管理 —— 检测、安装引导、启动守护进程、部署 QQ 网关容器。
 
 ═══════════════════════════════════════════════════════════════════
 设计前提：**尽可能自动，但不假装能全自动。**
@@ -9,7 +9,6 @@
   · 打开安装程序（macOS 挂载 DMG 并打开窗口 / Windows 启动 exe）
   · 启动 Docker Desktop 并轮询等待就绪
   · 拉取镜像、启动容器、等待端口可用
-  · 回填网关地址
 
 无法自动完成（系统级限制，必须用户操作）：
   · 输入管理员密码
@@ -36,12 +35,6 @@ from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger(__name__)
-
-# GeWe 网关容器
-GATEWAY_IMAGE = "registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest"
-GATEWAY_CONTAINER = "gewe"
-GATEWAY_PORTS = (2531, 2532)
-GATEWAY_URL = "http://127.0.0.1:2531"
 
 # NapCat（QQ / OneBot 11）容器
 NAPCAT_IMAGE = "mlikiowa/napcat-docker:latest"
@@ -166,34 +159,10 @@ class DockerManager:
                 st.error = err[:200]
 
         # 兜底：端口能通也算在跑（有些环境 CLI 权限不足）
-        if not st.running and port_open(GATEWAY_PORTS[0]):
+        if not st.running and port_open(NAPCAT_WEBUI_PORT):
             st.running = True
 
         return st
-
-    def gateway_status(self) -> dict:
-        """网关容器状态。"""
-        if port_open(GATEWAY_PORTS[0]):
-            return {"running": True, "url": GATEWAY_URL, "container": GATEWAY_CONTAINER,
-                    "message": "网关正在运行"}
-
-        st = self.detect()
-        if not st.running:
-            return {"running": False, "url": GATEWAY_URL, "container": GATEWAY_CONTAINER,
-                    "message": "Docker 未运行"}
-
-        code, out, _ = _run([st.cli_path, "ps", "-a",
-                             "--filter", f"name=^{GATEWAY_CONTAINER}$",
-                             "--format", "{{.State}}"], timeout=15)
-        if code == 0 and out:
-            state = out.strip()
-            msg = {"exited": "容器已停止", "created": "容器已创建但未启动",
-                   "running": "容器运行中（端口未就绪）"}.get(state, f"容器状态：{state}")
-            return {"running": False, "exists": True, "state": state,
-                    "url": GATEWAY_URL, "container": GATEWAY_CONTAINER, "message": msg}
-
-        return {"running": False, "exists": False, "url": GATEWAY_URL,
-                "container": GATEWAY_CONTAINER, "message": "尚未创建网关容器"}
 
     # ══ 安装方案 ══════════════════════════════════════════════
 
@@ -225,7 +194,7 @@ class DockerManager:
                         {"text": "自动打开终端并执行安装命令", "auto": True},
                         {"text": "在弹出的终端里输入你的开机密码", "auto": False},
                         {"text": "安装完成后，首次打开 Docker 需手动同意许可协议", "auto": False},
-                        {"text": "完成后回到本页面，应用会自动启动服务并配置网关", "auto": True},
+                        {"text": "完成后回到本页面，应用会自动部署 QQ 网关", "auto": True},
                     ],
                     "note": "不想用 Docker Desktop？也可以在终端执行 "
                             "brew install colima && colima start，无需同意许可协议。",
@@ -240,7 +209,7 @@ class DockerManager:
                     {"text": "自动挂载安装包并打开窗口", "auto": True},
                     {"text": "把 Docker 图标拖进「应用程序」文件夹", "auto": False},
                     {"text": "首次打开 Docker 需输入密码并同意许可协议", "auto": False},
-                    {"text": "完成后回到本页面，应用会自动启动服务并配置网关", "auto": True},
+                    {"text": "完成后回到本页面，应用会自动部署 QQ 网关", "auto": True},
                 ],
                 "url": self._docker_download_url(),
             }
@@ -256,7 +225,7 @@ class DockerManager:
                     {"text": "自动启动安装程序", "auto": True},
                     {"text": "按提示完成安装（需管理员权限，保持「使用 WSL2」默认勾选）", "auto": False},
                     {"text": "安装完成后可能需要重启电脑", "auto": False},
-                    {"text": "完成后回到本页面，应用会自动启动服务并配置网关", "auto": True},
+                    {"text": "完成后回到本页面，应用会自动部署 QQ 网关", "auto": True},
                 ],
                 "url": "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
             }
@@ -271,7 +240,7 @@ class DockerManager:
                 {"text": "CentOS/RHEL：sudo yum install docker", "auto": False},
                 {"text": "启动服务：sudo systemctl enable --now docker", "auto": False},
                 {"text": "加入 docker 组：sudo usermod -aG docker $USER（需重新登录生效）", "auto": False},
-                {"text": "完成后回到本页面，应用会自动启动网关并完成配置", "auto": True},
+                {"text": "完成后回到本页面，应用会自动部署 QQ 网关", "auto": True},
             ],
         }
 
@@ -479,108 +448,9 @@ class DockerManager:
             self._set_task(running=False, stage="error", error=str(e),
                            message=f"启动失败：{e}")
 
-    # ══ 网关容器 ══════════════════════════════════════════════
-
-    async def ensure_gateway(self) -> dict:
-        """确保网关容器在运行。"""
-        if self.task.get("running"):
-            return {"ok": False, "message": "已有任务在执行中"}
-        asyncio.create_task(self._ensure_gateway_impl())
-        return {"ok": True, "message": "正在启动网关…"}
-
-    async def _ensure_gateway_impl(self) -> None:
-        self._set_task(running=True, stage="gateway", progress=5,
-                       message="正在检查网关状态…", error="", needsUser=False)
-        try:
-            if port_open(GATEWAY_PORTS[0]):
-                self._set_task(running=False, stage="ready", progress=100,
-                               message="网关已在运行")
-                return
-
-            st = self.detect()
-            if not st.installed:
-                self._set_task(running=False, stage="need_docker", needsUser=True,
-                               message="需要先安装 Docker")
-                return
-            if not st.running:
-                self._set_task(running=False, stage="need_daemon", needsUser=True,
-                               message="需要先启动 Docker 服务")
-                return
-
-            cli = st.cli_path
-
-            # 已有同名容器 → 启动它；否则创建
-            code, out, _ = _run([cli, "ps", "-a", "--filter",
-                                 f"name=^{GATEWAY_CONTAINER}$", "--format", "{{.Names}}"],
-                                timeout=20)
-            if code == 0 and out.strip() == GATEWAY_CONTAINER:
-                self._set_task(progress=40, message="正在启动已有网关容器…")
-                await asyncio.to_thread(_run, [cli, "start", GATEWAY_CONTAINER], 120)
-            else:
-                self._set_task(progress=20, message="正在拉取网关镜像（首次约 300MB）…")
-                code, _, err = await asyncio.to_thread(
-                    _run, [cli, "pull", GATEWAY_IMAGE], 1800)
-                if code != 0:
-                    self._set_task(running=False, stage="error",
-                                   error=err[:300],
-                                   message=f"拉取镜像失败：{err[:200]}")
-                    return
-
-                self._set_task(progress=70, message="正在创建网关容器…")
-                code, _, err = await asyncio.to_thread(_run, [
-                    cli, "run", "-d",
-                    "-p", f"{GATEWAY_PORTS[0]}:{GATEWAY_PORTS[0]}",
-                    "-p", f"{GATEWAY_PORTS[1]}:{GATEWAY_PORTS[1]}",
-                    "--privileged=true",
-                    "--name", GATEWAY_CONTAINER,
-                    "--restart", "unless-stopped",
-                    GATEWAY_IMAGE,
-                ], 180)
-                if code != 0:
-                    self._set_task(running=False, stage="error",
-                                   error=err[:300],
-                                   message=f"创建容器失败：{err[:200]}")
-                    return
-
-            # 等待端口就绪
-            self._set_task(progress=85, message="正在等待网关就绪…")
-            for i in range(60):
-                await asyncio.sleep(2)
-                if port_open(GATEWAY_PORTS[0]):
-                    self._set_task(running=False, stage="ready", progress=100,
-                                   message="网关已就绪")
-                    return
-                self._set_task(progress=min(85 + i // 2, 97),
-                               message=f"正在等待网关就绪…（已等待 {(i + 1) * 2} 秒）")
-
-            self._set_task(running=False, stage="timeout", progress=100,
-                           message="网关启动超时。可执行 docker logs gewe 查看日志")
-        except Exception as e:
-            log.exception("启动网关失败")
-            self._set_task(running=False, stage="error", error=str(e),
-                           message=f"启动网关失败：{e}")
-
-    async def stop_gateway(self) -> dict:
-        st = self.detect()
-        if not st.installed:
-            return {"ok": False, "message": "Docker 未安装"}
-        code, _, err = await asyncio.to_thread(
-            _run, [st.cli_path, "stop", GATEWAY_CONTAINER], 60)
-        if code == 0:
-            return {"ok": True, "message": "网关已停止"}
-        return {"ok": False, "message": f"停止失败：{err[:200]}"}
-
-    async def gateway_logs(self, lines: int = 100) -> dict:
-        st = self.detect()
-        if not st.installed:
-            return {"ok": False, "log": "Docker 未安装"}
-        code, out, err = await asyncio.to_thread(
-            _run, [st.cli_path, "logs", "--tail", str(lines), GATEWAY_CONTAINER], 30)
-        return {"ok": code == 0, "log": out or err or "(无日志)"}
-
     # ══ NapCat（QQ / OneBot 11）═════════════════════════════════
     #
-    # 与 GeWe 的关键差别：NapCat 的 entrypoint **只在配置文件不存在时**
+    # 关键点：NapCat 的 entrypoint **只在配置文件不存在时**
     # 才按环境变量生成 webui.json / onebot11.json，
     # 而 OneBot 配置的写入接口又有 "Not Login" 前置检查。
     # 所以必须在容器**启动前**把配置灌进卷里 —— 见 `seed_napcat_config()`。

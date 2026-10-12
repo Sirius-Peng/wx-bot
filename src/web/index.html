@@ -34,11 +34,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v6"/><rect x="4" y="8" width="16" height="13" rx="3"/><circle cx="12" cy="15" r="2"/></svg>
         <span>接入设置</span>
       </button>
-      <button class="nav-item" data-page="groups">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M15 20a5 5 0 0 1 6.5-4.8"/></svg>
-        <span>群聊管理</span>
-        <em class="nav-badge" id="nav-group-count" hidden>0</em>
-      </button>
       <button class="nav-item" data-page="memory">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4Z"/><path d="M12 3v18"/></svg>
         <span>人格知识库</span>
@@ -93,7 +88,7 @@
           </div>
           <div class="hero-meta">
             <div><span>接入通道</span><strong id="hero-platform">—</strong></div>
-            <div><span>群聊能力</span><strong id="hero-groupcap">—</strong></div>
+            <div><span>会话能力</span><strong id="hero-groupcap">—</strong></div>
             <div><span>运行时长</span><strong id="hero-uptime">—</strong></div>
           </div>
         </div>
@@ -110,9 +105,9 @@
             <span class="stat-foot" id="st-out-foot">回复率 0%</span>
           </div>
           <div class="stat-card">
-            <span class="stat-label">主动沉默</span>
+            <span class="stat-label">未回复</span>
             <strong class="stat-value" id="st-silent">0</strong>
-            <span class="stat-foot">被触发漏斗拦下</span>
+            <span class="stat-foot">无需回复的消息</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">活跃会话</span>
@@ -154,50 +149,17 @@
                   <span class="pcard-main">
                     <span class="pcard-title">
                       微信
-                      <span class="tag on">私聊 + 群聊</span>
+                      <span class="tag on">私聊</span>
                     </span>
                     <span class="pcard-desc">
-                      可选 <b>GeWe 协议</b>（能力完整，网关自动安装）或
-                      <b>官方 iLink</b>（零封号，仅私聊）。
+                      走腾讯 <b>官方 iLink</b> 接口：手机微信扫码即用，
+                      <b>合规、零封号</b>，不需要装任何网关。
                     </span>
                   </span>
                   <span class="pcard-check" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg>
                   </span>
                 </label>
-
-                <!-- 微信子选项（仅勾选微信时可用） -->
-                <div class="pcard-body" id="wechat-sub">
-                  <div class="seg" role="radiogroup" aria-label="微信接入方式">
-                    <label class="seg-item" data-value="wechatpadpro">
-                      <input type="radio" name="wechat_type" value="wechatpadpro" checked>
-                      <span class="seg-title">协议端 · 推荐</span>
-                      <span class="seg-desc">私聊 + 群聊，功能完整</span>
-                    </label>
-                    <label class="seg-item" data-value="ilink">
-                      <input type="radio" name="wechat_type" value="ilink">
-                      <span class="seg-title">官方 iLink</span>
-                      <span class="seg-desc">零封号，仅私聊</span>
-                    </label>
-                    <label class="seg-item seg-item-off" data-value="gewechat">
-                      <input type="radio" name="wechat_type" value="gewechat">
-                      <span class="seg-title">GeWe（已停服）</span>
-                      <span class="seg-desc">仅旧配置兼容，请勿新用</span>
-                    </label>
-                  </div>
-                  <p class="seg-warn" id="gewe-deprecated" hidden>
-                    GeWe / Gewechat 上游已宣布停止维护：运行服务、Docker 镜像与技术支持
-                    均不再提供。请改用「协议端」或「官方 iLink」。
-                  </p>
-
-                  <label class="switch-row pcard-sub">
-                    <span>
-                      <strong>混合模式</strong>
-                      <em>私聊走官方 iLink、群聊走 GeWe，把合规风险压到最小</em>
-                    </span>
-                    <input type="checkbox" id="hybrid-enabled">
-                  </label>
-                </div>
               </div>
 
               <!-- QQ 通道 -->
@@ -223,218 +185,6 @@
                 </label>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- 步骤 2：配置网关（自动完成）-->
-        <div class="card wizard-step" id="step-2">
-          <div class="wz-head">
-            <span class="wz-num">2</span>
-            <div class="wz-title">
-              <h3 id="step2-title">配置网关</h3>
-              <p id="step2-sub">点一下按钮，剩下的交给程序</p>
-            </div>
-            <span class="wz-status" id="gw-badge">检测中…</span>
-          </div>
-          <div class="wz-body">
-
-            <!-- 协议端（WeChatPadPro）专用面板 -->
-            <div id="wpp-panel" hidden>
-              <div class="checklist" id="wpp-checklist">
-                <div class="check-item" data-key="wpp-proc">
-                  <span class="check-icon">○</span>
-                  <div class="check-main">
-                    <div class="check-title">协议端进程</div>
-                    <div class="check-desc" id="wchk-proc">正在检测…</div>
-                  </div>
-                </div>
-                <div class="check-item" data-key="wpp-auth">
-                  <span class="check-icon">○</span>
-                  <div class="check-main">
-                    <div class="check-title">授权码</div>
-                    <div class="check-desc" id="wchk-auth">等待中</div>
-                  </div>
-                  <button class="btn btn-ghost btn-sm" id="btn-wpp-auth">获取授权码</button>
-                </div>
-                <div class="check-item" data-key="wpp-login">
-                  <span class="check-icon">○</span>
-                  <div class="check-main">
-                    <div class="check-title">微信登录</div>
-                    <div class="check-desc" id="wchk-login">未登录</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="field-grid" style="margin-top:12px;">
-                <label class="field field-full">
-                  <span>协议端地址</span>
-                  <input type="text" id="wpp-base" placeholder="http://127.0.0.1:1238">
-                  <em>本机运行保持默认即可</em>
-                </label>
-                <label class="field field-full">
-                  <span>管理员密钥（ADMIN_KEY）</span>
-                  <input type="password" id="wpp-admin" placeholder="协议端 .env 里的 ADMIN_KEY">
-                  <em>用来生成授权码；默认 99999</em>
-                </label>
-                <label class="field field-full">
-                  <span>授权码</span>
-                  <input type="password" id="wpp-authkey" placeholder="点右侧「获取授权码」自动生成">
-                  <em>业务接口靠它鉴权，生成后自动保存</em>
-                </label>
-              </div>
-
-              <!-- 扫码区 -->
-              <div class="qr-wrap" id="wpp-qr-wrap" hidden>
-                <div class="qr-box" id="wpp-qr-box">
-                  <div class="qr-empty">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v3M17 20h3"/></svg>
-                    <span>点右侧按钮获取二维码</span>
-                  </div>
-                </div>
-                <div class="qr-info">
-                  <p id="wpp-qr-status">尚未登录</p>
-                  <button class="btn btn-primary" id="btn-wpp-qr">获取登录二维码</button>
-                  <p class="hint">
-                    用手机微信扫描。<b>请用小号</b> —— 这是非官方协议通道，
-                    存在账号被风控的可能。登录状态会自动识别。
-                  </p>
-                </div>
-              </div>
-
-              <p class="help-note" style="margin-top:10px;">
-                协议端是第三方程序，本程序不分发它。把解压出来的
-                <code>wechatpadpro-*</code> 可执行文件放进程序数据目录的
-                <code>wechatpadpro/</code> 下即可被自动找到；
-                也可以在
-                <a href="#" data-goto="settings">「模型与行为」</a>
-                页手动指定路径。
-              </p>
-            </div>
-
-            <!-- GeWe 专用面板（该通道已停服）-->
-            <div id="gewe-panel">
-            <!-- 环境检查清单 -->
-            <div class="checklist" id="env-checklist">
-              <div class="check-item" data-key="docker">
-                <span class="check-icon">○</span>
-                <div class="check-main">
-                  <div class="check-title">Docker 环境</div>
-                  <div class="check-desc" id="chk-docker">正在检测…</div>
-                </div>
-                <button class="btn btn-ghost btn-sm" id="btn-install-docker" hidden>自动安装</button>
-              </div>
-              <div class="check-item" data-key="daemon">
-                <span class="check-icon">○</span>
-                <div class="check-main">
-                  <div class="check-title">Docker 服务</div>
-                  <div class="check-desc" id="chk-daemon">等待中</div>
-                </div>
-                <button class="btn btn-ghost btn-sm" id="btn-start-daemon" hidden>启动服务</button>
-              </div>
-              <div class="check-item" data-key="gateway">
-                <span class="check-icon">○</span>
-                <div class="check-main">
-                  <div class="check-title">微信网关</div>
-                  <div class="check-desc" id="chk-gateway">等待中</div>
-                </div>
-                <button class="btn btn-ghost btn-sm" id="btn-start-gateway" hidden>启动网关</button>
-              </div>
-            </div>
-
-            <!-- 主操作 -->
-            <div class="setup-action">
-              <button class="btn btn-primary btn-lg" id="btn-oneclick">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2L4.5 13H11l-1 9L19.5 11H13l0-9z"/></svg>
-                一键完成配置
-              </button>
-              <span class="setup-hint" id="setup-hint">
-                自动检测并安装 Docker、启动服务、拉起网关，全程无需你操作
-              </span>
-            </div>
-
-            <!-- 进度 -->
-            <div class="progress-box" id="progress-box" hidden>
-              <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-              <div class="progress-text" id="progress-text">准备中…</div>
-            </div>
-
-            <!-- 需要用户操作时的提示 -->
-            <div class="action-needed" id="action-needed" hidden>
-              <div class="an-head">
-                <span class="an-icon">!</span>
-                <strong>需要你操作一下</strong>
-              </div>
-              <div class="an-body" id="an-body"></div>
-              <button class="btn btn-primary btn-sm" id="btn-continue">我已完成，继续</button>
-            </div>
-
-            <!-- 需要手动安装时的步骤指引 -->
-            <details class="help-panel" id="install-steps" hidden>
-              <summary id="install-steps-title">查看安装步骤</summary>
-              <div class="help-body" id="install-steps-body"></div>
-            </details>
-
-            <!-- 网关凭证（始终可见：用户最常卡在这里）-->
-            <div class="cred-row" id="gewe-cred">
-              <div class="cred-main">
-                <span class="cred-label">网关凭证 Token</span>
-                <div class="cred-input">
-                  <input type="password" id="gewe-token" placeholder="点右侧按钮自动获取，或手动粘贴">
-                  <button class="btn btn-ghost btn-sm" id="btn-fetch-token">自动获取 Token</button>
-                </div>
-                <p class="cred-hint" id="gewe-token-hint">
-                  一键配置完成后，程序会尝试直接从本地网关取回 Token，无需你去控制台复制。
-                </p>
-              </div>
-            </div>
-
-            <!-- 手动覆盖（高级）-->
-            <details class="help-panel help-panel-sm">
-              <summary>网关已在别处运行？手动指定地址</summary>
-              <div class="help-body">
-                <p class="help-lead">
-                  如果你已经把网关部署在其他机器或端口上，在这里填地址即可跳过自动配置。
-                </p>
-                <div class="field-grid">
-                  <label class="field field-full">
-                    <span>网关地址</span>
-                    <input type="text" id="gewe-base" placeholder="http://127.0.0.1:2531">
-                  </label>
-                  <label class="field">
-                    <span>设备 ID（appId）</span>
-                    <input type="text" id="gewe-appid" placeholder="登录后自动填充">
-                  </label>
-                  <label class="field">
-                    <span>机器人微信号</span>
-                    <input type="text" id="bot-wxid" placeholder="扫码登录后自动填充">
-                  </label>
-                  <label class="field field-full">
-                    <span>机器人群昵称</span>
-                    <input type="text" id="bot-nickname" placeholder="小助手">
-                    <em>群里 @ 它时用的名字</em>
-                  </label>
-                </div>
-                <div class="test-row">
-                  <button class="btn btn-ghost" id="btn-test-gw">测试连接</button>
-                  <div class="test-status" id="test-status"></div>
-                </div>
-              </div>
-            </details>
-
-            </div><!-- /gewe-panel -->
-
-            <!-- 协议端面板的保存按钮 -->
-            <div id="wpp-foot" hidden>
-              <div class="wz-foot">
-                <button class="btn btn-primary" id="btn-save-wpp">保存并继续</button>
-              </div>
-            </div>
-
-            <div class="wz-foot" id="gewe-foot">
-              <button class="btn btn-ghost" id="btn-gw-logs">查看网关日志</button>
-              <button class="btn btn-primary" id="btn-save-connect">保存并继续</button>
-            </div>
-            <pre class="log-view" id="gw-logview" hidden></pre>
           </div>
         </div>
 
@@ -563,7 +313,7 @@
         <!-- 步骤 3：扫码登录 -->
         <div class="card wizard-step" id="step-3">
           <div class="wz-head">
-            <span class="wz-num">3</span>
+            <span class="wz-num" id="step3-num">3</span>
             <div class="wz-title">
               <h3 id="step3-title">扫码登录微信</h3>
               <p id="step3-sub">用手机微信扫描二维码完成登录</p>
@@ -588,26 +338,6 @@
           </div>
         </div>
 
-      </section>
-
-      <!-- ─────── 群聊管理 ─────── -->
-      <section class="page" id="page-groups">
-        <div class="notice notice-warn">
-          <strong>群聊如何工作</strong>
-          <p>机器人不是「有问必答」，而是通过<b>五层漏斗</b>判断该不该插话：@机器人 / 唤醒词 → 黑名单与静默时段 → 启发式打分 → 小模型判定 → 冷却与配额。
-             最终只有约 <b>1~2%</b> 的群消息会被回复，避免刷屏惹人反感。</p>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h3>群列表</h3>
-            <div class="head-actions">
-              <button class="btn btn-ghost btn-sm" id="btn-refresh-groups">刷新</button>
-              <button class="btn btn-ghost btn-sm" id="btn-add-group">手动添加群</button>
-            </div>
-          </div>
-          <div id="groups-list" class="groups"></div>
-        </div>
       </section>
 
       <!-- ─────── 人格知识库 ─────── -->
@@ -712,46 +442,46 @@
             <label class="field"><span>模型名称</span><input type="text" id="judge-model"></label>
             <label class="field field-full"><span>API Key</span><input type="password" id="judge-key"></label>
           </div>
-          <p class="hint">用于群聊「该不该插话」的快速判定。建议用 <b>GLM-4.7-Flash（免费）</b>，判定成本可降到 0。</p>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h3>群聊回复策略</h3></div>
-          <div class="segmented" id="group-mode">
-            <button data-value="mention_only" class="active">仅 @ 机器人时回复</button>
-            <button data-value="smart">智能判断（自动找时机插话）</button>
-          </div>
-          <div class="notice notice-info" id="mode-hint" style="margin:0 20px 18px">
-            <strong>仅 @ 机器人时回复</strong>
-            <p>私聊<b>一律回复</b>；群聊<b>只有 @ 了机器人才回复</b>，其余消息一概不回。<br>
-               最省心、最不容易打扰群友，推荐绝大多数场景使用。</p>
-          </div>
+          <p class="hint">用于<b>人格知识库</b>的信息抽取（从对话里挑出值得长期记住的内容）。
+            建议用 <b>GLM-4.7-Flash（免费）</b>，这部分成本可降到 0。留空则复用主模型。</p>
         </div>
 
         <div class="card">
           <div class="card-head"><h3>机器人行为</h3></div>
           <div class="field-grid">
-            <label class="field"><span>机器人名称</span><input type="text" id="bot-name"></label>
+            <label class="field">
+              <span>机器人名称</span>
+              <input type="text" id="bot-name" placeholder="小助手">
+              <em>群里 @ 它时用的名字；也是它在对话里的自称</em>
+            </label>
             <label class="field field-full">
               <span>人设描述</span>
-              <textarea id="bot-persona" rows="3" placeholder="友好、简洁、乐于助人的群聊助手"></textarea>
-              <em>决定机器人的说话风格与边界</em>
+              <textarea id="bot-persona" rows="4" placeholder="例如：你是「小助手」，说话简洁友好，喜欢用短句。回答技术问题时先给结论再给理由，不确定的就直说不知道。"></textarea>
+              <em>决定机器人的身份、说话风格与边界，会写进每一轮对话的系统提示词</em>
             </label>
           </div>
           <label class="switch-row">
-            <div><strong>群聊回复时 @ 提问者</strong><span>让群成员知道这条回复是给谁的</span></div>
+            <div><strong>群聊回复时 @ 提问者</strong><span>让群成员知道这条回复是给谁的（仅 QQ 群聊生效）</span></div>
             <input type="checkbox" id="group-at-sender">
           </label>
-          <div class="field-grid" id="smart-only-fields" hidden>
+
+          <div class="card-head" style="border-top:1px solid var(--border)"><h3>人格知识库</h3></div>
+          <p class="hint" style="margin:-4px 20px 8px">
+            让机器人从聊天里慢慢记住用户（身份、偏好、习惯），下次回答时自动参考。
+          </p>
+          <label class="switch-row">
+            <div><strong>随对话自动积累记忆</strong><span>关闭后只使用「人格知识库」页里手动添加的内容</span></div>
+            <input type="checkbox" id="memory-enabled">
+          </label>
+          <label class="switch-row">
+            <div><strong>回答时参考已记住的内容</strong><span>关闭则只记录、不使用</span></div>
+            <input type="checkbox" id="memory-inject">
+          </label>
+          <div class="field-grid">
             <label class="field">
-              <span>回复概率 <b id="reply-prob-val">70%</b></span>
-              <input type="range" id="reply-prob" min="0" max="100" step="5">
-              <em>即使判定该回复，也按此概率回复，避免「必答」的机器感</em>
-            </label>
-            <label class="field">
-              <span>静默时段</span>
-              <input type="text" id="quiet-hours" placeholder="0,1,2,3,4,5,6">
-              <em>这些小时内不主动插话（24 小时制，逗号分隔）</em>
+              <span>每几轮对话抽取一次记忆</span>
+              <input type="number" id="memory-interval" min="1" max="50" step="1" placeholder="3">
+              <em>数值越大越省 token，但记得越慢（默认 3）</em>
             </label>
           </div>
           <div class="card-foot">
@@ -790,63 +520,42 @@
   </main>
 </div>
 
-<!-- ══════════ 群配置弹窗 ══════════ -->
-<div class="modal-mask" id="group-modal" hidden>
+<!-- ══════════ 手动添加记忆 ══════════ -->
+<div class="modal-mask" id="memory-modal" hidden>
   <div class="modal">
     <div class="modal-head">
-      <h3 id="gm-title">群聊设置</h3>
-      <button class="icon-btn" id="gm-close">
+      <h3>手动添加记忆</h3>
+      <button class="icon-btn" id="mm-close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
     <div class="modal-body">
-      <label class="switch-row">
-        <div><strong>启用机器人</strong><span>关闭后该群完全不响应</span></div>
-        <input type="checkbox" id="gm-enabled">
+      <label class="field">
+        <span>要记住什么</span>
+        <textarea id="mm-content" rows="3" placeholder="例如：用户是后端工程师，主力语言是 Rust，不喜欢冗长的解释"></textarea>
+        <em>用一句陈述句写清楚，机器人回答时会参考这条内容</em>
       </label>
 
       <div class="field">
-        <span>响应模式</span>
-        <div class="segmented segmented-sm" id="gm-mode">
-          <button data-value="">跟随全局</button>
-          <button data-value="mention_only">仅 @ 时响应</button>
-          <button data-value="smart">智能判断</button>
+        <span>属于哪一类</span>
+        <div class="segmented segmented-sm" id="mm-category">
+          <button data-value="fact" class="active">事实</button>
+          <button data-value="preference">偏好</button>
+          <button data-value="relation">关系</button>
+          <button data-value="event">事件</button>
+          <button data-value="style">风格</button>
         </div>
       </div>
 
       <label class="field">
-        <span>唤醒词</span>
-        <input type="text" id="gm-wake" placeholder="小助手, bot">
-        <em>逗号分隔。仅「智能判断」模式下生效；「仅 @」模式不看唤醒词</em>
-      </label>
-
-      <div class="field-grid">
-        <label class="field">
-          <span>冷却时间（秒）</span>
-          <input type="number" id="gm-cooldown" min="0" max="600">
-          <em>两次回复的最小间隔，填 0 表示不限速</em>
-        </label>
-        <label class="field">
-          <span>每小时上限</span>
-          <input type="number" id="gm-hourly" min="1" max="200">
-          <em>防止刷屏</em>
-        </label>
-      </div>
-
-      <label class="field" id="gm-prob-field">
-        <span>回复概率 <b id="gm-prob-val">70%</b></span>
-        <input type="range" id="gm-prob" min="0" max="100" step="5">
-        <em>仅「智能判断」模式下生效</em>
-      </label>
-
-      <label class="field">
-        <span>该群专属人设（可选）</span>
-        <textarea id="gm-persona" rows="2" placeholder="留空则使用全局人设"></textarea>
+        <span>这是关于谁的</span>
+        <input type="text" id="mm-owner" placeholder="对方的 ID（QQ 号 / 微信 wxid），留空表示所有人通用">
+        <em>填写对方 ID 后，只有和这个人对话时才会用上这条记忆</em>
       </label>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" id="gm-cancel">取消</button>
-      <button class="btn btn-primary" id="gm-save">保存</button>
+      <button class="btn btn-ghost" id="mm-cancel">取消</button>
+      <button class="btn btn-primary" id="mm-save">添加</button>
     </div>
   </div>
 </div>

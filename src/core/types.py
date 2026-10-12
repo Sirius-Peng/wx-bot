@@ -1,7 +1,7 @@
 """统一消息 DTO —— 所有协议适配器归一化到此结构。
 
-这是"换协议不改业务"的关键：无论底层是 iPad 协议、PC Hook 还是企微官方回调，
-上层的触发判定 / 上下文管理 / LLM 调用都只认这个结构。
+这是"换协议不改业务"的关键：无论底层是官方 iLink 还是 OneBot，
+上层的回复判定 / 上下文管理 / LLM 调用都只认这个结构。
 """
 from __future__ import annotations
 
@@ -16,16 +16,15 @@ Direction = Literal["in", "out"]
 @dataclass
 class WxMessage:
     msg_id: str                          # 全局唯一，用于幂等去重
-    platform: str                        # gewechat | wechatpad | wcf | wecom_aibot
+    platform: str                        # ilink | onebot
     chat_type: ChatType                  # private / group
-    chat_id: str                         # 私聊=对方 wxid；群聊=roomid
-    sender_id: str                       # 发送者 wxid
+    chat_id: str                         # 私聊=对方 ID；群聊=群 ID
+    sender_id: str                       # 发送者 ID
     sender_name: str                     # 发送者昵称（群聊上下文必须）
-    bot_id: str                          # 机器人自己的 wxid，用于判断 @自己
+    bot_id: str                          # 机器人自己的 ID，用于判断 @自己、防回环
     content: str                         # 已剥离 @ 前缀的正文
     raw_content: str = ""                # 原始文本（保留 @ 信息）
     msg_type: MsgType = "text"
-    mentions: list[str] = field(default_factory=list)   # 被 @ 的 wxid 列表
     quote_msg_id: Optional[str] = None   # 引用回复的目标 msg_id
     timestamp: int = 0                   # 毫秒时间戳
     is_at_me: bool = False               # 是否 @ 了机器人
@@ -35,7 +34,7 @@ class WxMessage:
     context_token: Optional[str] = None
     seq: Optional[int] = None            # iLink 消息序号
     session_id: Optional[str] = None
-    group_id: Optional[str] = None       # 官方协议预留字段（当前插件未启用）
+    group_id: Optional[str] = None       # 群号（OneBot 归一化时填入）
 
     @property
     def is_group(self) -> bool:
