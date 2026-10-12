@@ -1,7 +1,16 @@
 # 微信 AI 助手
 
-一个接入大模型的微信对话机器人，**支持一对一私聊与群聊智能插话**。
-自带美观的 Web 管理界面，**无需懂编程，双击即可运行**。
+接入大模型的微信对话机器人，支持**一对一私聊**与**群聊 @ 回复**。
+自带 Web 管理界面与 Electron 桌面版，**双击即可运行**。
+
+---
+
+## 核心结论（先说重点）
+
+1. **个人微信私聊已有官方 API** —— 腾讯 2026-03 通过 OpenClaw 开放了 **iLink Bot API**（微信 ClawBot），合规、零封号、官方维护。
+2. **但官方 API 不支持群聊** —— 源码能力声明为 `chatTypes: ["direct"]`，已四重交叉验证（官方包、社区 fork、第三方 SDK、官方仓库 feature request 全部指向同一结论）。
+3. **推荐混合架构**：私聊走官方 iLink（合规），群聊走 iPad 协议（承担风险）。把合规风险压缩到只存在于群聊场景。
+4. 若业务可收敛到企业内部，改用**企业微信官方智能机器人**（官方支持群聊，零封号）。
 
 ---
 
@@ -9,13 +18,13 @@
 
 | 方式 | 适合谁 | 怎么开始 |
 |---|---|---|
-| **桌面应用**（推荐给非技术用户） | 不想碰命令行 | 下载安装包，双击运行 |
+| **桌面应用** | 不想碰命令行 | 下载 `.dmg` / `.exe` 安装包，双击运行 |
 | **一键脚本** | 会双击文件就行 | 双击 `start-mac.command` / `start-windows.bat` |
 | **Docker / 命令行** | 有运维经验 | `docker compose up -d` 或 `python -m src.server` |
 
 ### 桌面应用版
 
-有原生窗口、系统托盘，**关掉窗口后机器人在后台继续静默运行**，可打包成单一安装包（`.dmg` / `.exe`）。
+原生窗口 + 系统托盘，**关掉窗口后机器人在后台继续静默运行**，可打包成单一安装包。
 
 ```bash
 cd desktop
@@ -82,12 +91,11 @@ docker run -itd -p 2531:2531 -p 2532:2532 \
 复制 API Key 填进「模型与行为」页面。
 
 **③ 群聊不会刷屏**
-机器人不是「有问必答」。它用**五层漏斗**判断该不该插话，
-最终只有约 **1~2%** 的群消息会被回复 —— 这是刻意设计的，避免惹人反感。
+默认策略下，机器人在群里**只有被 @ 时才会回复**。
 
 ---
 
-## 界面预览
+## 界面
 
 | 页面 | 作用 |
 |---|---|
@@ -95,36 +103,13 @@ docker run -itd -p 2531:2531 -p 2532:2532 \
 | **接入设置** | 通道配置 + 扫码登录 |
 | **群聊管理** | 为每个群单独设置响应策略 |
 | **消息记录** | 每条消息的触发判定结果一目了然 |
-| **模型与行为** | 大模型配置 + 机器人性格 |
-
-### 概览
-
-![概览](docs/screenshots/overview.png)
-
-### 群聊管理
-
-![群聊管理](docs/screenshots/groups.png)
-
-### 消息记录
-
-每条消息都会标注**触发层级与原因**，一眼看清机器人为什么回、为什么不回：
-
-![消息记录](docs/screenshots/messages.png)
-
-### 接入设置
-
-![接入设置](docs/screenshots/connect.png)
-
-### 模型与行为（可切换群聊回复策略）
-
-![模型与行为](docs/screenshots/settings.png)
-
+| **模型与行为** | 大模型配置 + 机器人性格 + 群聊策略 |
 
 ---
 
-## 群聊是怎么工作的
+## 群聊回复策略
 
-默认策略是 **「仅 @ 机器人时回复」**：
+默认 **「仅 @ 机器人时回复」**：
 
 ```
 消息到达
@@ -136,7 +121,7 @@ docker run -itd -p 2531:2531 -p 2532:2532 \
   └─ 群聊，没 @ ───────────────────→ 不回复
 ```
 
-**在「模型与行为」页可以切换成「智能判断」模式**，让机器人主动找时机插话：
+可在「模型与行为」页切换为 **「智能判断」**，让机器人主动找时机插话：
 
 ```
 群消息 → ① @机器人 / 唤醒词 ────→ 必回
@@ -178,8 +163,6 @@ docker run -itd -p 2531:2531 -p 2532:2532 \
 | 封号风险 | 中（用专用号可控制） | **无** |
 | 部署 | 需自建网关 | 装插件即可 |
 
-> **官方 iLink Bot API 是腾讯 2026 年开放的正规接口，合规零封号，但至今不支持群聊**（源码能力声明为 `chatTypes: ["direct"]`，已三重验证）。详见 [`docs/官方iLink-Bot-API-接入说明.md`](docs/官方iLink-Bot-API-接入说明.md)。
->
 > 界面里的「**混合模式**」可以两者兼得：**私聊走官方（合规），群聊走协议（承担风险）**。
 
 ---
@@ -225,53 +208,48 @@ python -m src.server
 ## 项目结构
 
 ```
-start-windows.bat / start-mac.command / start.sh   一键启动脚本
-docker-compose.yml / Dockerfile                    容器部署
-requirements.txt                                   依赖清单
-docs/
-  微信LLM机器人技术方案.md                          完整技术方案
-  官方iLink-Bot-API-接入说明.md                     官方 API 深度解析
-src/
-  server.py            Web 服务（管理界面 + API）
-  runtime.py           机器人运行时（启停/状态/日志/扫码）
-  config_store.py      配置持久化（原子写入 + 密钥掩码）
-  web/                 管理界面（index.html / style.css / app.js）
+src/                        Python 引擎
+  server.py                 Web 服务（管理界面 + API + 消息回调）
+  runtime.py                机器人运行时（启停 / 状态 / 消息日志 / 扫码登录）
+  config_store.py           配置持久化（原子写入 + 密钥掩码）
+  orchestrator.py           编排层，串联完整链路
+  store_memory.py           会话存储
+  web/                      管理界面（零构建步骤：HTML + CSS + 原生 JS）
   core/
-    types.py           统一消息结构
-    group.py           群聊语义（@检测 / 群昵称 / 发送者解析）
-    trigger.py         五层触发漏斗
-    context.py         上下文装配与压缩
-    llm.py             大模型网关（路由/降级）
-    sender.py          拟人化发送（限流/延迟/分段）
+    types.py                统一消息结构（换协议不改业务的关键）
+    group.py                群聊语义（@检测三格式 / 群昵称 / 发送者解析）
+    trigger.py              触发策略（仅 @ / 智能漏斗）
+    context.py              上下文装配与压缩
+    llm.py                  大模型网关（路由 / 降级 / 成本统计）
+    sender.py               拟人化发送（限流 / 延迟 / 分段）
   adapters/
-    base.py            适配器契约
-    gewechat.py        GeWe 协议（私聊 + 群聊）
-    ilink.py           官方 iLink（仅私聊）
-    hybrid.py          混合路由
-  store_memory.py      会话存储
-  orchestrator.py      编排层
-  demo.py              触发判定演示
-  demo_group.py        群聊端到端演示
-  verify_ilink.py      官方 API 验证
-  verify_group.py      群聊功能验证
+    base.py                 适配器契约 + 能力声明
+    gewechat.py             GeWe 协议（私聊 + 群聊）
+    ilink.py                官方 iLink Bot API（仅私聊）
+    hybrid.py               混合路由（私聊走官方、群聊走协议）
+
+desktop/                    Electron 桌面版
+  src/main/                 主进程（窗口 / 托盘 / 后端进程 / IPC / 路径）
+  src/preload/              安全桥接
+  backend/entry.py          PyInstaller 打包入口
+  scripts/                  后端打包 + 图标生成
+  electron-builder.yml      打包配置
+
+start-mac.command           一键启动脚本
+start-windows.bat
+start.sh
+docker-compose.yml / Dockerfile
+requirements.txt
 ```
 
----
-
-## 开发者：跑测试
-
-```bash
-python -m src.demo          # 触发判定演示（无需依赖）
-python -m src.demo_group    # 群聊端到端演示
-python -m src.verify_group  # 群聊功能验证（24 项）
-python -m src.verify_ilink  # 官方 API 验证（含真实接口联调）
-```
+**架构要点**：所有协议适配器都归一化到同一个 `WxMessage` 结构，因此换协议不改业务逻辑；
+桌面版把 Python 引擎作为 sidecar 二进制，前端 UI 与浏览器版完全复用。
 
 ---
 
 ## ⚠️ 使用须知
 
 - **群聊走的是协议方案**，违反微信平台协议，存在账号被风控的可能。请务必使用**专用小号**，不要用主号。
-- 官方 iLink 通道合规、零封号，但腾讯保留随时调整或终止服务的权利（条款 7.2），建议保留降级通道。
+- 官方 iLink 通道合规、零封号，但腾讯保留随时调整或终止服务的权利，建议保留降级通道。
 - 请勿用于营销群发、骚扰等违规用途。
 - 请遵守《生成式人工智能服务管理暂行办法》，使用已备案的国内大模型服务。
