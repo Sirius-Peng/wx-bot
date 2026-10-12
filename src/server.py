@@ -403,6 +403,32 @@ async def api_gateway_test(request: Request) -> dict:
 #  扫码登录
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+#  WeChatPadPro 微信协议端（群聊通道，接替已停服的 GeWe）
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/wpp/status")
+async def api_wpp_status() -> dict:
+    """协议端状态：可执行文件、可达性、授权码、登录态。"""
+    return await runtime.wpp_status()
+
+
+@app.post("/api/wpp/authkey")
+async def api_wpp_authkey() -> dict:
+    """用管理员密钥生成授权码（调用业务接口的前置步骤）。"""
+    return await runtime.wpp_generate_auth_key()
+
+
+@app.post("/api/wpp/login/qrcode")
+async def api_wpp_login_qrcode() -> dict:
+    return await runtime.wpp_login_qrcode()
+
+
+@app.get("/api/wpp/login/check")
+async def api_wpp_login_check() -> dict:
+    return await runtime.wpp_login_check()
+
+
 @app.get("/api/ilink/status")
 async def api_ilink_status() -> dict:
     """官方 iLink 通道是否已有可用凭证（前端用它显示"已登录"徽标）。"""
@@ -463,6 +489,9 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
         incoming.get("adapter", {}).get("napcat_webui_token", ""),
         old.adapter.napcat_webui_token,
     )
+    for f in ("wpp_admin_key", "wpp_auth_key"):
+        setattr(cfg.adapter, f, keep_masked(
+            incoming.get("adapter", {}).get(f, ""), getattr(old.adapter, f, "")))
     # 群配置：合并而非覆盖，避免前端未提交的群被删掉
     for cid, item in old.groups.items():
         cfg.groups.setdefault(cid, item)

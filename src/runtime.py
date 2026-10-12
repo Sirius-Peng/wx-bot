@@ -24,6 +24,7 @@ from .adapters.gewechat import GewechatAdapter
 from .adapters.hybrid import HybridAdapterRouter
 from .adapters.ilink import ILinkAdapter
 from .adapters.onebot import OneBotAdapter
+from .adapters.wechatpadpro import WeChatPadProAdapter, WePadProError
 from .config_store import AppConfig, ConfigStore, GroupConfigItem
 from .core.context import ContextManager
 from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
@@ -40,6 +41,15 @@ from .orchestrator import Orchestrator
 from .store_memory import MemoryStore
 
 log = logging.getLogger(__name__)
+
+
+def _first_key(d: dict, *names: str) -> object:
+    """按候选键名取第一个非空值（协议端字段大小写不统一）。"""
+    for n in names:
+        if d.get(n) not in (None, ""):
+            return d[n]
+    return ""
+
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -328,9 +338,11 @@ class BotRuntime:
     def _validate(self) -> None:
         a, l = self.cfg.adapter, self.cfg.llm
         if a.wechat_enabled:
-            # 只有 GeWe 通道需要 Token；官方 iLink **完全不需要 GeWe Token**
+            # 各通道的凭据要求完全不同，别互相串
             if a.wechat_type == "gewechat" and not a.gewe_token:
-                raise ValueError("微信通道：未填写 GeWe Token")
+                raise ValueError("微信通道：未填写 GeWe Token（该通道已停服，建议改用 WeChatPadPro）")
+            if a.wechat_type == "wechatpadpro" and not a.wpp_auth_key:
+                raise ValueError("微信协议端：还没有授权码，请到「接入设置」点「获取授权码」")
             if a.wechat_type == "ilink" and not self.ilink_status().get("loggedIn"):
                 raise ValueError("官方通道还没扫码登录，请到「接入设置」点「获取登录二维码」")
         if a.qq_enabled and not a.onebot_http_url:
@@ -338,19 +350,38 @@ class BotRuntime:
         if not l.primary_key:
             raise ValueError("未填写大模型 API Key，请到「模型设置」完善")
 
-    def _build_wechat_adapter(self) -> BaseAdapter:
+    def _build_group_adapter(self) -> BaseAdapter:
+        """群聊通道。
+
+        GeWe 已停服（README 明确写「技术归档、不再提供镜像」），
+        所以协议端换成 WeChatPadPro。两者接口形状相近，
+        但**鉴权模型完全不同**：GeWe 用 `X-GEWE-TOKEN` 请求头，
+        WeChatPadPro 用 `?key=<授权码>` 查询参数。
+        """
         a = self.cfg.adapter
-        gewe = GewechatAdapter(
-            base_url=a.gewe_base_url, token=a.gewe_token, app_id=a.gewe_app_id,
+        if a.wechat_type == "gewechat":
+            # 保留兼容：老配置仍能跑（但上游已停服，界面会提示）
+            return GewechatAdapter(
+                base_url=a.gewe_base_url, token=a.gewe_token, app_id=a.gewe_app_id,
+                bot_wxid=a.bot_wxid, bot_nickname=a.bot_nickname or self.cfg.bot.name,
+            )
+        return WeChatPadProAdapter(
+            base_url=a.wpp_base_url or "http://127.0.0.1:1238",
+            auth_key=a.wpp_auth_key,
             bot_wxid=a.bot_wxid, bot_nickname=a.bot_nickname or self.cfg.bot.name,
         )
-        if a.wechat_type == "ilink" or a.hybrid_enabled:
+
+    def _build_wechat_adapter(self) -> BaseAdapter:
+        a = self.cfg.adapter
+        if a.wechat_type == "ilink":
+            return ILinkAdapter(state_dir=str(self._ilink_state_dir()),
+                                bot_agent="WxBot/1.0")
+        group = self._build_group_adapter()
+        if a.hybrid_enabled:
             official = ILinkAdapter(state_dir=str(self._ilink_state_dir()),
                                     bot_agent="WxBot/1.0")
-            if a.wechat_type == "ilink":
-                return official
-            return HybridAdapterRouter(private_adapter=official, group_adapter=gewe)
-        return gewe
+            return HybridAdapterRouter(private_adapter=official, group_adapter=group)
+        return group
 
     def _build_qq_adapter(self) -> BaseAdapter:
         a = self.cfg.adapter
@@ -971,6 +1002,227 @@ class BotRuntime:
         }
 
     # ── 扫码登录 ──────────────────────────────────────────────
+
+    # ══ WeChatPadPro 微信协议端 ═══════════════════════════════
+    #
+    # 用于微信群聊（官方 iLink 不开放群聊，这是服务端限制）。
+    # 鉴权两步走：ADMIN_KEY → /admin/GenAuthKey1 → authKey → 业务接口 ?key=
+    #
+    # 分发说明（重要）：这是第三方闭源二进制，**不在本仓库分发**。
+    # 程序按以下顺序找它：配置里的路径 → 数据目录 → 常见下载目录。
+
+    WPP_BINARY_HINTS = (
+        "wechatpadpro-macos-arm64",
+        "wechatpadpro-macos-x64",
+        "wechatpadpro-linux-amd64",
+        "wechatpadpro",
+    )
+
+    def find_wpp_binary(self) -> str:
+        """找协议端可执行文件。找不到返回空串（不是报错）。
+
+        查找顺序：
+          ① 配置里显式指定的路径
+          ② 数据目录下的 `wechatpadpro/`
+          ③ 用户「下载」/「桌面」目录里解压出来的 wechatpadpro* 文件夹
+
+        ⚠️ 这个二进制是**第三方闭源程序，不在本仓库分发**，
+        所以只能"帮用户找到他自己下载的那份"。
+        """
+        raw = (self.cfg.adapter.wpp_binary or "").strip()
+        if raw:
+            p = Path(raw).expanduser()
+            if p.is_file():
+                return str(p)
+
+        roots = [self.data_dir / "wechatpadpro",
+                 Path.home() / "Downloads",
+                 Path.home() / "Desktop"]
+        for root in roots:
+            if not root.is_dir():
+                continue
+            # 两种常见布局：
+            #   <root>/wechatpadpro-xxx/wechatpadpro-macos-arm64-xxx   （解压后一层）
+            #   <root>/<任意名>/wechatpadpro-macos-arm64-xxx
+            for hint in self.WPP_BINARY_HINTS:
+                for pat in (f"{hint}/{hint}*", f"*/{hint}*", f"{hint}*"):
+                    try:
+                        for p in sorted(root.glob(pat)):
+                            if p.is_file() and os.access(p, os.X_OK):
+                                return str(p)
+                    except OSError:
+                        continue
+        return ""
+
+    async def _wpp_admin_call(self, path: str, body: dict | None = None,
+                              timeout: float = 20.0) -> dict:
+        """用 ADMIN_KEY 调管理接口，返回解析后的 JSON（失败返回 ok=False）。"""
+        a = self.cfg.adapter
+        base = (a.wpp_base_url or "http://127.0.0.1:1238").rstrip("/")
+        admin = a.wpp_admin_key
+        if not admin:
+            return {"ok": False, "message": "请先填写协议端的管理员密钥（ADMIN_KEY）",
+                    "hint": "管理员密钥在协议端的 .env 文件里（项名 ADMIN_KEY）。"}
+        url = f"{base}{path}"
+        try:
+            async with make_client(base, timeout=timeout) as c:
+                if body is None:
+                    r = await c.get(url, params={"key": admin})
+                else:
+                    r = await c.post(url, params={"key": admin}, json=body)
+                data = r.json()
+        except Exception as e:
+            return {"ok": False, "stage": "connect",
+                    "message": "连不上微信协议端",
+                    "detail": explain_error(e, url),
+                    "hint": "请先点「启动微信协议端」。"}
+        if data.get("Code") != 200:
+            return {"ok": False, "stage": "auth",
+                    "message": data.get("Text") or "管理接口调用失败",
+                    "hint": "请确认管理员密钥与协议端 .env 里的 ADMIN_KEY 一致。"}
+        return {"ok": True, "data": data.get("Data") or {}}
+
+    async def wpp_list_devices(self) -> dict:
+        return await self._wpp_admin_call("/admin/GetAllDevices", timeout=15.0)
+
+    async def wpp_generate_auth_key(self, days: int = 365) -> dict:
+        """拿到一个可用授权码并保存。
+
+        ⚠️ 实践发现：**重复生成新授权码反而可能不可用**。
+        协议端会累积多台"设备"，而业务接口只认其中一条
+        （实测：第二次生成的 key 调业务接口返回
+         `{"Code":-2,"Text":"<key> 该链接不存在！"}`，第一条才正常）。
+
+        所以顺序是：**先复用已有的有效授权码，没有再生成**。
+        """
+        # ① 已有授权码 → 直接复用（不重复生成）
+        a = self.cfg.adapter
+        if a.wpp_auth_key:
+            return {"ok": True, "authKey": a.wpp_auth_key,
+                    "message": "已有授权码，继续使用", "reused": True}
+
+        # ② 没有 → 看协议端登记过哪些，挑一个复用
+        dev = await self.wpp_list_devices()
+        if dev.get("ok"):
+            keys = [d.get("authKey") for d in (dev["data"].get("devices") or [])
+                    if d.get("authKey")]
+            if keys:
+                cfg = self.config_store.load()
+                cfg.adapter.wpp_auth_key = keys[0]
+                cfg.adapter.wpp_base_url = (
+                    a.wpp_base_url or "http://127.0.0.1:1238").rstrip("/")
+                self.config_store.save(cfg)
+                self.cfg = cfg
+                return {"ok": True, "authKey": keys[0],
+                        "message": "已复用协议端里已有的授权码", "reused": True}
+
+        # ③ 都没有 → 新生成一个
+        gen = await self._wpp_admin_call(
+            "/admin/GenAuthKey1",
+            {"Count": 1, "Days": days, "Remark": "wxbot"}, timeout=25.0)
+        if not gen.get("ok"):
+            return gen
+        keys = (gen["data"].get("authKeys") or [])
+        if not keys:
+            return {"ok": False, "message": "协议端没有返回授权码"}
+
+        cfg = self.config_store.load()
+        cfg.adapter.wpp_auth_key = keys[0]
+        cfg.adapter.wpp_base_url = (a.wpp_base_url or "http://127.0.0.1:1238").rstrip("/")
+        self.config_store.save(cfg)
+        self.cfg = cfg
+        return {"ok": True, "authKey": keys[0],
+                "message": "授权码已生成并保存"}
+
+    def _wpp_adapter(self) -> WeChatPadProAdapter:
+        a = self.cfg.adapter
+        return WeChatPadProAdapter(
+            base_url=a.wpp_base_url or "http://127.0.0.1:1238",
+            auth_key=a.wpp_auth_key, bot_wxid=a.bot_wxid,
+            bot_nickname=a.bot_nickname or self.cfg.bot.name,
+        )
+
+    async def wpp_status(self) -> dict:
+        """协议端状态：进程是否在跑、授权码是否有效、是否已登录。"""
+        a = self.cfg.adapter
+        base = (a.wpp_base_url or "http://127.0.0.1:1238").rstrip("/")
+        binary = self.find_wpp_binary()
+        out = {
+            "baseUrl": base,
+            "binaryFound": bool(binary),
+            "binary": binary,
+            "hasAdminKey": bool(a.wpp_admin_key),
+            "hasAuthKey": bool(a.wpp_auth_key),
+            "reachable": False,
+            "authValid": False,
+            "loggedIn": False,
+            "message": "",
+        }
+        if not a.wpp_auth_key:
+            out["message"] = "还没有授权码"
+            return out
+
+        st = await self._wpp_adapter().login_status()
+        out.update({
+            "reachable": st.get("reachable", False),
+            "authValid": not st.get("authInvalid", False) and st.get("reachable", False),
+            "loggedIn": st.get("loggedIn", False),
+            "wxid": st.get("wxid", ""),
+            "nickname": st.get("nickname", ""),
+            "message": st.get("message", ""),
+            "hint": st.get("hint", ""),
+        })
+        return out
+
+    async def wpp_login_qrcode(self) -> dict:
+        """取 Pad 协议登录二维码。
+
+        协议端直接返回 `qrCodeBase64`（data URL），不需要我们自己编码。
+        """
+        a = self.cfg.adapter
+        base = (a.wpp_base_url or "http://127.0.0.1:1238").rstrip("/")
+        if not a.wpp_auth_key:
+            gen = await self.wpp_generate_auth_key()
+            if not gen.get("ok"):
+                return gen
+        adapter = self._wpp_adapter()
+        try:
+            data = await adapter._call_ok(
+                "POST", "/login/GetLoginQrCodePad",
+                {"Check": True, "Proxy": ""}, timeout=40.0)
+        except WePadProError as e:
+            return {"ok": False, "message": str(e),
+                    "hint": "请确认协议端已启动、授权码有效。"}
+        finally:
+            await adapter.stop()
+
+        img = str(_first_key(data, "qrCodeBase64", "QrCodeBase64") or "")
+        link = str(_first_key(data, "QrLink", "QrCodeUrl") or "")
+        if not img:
+            return {"ok": False, "message": "协议端没有返回二维码图片"}
+        return {
+            "ok": True, "image": img, "url": link,
+            "expiredIn": data.get("expiredTime") or 0,
+            "channel": "wechatpadpro",
+            "message": "请用微信扫码登录",
+            "hint": "这是 iPad 协议通道，可用于群聊；请用小号，注意风控。",
+        }
+
+    async def wpp_login_check(self) -> dict:
+        adapter = self._wpp_adapter()
+        try:
+            st = await adapter.login_status()
+        finally:
+            await adapter.stop()
+        if st.get("loggedIn"):
+            cfg = self.config_store.load()
+            if st.get("wxid"):
+                cfg.adapter.bot_wxid = st["wxid"]
+            if st.get("nickname"):
+                cfg.adapter.bot_nickname = cfg.adapter.bot_nickname or st["nickname"]
+            self.config_store.save(cfg)
+            self.cfg = cfg
+        return {"ok": True, **st}
 
     # ══ 官方 iLink 扫码登录（应用内完成，无需命令行）══════════
     #
