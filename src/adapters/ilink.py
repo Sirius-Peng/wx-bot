@@ -33,6 +33,7 @@ from typing import Awaitable, Callable, Optional
 
 import httpx
 
+from ..core.http import explain_error, make_client
 from ..core.types import WxMessage
 from .base import BaseAdapter, MessageHandler
 
@@ -86,7 +87,8 @@ class ILinkAdapter(BaseAdapter):
         self.typing_ticket: Optional[str] = None
 
         self._get_updates_buf: str = ""
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=10.0))
+        # 官方域名是公网地址，走系统代理没问题；make_client 会自动判断
+        self._client = make_client(self.base_url, timeout=40.0)
         self._handler: Optional[MessageHandler] = None
         self._running = False
 
