@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -17,7 +18,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -115,6 +116,147 @@ async def api_stop() -> dict:
 @app.post("/api/bot/restart")
 async def api_restart() -> dict:
     return await runtime.restart()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  QQ / OneBot 11 接入
+#
+#  两种上报方式都支持，用户按部署习惯选：
+#    · 反向 WebSocket：网关连到 ws://<本机>:<端口>/ws/onebot
+#    · HTTP POST：网关把事件 POST 到 /onebot/event
+# ═══════════════════════════════════════════════════════════════════
+
+@app.websocket("/ws/onebot")
+async def ws_onebot(websocket: WebSocket) -> None:
+    """OneBot 反向 WebSocket —— 网关主动连过来推送事件。
+
+    ⚠️ 是否接受连接看**配置**，而不是看机器人是否已启动：
+    网关通常在本程序刚起来、用户还没点「启动机器人」时就连过来了，
+    这时若拒绝连接，网关会不断重连、刷满日志。
+    """
+    await websocket.accept()
+
+    cfg = config_store.load()
+    if cfg.adapter.type != "onebot":
+        await websocket.close(code=1008, reason="当前未启用 QQ 通道")
+        return
+
+    # 校验 Access Token
+    token = cfg.adapter.onebot_token
+    if token:
+        auth = websocket.headers.get("authorization", "")
+        if auth not in (f"Bearer {token}", token):
+            await websocket.close(code=1008, reason="Access Token 不正确")
+            return
+
+    log.info("OneBot 反向 WebSocket 已连接")
+    warned = False
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            adapter = runtime.adapter
+            if adapter is None or getattr(adapter, "platform", "") != "onebot":
+                if not warned:
+                    log.warning("收到 QQ 消息，但机器人尚未启动，消息将被忽略 —— "
+                                "请在管理界面点「启动机器人」")
+                    warned = True
+                continue
+            warned = False
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            await adapter.handle_event(event)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        log.debug("OneBot WebSocket 异常", exc_info=True)
+    finally:
+        adapter = runtime.adapter
+        if adapter is not None and hasattr(adapter, "detach_ws"):
+            adapter.detach_ws(websocket)
+        log.info("OneBot 反向 WebSocket 已断开")
+
+
+@app.post("/onebot/event")
+async def onebot_event(request: Request) -> Response:
+    """OneBot HTTP POST 上报。"""
+    cfg = config_store.load()
+    if cfg.adapter.type != "onebot":
+        return JSONResponse({"status": "failed", "retcode": 100,
+                             "message": "当前未启用 QQ 通道"})
+
+    token = cfg.adapter.onebot_token
+    if token:
+        auth = request.headers.get("authorization", "")
+        if auth not in (f"Bearer {token}", token):
+            return JSONResponse({"status": "failed", "retcode": 403,
+                                 "message": "Access Token 不正确"})
+
+    try:
+        event = await request.json()
+    except Exception:
+        return JSONResponse({"status": "failed", "retcode": 100, "message": "无效的 JSON"})
+
+    adapter = runtime.adapter
+    if adapter is None or getattr(adapter, "platform", "") != "onebot":
+        # 明确告知网关（避免它以为投递成功），但不报错，网关会按自己的策略重试
+        return JSONResponse({"status": "failed", "retcode": 100,
+                             "message": "机器人尚未启动，请先在管理界面点「启动机器人」"})
+
+    await adapter.handle_event(event)
+    return JSONResponse({"status": "ok", "retcode": 0, "data": None})
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  QQ / OneBot 连接测试
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/qq/test")
+async def api_qq_test(request: Request) -> dict:
+    b = {}
+    try:
+        b = await request.json()
+    except Exception:
+        pass
+    return await runtime.test_onebot(
+        http_url=b.get("http_url", ""), token=b.get("token", ""),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  人格知识库
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/memory")
+async def api_memory_list(scope: str = "", owner_id: str = "",
+                          category: str = "", keyword: str = "") -> dict:
+    return runtime.memory_list(scope, owner_id, category, keyword)
+
+
+@app.get("/api/memory/stats")
+async def api_memory_stats() -> dict:
+    return runtime.memory_stats()
+
+
+@app.post("/api/memory")
+async def api_memory_add(request: Request) -> dict:
+    b = await request.json()
+    return runtime.memory_add(
+        scope=b.get("scope", "user"), owner_id=str(b.get("owner_id", "")),
+        category=b.get("category", "fact"), content=b.get("content", ""),
+        keywords=b.get("keywords") or [],
+    )
+
+
+@app.delete("/api/memory/{item_id}")
+async def api_memory_delete(item_id: str) -> dict:
+    return runtime.memory_delete(item_id)
+
+
+@app.delete("/api/memory")
+async def api_memory_clear(scope: str = "", owner_id: str = "") -> dict:
+    return runtime.memory_clear(scope, owner_id)
 
 
 # ═══════════════════════════════════════════════════════════════════

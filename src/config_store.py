@@ -22,15 +22,19 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 @dataclass
 class AdapterConfig:
     """接入通道配置。"""
-    type: str = "gewechat"            # gewechat（私聊+群聊） | ilink（官方，仅私聊）
-    # GeWe / Gewechat
+    type: str = "gewechat"            # gewechat（微信） | onebot（QQ） | ilink（官方，仅私聊）
+    # GeWe / Gewechat（微信）
     gewe_base_url: str = "http://127.0.0.1:2531"
     gewe_token: str = ""
     gewe_app_id: str = ""
     bot_wxid: str = ""
     bot_nickname: str = ""
-    # 官方 iLink
+    # 官方 iLink（微信私聊）
     ilink_state_dir: str = "./data/ilink"
+    # OneBot 11（QQ，兼容 NapCat / Lagrange / LLOneBot 等）
+    onebot_http_url: str = "http://127.0.0.1:3000"
+    onebot_token: str = ""
+    bot_qq: str = ""
     # 混合模式：私聊走官方、群聊走协议
     hybrid_enabled: bool = False
 
@@ -62,6 +66,11 @@ class BotConfig:
     quiet_hours: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
     global_daily_limit: int = 800
     group_reply_at_sender: bool = True  # 群聊回复时 @ 提问者
+
+    # ── 人格知识库 ────────────────────────────────────────────
+    memory_enabled: bool = True       # 是否随对话积累记忆
+    memory_inject: bool = True        # 是否把记忆注入到回答上下文
+    memory_extract_interval: int = 3  # 每多少轮对话抽取一次（省 token）
 
 
 @dataclass
@@ -174,6 +183,7 @@ class ConfigStore:
         for k in ("primary_key", "fallback_key", "judge_key"):
             d["llm"][k] = _mask(d["llm"].get(k, ""))
         d["adapter"]["gewe_token"] = _mask(d["adapter"].get("gewe_token", ""))
+        d["adapter"]["onebot_token"] = _mask(d["adapter"].get("onebot_token", ""))
         return d
 
 

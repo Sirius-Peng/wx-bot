@@ -39,6 +39,11 @@
         <span>群聊管理</span>
         <em class="nav-badge" id="nav-group-count" hidden>0</em>
       </button>
+      <button class="nav-item" data-page="memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4Z"/><path d="M12 3v18"/></svg>
+        <span>人格知识库</span>
+        <em class="nav-badge" id="nav-memory-count" hidden>0</em>
+      </button>
       <button class="nav-item" data-page="messages">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12Z"/></svg>
         <span>消息记录</span>
@@ -143,11 +148,24 @@
                 <input type="radio" name="adapter" value="gewechat" checked>
                 <div class="choice-main">
                   <div class="choice-title">
-                    GeWe 协议
+                    微信 · GeWe 协议
                     <span class="tag on">推荐</span>
                   </div>
                   <div class="choice-desc">
-                    支持<b>私聊 + 群聊</b>，能力完整。需要先准备一个网关服务（下方有指引）。
+                    支持<b>私聊 + 群聊</b>，能力完整。网关会自动帮你装好（需要 Docker）。
+                  </div>
+                </div>
+              </label>
+              <label class="choice" data-value="onebot">
+                <input type="radio" name="adapter" value="onebot">
+                <div class="choice-main">
+                  <div class="choice-title">
+                    QQ · OneBot 协议
+                    <span class="tag on">私聊 + 群聊</span>
+                  </div>
+                  <div class="choice-desc">
+                    通过标准 OneBot 11 协议接入，兼容 <b>NapCat</b>、<b>Lagrange</b> 等实现。
+                    换实现不用改配置。
                   </div>
                 </div>
               </label>
@@ -155,7 +173,7 @@
                 <input type="radio" name="adapter" value="ilink">
                 <div class="choice-main">
                   <div class="choice-title">
-                    官方 iLink
+                    微信 · 官方 iLink
                     <span class="tag info">合规</span>
                   </div>
                   <div class="choice-desc">
@@ -293,6 +311,98 @@
           </div>
         </div>
 
+        <!-- 步骤 2（QQ）：配置 OneBot 网关 -->
+        <div class="card wizard-step" id="step-2-qq" hidden>
+          <div class="wz-head">
+            <span class="wz-num">2</span>
+            <div class="wz-title">
+              <h3>连接 QQ 网关</h3>
+              <p>填写 OneBot 网关信息，然后测试连接</p>
+            </div>
+            <span class="wz-status" id="qq-badge">待配置</span>
+          </div>
+          <div class="wz-body">
+
+            <details class="help-panel" open>
+              <summary>还没装 QQ 网关？点这里看指引</summary>
+              <div class="help-body">
+                <p class="help-lead">
+                  需要一个实现了 <b>OneBot 11 协议</b>的网关程序。推荐
+                  <b>NapCat</b>（最活跃），也可用 Lagrange 等其它实现。
+                </p>
+
+                <div class="help-option">
+                  <div class="help-option-head">
+                    <strong>方式 A · NapCat（推荐）</strong>
+                    <span class="tag on">维护活跃</span>
+                  </div>
+                  <p>下载后启动，扫码登录 QQ，然后在 NapCat 的网络配置里添加一个
+                    <b>反向 WebSocket</b>，地址填下方这个：</p>
+                  <div class="code-block">
+                    <code id="qq-ws-url">ws://127.0.0.1:8000/ws/onebot</code>
+                    <button class="btn btn-ghost btn-sm" id="btn-copy-ws">复制</button>
+                  </div>
+                  <p class="help-note">
+                    同时把 NapCat 的 <b>HTTP 服务</b>打开（默认端口 3000），
+                    本程序用它来发消息。
+                  </p>
+                </div>
+
+                <div class="help-option">
+                  <div class="help-option-head"><strong>方式 B · Lagrange</strong></div>
+                  <p>同样是 OneBot 11 实现，配置方式类似：填反向 WS 地址 + 开启 HTTP API。
+                    本程序对两者完全兼容，换实现不用改代码。</p>
+                </div>
+
+                <div class="help-option">
+                  <div class="help-option-head"><strong>注意</strong></div>
+                  <p>NapCat / Lagrange 都是<b>非官方协议实现</b>，存在账号被风控的可能，
+                    请使用小号。QQ 官方开放平台也可接入，但需要企业认证与审核，门槛较高。</p>
+                </div>
+              </div>
+            </details>
+
+            <div class="field-grid">
+              <label class="field field-full">
+                <span>HTTP 接口地址</span>
+                <input type="text" id="onebot-http" placeholder="http://127.0.0.1:3000">
+                <em>用于发送消息，通常是网关的 HTTP 服务端口</em>
+              </label>
+              <label class="field field-full">
+                <span>Access Token（可选）</span>
+                <input type="password" id="onebot-token" placeholder="若网关没设 Token 则留空">
+                <em>需与网关配置里的一致</em>
+              </label>
+            </div>
+
+            <div class="test-row">
+              <button class="btn btn-ghost" id="btn-test-qq">测试连接</button>
+              <div class="test-status" id="qq-test-status"></div>
+            </div>
+
+            <details class="help-panel help-panel-sm">
+              <summary>高级设置（通常不用改）</summary>
+              <div class="help-body">
+                <div class="field-grid">
+                  <label class="field">
+                    <span>机器人 QQ 号</span>
+                    <input type="text" id="bot-qq" placeholder="连接后自动获取">
+                  </label>
+                  <label class="field">
+                    <span>机器人群昵称</span>
+                    <input type="text" id="qq-nickname" placeholder="小助手">
+                    <em>群里 @ 它时用的名字</em>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <div class="wz-foot">
+              <button class="btn btn-primary" id="btn-save-qq">保存并继续</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 步骤 3：扫码登录 -->
         <div class="card wizard-step" id="step-3">
           <div class="wz-head">
@@ -340,6 +450,51 @@
             </div>
           </div>
           <div id="groups-list" class="groups"></div>
+        </div>
+      </section>
+
+      <!-- ─────── 人格知识库 ─────── -->
+      <section class="page" id="page-memory">
+        <div class="notice notice-info">
+          <strong>机器人会随对话不断了解用户</strong>
+          <p>每次对话后，程序会用大模型从中挑出<b>值得长期记住</b>的信息（身份、偏好、习惯、关系），
+             下次回答时自动参考。相似信息会<b>更新而非堆叠</b>，用户换工作了旧记忆会被改写，
+             不会出现两条互相矛盾的信息。</p>
+        </div>
+
+        <div class="stat-grid" id="memory-stats">
+          <div class="stat-card">
+            <span class="stat-label">记忆总数</span>
+            <strong class="stat-value" id="mem-total">0</strong>
+            <span class="stat-foot" id="mem-owners">0 个对象</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">平均置信度</span>
+            <strong class="stat-value" id="mem-conf">0</strong>
+            <span class="stat-foot">反复出现会提升</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">自动积累</span>
+            <strong class="stat-value" id="mem-enabled">—</strong>
+            <span class="stat-foot">可在「模型与行为」调整</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">类别分布</span>
+            <strong class="stat-value" id="mem-cats">0</strong>
+            <span class="stat-foot" id="mem-cats-foot">—</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>记忆列表</h3>
+            <div class="head-actions">
+              <input type="text" id="mem-search" class="input-sm" placeholder="搜索内容或关键词">
+              <button class="btn btn-ghost btn-sm" id="btn-mem-refresh">刷新</button>
+              <button class="btn btn-primary btn-sm" id="btn-mem-add">手动添加</button>
+            </div>
+          </div>
+          <div id="memory-list" class="memory-list"></div>
         </div>
       </section>
 

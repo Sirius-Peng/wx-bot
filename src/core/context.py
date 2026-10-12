@@ -39,8 +39,13 @@ class ContextManager:
         self.store = store            # 需实现 get_recent / get_summary / push / set_summary
         self.compactor = compactor    # 摘要压缩器，需实现 summarize(turns) -> str
 
-    async def build(self, msg: WxMessage, rag_context: str = "") -> list[dict]:
-        """装配发给 LLM 的 messages。"""
+    async def build(self, msg: WxMessage, rag_context: str = "",
+                    memory_context: str = "") -> list[dict]:
+        """装配发给 LLM 的 messages。
+
+        @param memory_context 人格知识库召回的内容（长期记忆）
+        @param rag_context    知识库检索结果（文档问答）
+        """
         key = msg.ctx_key
         history = await self.store.get_recent(key)
         summary = await self.store.get_summary(key)
@@ -48,6 +53,8 @@ class ContextManager:
         messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
         if summary:
             messages.append({"role": "system", "content": f"[历史对话摘要] {summary}"})
+        if memory_context:
+            messages.append({"role": "system", "content": memory_context})
 
         # 按预算从最新往前装，装不下就丢弃最早的
         messages += self._fit_budget(history, WINDOW_BUDGET)

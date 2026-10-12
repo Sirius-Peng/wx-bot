@@ -21,7 +21,8 @@ log = logging.getLogger(__name__)
 
 class Orchestrator:
     def __init__(self, adapter, store, llm: LLMGateway, judge: JudgeLLM,
-                 ctx: ContextManager, router: TriggerRouter, sender: HumanLikeSender):
+                 ctx: ContextManager, router: TriggerRouter, sender: HumanLikeSender,
+                 memory=None):
         self.adapter = adapter
         self.store = store
         self.llm = llm
@@ -29,8 +30,10 @@ class Orchestrator:
         self.ctx = ctx
         self.router = router
         self.sender = sender
+        self.memory = memory              # 人格知识库（可选）
         self._locks: dict[str, asyncio.Lock] = {}
         self._configs: dict[str, GroupConfig] = {}
+        self._turn_counter: dict[str, int] = {}
         adapter.on_message(self.handle)
 
     # ── 主链路 ────────────────────────────────────────────────
@@ -65,8 +68,18 @@ class Orchestrator:
             await self.store.archive(msg, direction="in")
             return
 
+        # 人格知识库：召回与当前消息相关的长期记忆
+        mem_ctx = ""
+        if self.memory and getattr(self.memory, "enabled", False):
+            try:
+                mem_ctx = self.memory.build_context(
+                    user_id=msg.sender_id, chat_id=msg.chat_id, query=msg.content,
+                )
+            except Exception:
+                log.debug("知识库召回失败", exc_info=True)
+
         # 装配上下文
-        messages = await self.ctx.build(msg)
+        messages = await self.ctx.build(msg, memory_context=mem_ctx)
 
         # 群聊回复时 @ 提问者 —— 否则群里没人知道这条回复是给谁的
         reply_at = [msg.sender_id] if (msg.is_group and msg.sender_id) else None
@@ -86,6 +99,31 @@ class Orchestrator:
         await self.store.archive_reply(msg, reply)
         await self.store.set_cooldown(msg.chat_id, cfg.cooldown_sec)
         await self.store.bump_hourly(msg.chat_id)
+
+        # 人格知识库：按间隔抽取记忆（每轮都抽太费 token）
+        await self._maybe_learn(msg, reply)
+
+    async def _maybe_learn(self, msg: WxMessage, reply: str) -> None:
+        """按配置的间隔，从最近的对话中抽取长期记忆。"""
+        if not self.memory or not getattr(self.memory, "enabled", False):
+            return
+
+        interval = max(1, int(getattr(self.memory, "extract_interval", 3)))
+        n = self._turn_counter.get(msg.ctx_key, 0) + 1
+        if n < interval:
+            self._turn_counter[msg.ctx_key] = n
+            return
+        self._turn_counter[msg.ctx_key] = 0
+
+        try:
+            history = await self.store.get_recent(msg.ctx_key)
+            await self.memory.observe(
+                chat_id=msg.chat_id, chat_type=msg.chat_type,
+                user_id=msg.sender_id, user_name=msg.sender_name or msg.sender_id,
+                history=history[-6:],
+            )
+        except Exception:
+            log.debug("知识库抽取失败", exc_info=True)
 
     async def _load_config(self, chat_id: str) -> GroupConfig:
         cfg = await self.store.get_group_config(chat_id)

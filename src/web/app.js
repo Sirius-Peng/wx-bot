@@ -59,8 +59,9 @@ const ICON_EMPTY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 
 const PAGE_META = {
   overview: ['概览', '查看机器人运行状态与今日数据'],
-  connect:  ['接入设置', '配置微信通道并扫码登录'],
+  connect:  ['接入设置', '配置通道并完成登录'],
   groups:   ['群聊管理', '为每个群单独设置响应策略'],
+  memory:   ['人格知识库', '机器人随对话积累的对用户的理解'],
   messages: ['消息记录', '查看收发消息与触发判定结果'],
   settings: ['模型与行为', '配置大模型与机器人性格'],
 };
@@ -75,6 +76,7 @@ function switchPage(name) {
   $('#page-sub').textContent = sub;
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   if (name === 'groups') loadGroups();
+  if (name === 'memory') loadMemory();
   if (name === 'messages') loadMessages();
   if (name === 'settings' || name === 'connect') loadConfig();
 
@@ -233,6 +235,11 @@ async function loadConfig() {
   $('#gewe-appid').value = c.adapter.gewe_app_id || '';
   $('#bot-wxid').value = c.adapter.bot_wxid || '';
   $('#bot-nickname').value = c.adapter.bot_nickname || '';
+  // QQ / OneBot
+  $('#onebot-http').value = c.adapter.onebot_http_url || '';
+  $('#onebot-token').value = c.adapter.onebot_token || '';
+  $('#bot-qq').value = c.adapter.bot_qq || '';
+  $('#qq-nickname').value = c.adapter.bot_nickname || '';
 
   // 模型
   $('#primary-base').value = c.llm.primary_base || '';
@@ -263,11 +270,17 @@ async function loadConfig() {
 function applyAdapterType(type) {
   adapterType = type;
   const isGeWe = type === 'gewechat';
+  const isQQ = type === 'onebot';
+
   $('#step-2').hidden = !isGeWe;
-  $('#step-3').hidden = !isGeWe;
+  $('#step-2-qq').hidden = !isQQ;
+  $('#step-3').hidden = isQQ;          // QQ 不需要扫码（在网关侧登录）
   $('#hybrid-row').hidden = !isGeWe;
-  if (!isGeWe) {
-    $('#step-1').querySelector('.wz-status')?.remove();
+
+  // QQ 的反向 WS 地址要显示成当前实际地址，方便用户直接复制
+  const wsEl = $('#qq-ws-url');
+  if (wsEl) {
+    wsEl.textContent = `ws://${location.hostname}:${location.port}/ws/onebot`;
   }
 }
 
@@ -297,6 +310,22 @@ function updateWizardStatus(cfg) {
       loginBadge.textContent = '未登录';
     }
   }
+
+  // QQ 通道状态
+  const qqBadge = $('#qq-badge');
+  if (qqBadge) {
+    const hasUrl = !!a.onebot_http_url;
+    if (a.bot_qq) {
+      qqBadge.className = 'wz-status ok';
+      qqBadge.textContent = `已连接 ${a.bot_qq}`;
+    } else if (hasUrl) {
+      qqBadge.className = 'wz-status';
+      qqBadge.textContent = '待连接';
+    } else {
+      qqBadge.className = 'wz-status';
+      qqBadge.textContent = '待配置';
+    }
+  }
 }
 
 function collectConfig() {
@@ -307,7 +336,11 @@ function collectConfig() {
   c.adapter.gewe_token = $('#gewe-token').value.trim();
   c.adapter.gewe_app_id = $('#gewe-appid').value.trim();
   c.adapter.bot_wxid = $('#bot-wxid').value.trim();
-  c.adapter.bot_nickname = $('#bot-nickname').value.trim();
+  c.adapter.bot_nickname = $('#bot-nickname').value.trim() || $('#qq-nickname').value.trim();
+  // QQ / OneBot
+  c.adapter.onebot_http_url = $('#onebot-http').value.trim();
+  c.adapter.onebot_token = $('#onebot-token').value.trim();
+  c.adapter.bot_qq = $('#bot-qq').value.trim();
 
   c.llm.primary_base = $('#primary-base').value.trim();
   c.llm.primary_model = $('#primary-model').value.trim();
@@ -850,6 +883,150 @@ async function copyText(text, btn) {
   setTimeout(() => { btn.textContent = old; }, 1500);
 }
 
+/* ══════════ QQ / OneBot ══════════ */
+
+async function testQQ() {
+  const btn = $('#btn-test-qq');
+  const box = $('#qq-test-status');
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+  box.className = 'test-status';
+  box.innerHTML = '<div class="ts-line">正在连接…</div>';
+
+  try {
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    const r = await api('/api/qq/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        http_url: $('#onebot-http').value.trim(),
+        token: $('#onebot-token').value.trim(),
+      }),
+    });
+    if (r.ok) {
+      box.className = 'test-status ok';
+      box.innerHTML = `
+        <div class="ts-line"><span class="ts-icon">✓</span><span>${esc(r.message)}</span></div>
+        ${r.hint ? `<div class="ts-hint">${esc(r.hint)}</div>` : ''}`;
+    } else {
+      box.className = 'test-status err';
+      box.innerHTML = `
+        <div class="ts-line"><span class="ts-icon">✗</span><span>${esc(r.message)}</span></div>
+        ${r.detail ? `<div class="ts-detail">${esc(r.detail)}</div>` : ''}
+        ${r.hint ? `<div class="ts-hint">${esc(r.hint)}</div>` : ''}`;
+    }
+    await loadConfig();
+  } catch (e) {
+    box.className = 'test-status err';
+    box.innerHTML = `<div class="ts-line"><span class="ts-icon">✗</span><span>测试失败：${esc(e.message)}</span></div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '测试连接';
+}
+
+/* ══════════ 人格知识库 ══════════ */
+
+let memoryItems = [];
+
+async function loadMemory() {
+  const kw = ($('#mem-search') || {}).value || '';
+  const q = new URLSearchParams();
+  if (kw) q.set('keyword', kw);
+  let data;
+  try {
+    data = await api('/api/memory?' + q.toString());
+  } catch (e) {
+    toast('读取知识库失败：' + e.message, 'err');
+    return;
+  }
+  memoryItems = data.items || [];
+  renderMemoryStats(data.stats || {});
+  renderMemoryList(memoryItems);
+
+  const badge = $('#nav-memory-count');
+  if (badge) {
+    const n = (data.stats || {}).total || 0;
+    badge.hidden = !n;
+    badge.textContent = n;
+  }
+}
+
+function renderMemoryStats(s) {
+  $('#mem-total').textContent = s.total || 0;
+  $('#mem-owners').textContent = `${s.owners || 0} 个对象`;
+  $('#mem-conf').textContent = s.avgConfidence ? Math.round(s.avgConfidence * 100) + '%' : '—';
+  $('#mem-enabled').textContent = s.enabled ? '已开启' : '已关闭';
+  const cats = s.byCategory || {};
+  const n = Object.keys(cats).length;
+  $('#mem-cats').textContent = n;
+  const labelMap = s.categories || {};
+  $('#mem-cats-foot').textContent = n
+    ? Object.entries(cats).map(([k, v]) => `${labelMap[k] || k} ${v}`).join(' · ')
+    : '—';
+}
+
+function renderMemoryList(items) {
+  const box = $('#memory-list');
+  if (!items.length) {
+    box.innerHTML = `<div class="empty">
+      ${ICON_EMPTY}
+      <span>还没有记忆<br>机器人运行后会自动从对话中积累，也可以点「手动添加」补录</span>
+    </div>`;
+    return;
+  }
+  box.innerHTML = items.map(it => `
+    <div class="memory-item" data-id="${esc(it.id)}">
+      <span class="mem-cat ${esc(it.category)}">${esc(it.categoryLabel || it.category)}</span>
+      <div class="mem-main">
+        <div class="mem-content">${esc(it.content)}</div>
+        <div class="mem-meta">
+          ${(it.keywords || []).slice(0, 6).map(k => `<span class="kw">${esc(k)}</span>`).join('')}
+          <span class="mem-conf">
+            置信度
+            <span class="bar"><i style="width:${Math.round((it.confidence || 0) * 100)}%"></i></span>
+            ${Math.round((it.confidence || 0) * 100)}%
+          </span>
+          <span>使用 ${it.hits || 0} 次</span>
+          <span>更新于 ${esc(it.updatedAt || '')}</span>
+        </div>
+      </div>
+      <div class="mem-actions">
+        <button class="btn btn-ghost btn-sm" data-del="${esc(it.id)}">删除</button>
+      </div>
+    </div>`).join('');
+
+  $$('#memory-list [data-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      if (!confirm('确定删除这条记忆？')) return;
+      await api(`/api/memory/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
+      toast('已删除', 'ok');
+      loadMemory();
+    }));
+}
+
+async function addMemory() {
+  const content = prompt('要记住什么？（例如：用户是后端工程师，喜欢用 Rust）');
+  if (!content || !content.trim()) return;
+  const cat = prompt(
+    '属于哪一类？输入数字：\n1 事实\n2 偏好\n3 关系\n4 事件\n5 风格',
+    '1'
+  );
+  const map = { '1': 'fact', '2': 'preference', '3': 'relation', '4': 'event', '5': 'style' };
+  const owner = prompt('这是关于谁的？填对方的 ID（微信 wxid / QQ 号）', '') || 'global';
+  try {
+    await api('/api/memory', {
+      method: 'POST',
+      body: JSON.stringify({
+        scope: 'user', owner_id: owner.trim(),
+        category: map[cat] || 'fact', content: content.trim(),
+      }),
+    });
+    toast('已添加', 'ok');
+    loadMemory();
+  } catch (e) {
+    toast('添加失败：' + e.message, 'err');
+  }
+}
+
 /* ══════════ 事件绑定 ══════════ */
 
 function bind() {
@@ -881,6 +1058,27 @@ function bind() {
   $('#btn-continue').addEventListener('click', runOneClick);
   $('#btn-test-gw').addEventListener('click', testGateway);
   $('#btn-gw-logs').addEventListener('click', toggleGatewayLogs);
+
+  // QQ / OneBot
+  $('#btn-test-qq').addEventListener('click', testQQ);
+  $('#btn-save-qq').addEventListener('click', async () => {
+    await saveConfig();
+    await loadConfig();
+    toast('已保存', 'ok');
+  });
+  $('#btn-copy-ws').addEventListener('click', () => {
+    const el = $('#qq-ws-url');
+    copyText(el.textContent.trim(), $('#btn-copy-ws'));
+  });
+
+  // 人格知识库
+  $('#btn-mem-refresh').addEventListener('click', loadMemory);
+  $('#btn-mem-add').addEventListener('click', addMemory);
+  let memTimer = null;
+  $('#mem-search').addEventListener('input', () => {
+    clearTimeout(memTimer);
+    memTimer = setTimeout(loadMemory, 300);
+  });
 
   // 代码块复制按钮
   $$('[data-copy]').forEach(b =>
