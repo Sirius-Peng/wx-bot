@@ -322,6 +322,32 @@
             <button class="btn btn-primary" id="btn-save-settings">保存设置</button>
           </div>
         </div>
+
+        <!-- 仅桌面版显示：由 preload 注入 window.wxbotDesktop 后激活 -->
+        <div class="card" id="card-desktop" hidden>
+          <div class="card-head">
+            <h3>桌面应用</h3>
+            <span class="tag" id="desk-version">—</span>
+          </div>
+          <div class="notice notice-info" style="margin:16px 20px 4px">
+            <strong>关闭窗口后仍会在后台运行</strong>
+            <p>点窗口关闭按钮只是把它收起来，机器人在托盘里继续工作。<br>
+               要彻底退出，请用下方「退出应用」或托盘菜单里的「退出」。</p>
+          </div>
+          <div class="desk-actions">
+            <button class="btn btn-ghost" id="desk-hide">隐藏到后台</button>
+            <button class="btn btn-ghost" id="desk-restart">重启后台服务</button>
+            <button class="btn btn-ghost" id="desk-data">打开数据目录</button>
+            <button class="btn btn-ghost" id="desk-log">查看运行日志</button>
+            <button class="btn btn-ghost" id="desk-logdir">打开日志目录</button>
+            <button class="btn btn-danger" id="desk-quit">退出应用</button>
+          </div>
+          <div class="desk-meta">
+            <div><span>后台服务</span><strong id="desk-backend">—</strong></div>
+            <div><span>数据目录</span><strong id="desk-datadir">—</strong></div>
+          </div>
+          <pre class="log-view" id="desk-logview" hidden></pre>
+        </div>
       </section>
 
     </div>

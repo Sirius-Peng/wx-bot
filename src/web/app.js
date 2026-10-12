@@ -534,10 +534,89 @@ function bind() {
   });
 }
 
+/* ══════════ 桌面版集成 ══════════ */
+
+async function initDesktop() {
+  const desk = window.wxbotDesktop;
+  if (!desk) return;              // 浏览器模式：不显示桌面功能区
+
+  document.body.classList.add('is-electron');
+  let info = {};
+  try { info = await desk.info(); } catch (_) { /* 拿不到就降级 */ }
+  if (info.platform === 'darwin') document.body.classList.add('is-mac');
+
+  $('#card-desktop').hidden = false;
+  $('#desk-version').textContent = `v${info.version || '—'} · ${info.platform || ''}/${info.arch || ''}`;
+  $('#desk-datadir').textContent = info.dataDir || '—';
+  $('#desk-datadir').title = info.dataDir || '';
+  updateBackendLabel(info.backendState);
+
+  $('#desk-hide').addEventListener('click', () => {
+    desk.hide();
+    toast('已隐藏到后台，机器人继续运行');
+  });
+
+  $('#desk-quit').addEventListener('click', () => {
+    if (confirm('确定要退出应用吗？\n\n退出后后台机器人也会停止，不再回复消息。')) {
+      desk.quit();
+    }
+  });
+
+  $('#desk-restart').addEventListener('click', async () => {
+    toast('正在重启后台服务…');
+    const r = await desk.backend.restart();
+    toast(r.ok ? '后台服务已重启' : `重启失败：${r.error || '未知错误'}`,
+          r.ok ? 'ok' : 'err');
+    updateBackendLabel(r.ok ? 'running' : 'crashed');
+  });
+
+  $('#desk-data').addEventListener('click', () => desk.shell.openDataDir());
+  $('#desk-logdir').addEventListener('click', () => desk.shell.openLogDir());
+
+  // 运行日志折叠面板
+  const logBox = $('#desk-logview');
+  const logBtn = $('#desk-log');
+  logBtn.addEventListener('click', async () => {
+    if (!logBox.hidden) {
+      logBox.hidden = true;
+      logBtn.textContent = '查看运行日志';
+      return;
+    }
+    const { log } = await desk.backend.log(300);
+    logBox.textContent = log || '(暂无日志)';
+    logBox.hidden = false;
+    logBox.scrollTop = logBox.scrollHeight;
+    logBtn.textContent = '收起日志';
+  });
+
+  // 主进程事件
+  desk.on('backend:crashed', (p) => {
+    updateBackendLabel('crashed');
+    toast(`后台服务异常退出，${Math.round((p && p.retryInMs || 0) / 1000)} 秒后自动重启`, 'err');
+  });
+  desk.on('backend:restarted', () => updateBackendLabel('running'));
+  desk.on('backend:ready', () => updateBackendLabel('running'));
+
+  // 周期性同步后端状态
+  setInterval(async () => {
+    try {
+      const s = await desk.backend.status();
+      updateBackendLabel(s.state);
+    } catch (_) { /* 忽略 */ }
+  }, 5000);
+}
+
+function updateBackendLabel(state) {
+  const map = { running: '运行中', starting: '启动中…', stopped: '已停止', crashed: '异常' };
+  const el = $('#desk-backend');
+  if (el) el.textContent = map[state] || state || '—';
+}
+
 /* ══════════ 启动 ══════════ */
 
 async function init() {
   bind();
+  await initDesktop();          // 桌面版才生效，浏览器里直接跳过
   await loadConfig();
   // 支持通过 #groups / #messages 等直达页面
   const hash = location.hash.replace('#', '');
