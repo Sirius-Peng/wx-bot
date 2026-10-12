@@ -814,6 +814,103 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
   border-radius: var(--r-sm); color: #96650A; font-size: 12px;
 }
 
+/* ══════════ 环境检查清单 ══════════ */
+
+.checklist {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+
+.check-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  transition: border-color .18s, background .18s;
+}
+.check-item.ok   { border-color: var(--primary-line); background: var(--primary-soft); }
+.check-item.err  { border-color: #F5C4C4; background: var(--danger-soft); }
+.check-item.busy { border-color: #CFE0FB; background: var(--info-soft); }
+
+.check-icon {
+  width: 20px; height: 20px; flex-shrink: 0;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 700;
+  background: var(--surface-3); color: var(--text-3);
+}
+.check-item.ok   .check-icon { background: var(--primary); color: #fff; }
+.check-item.err  .check-icon { background: var(--danger); color: #fff; }
+.check-item.busy .check-icon { background: var(--info); color: #fff; }
+
+.check-main { flex: 1; min-width: 0; }
+.check-title { font-size: 13px; font-weight: 500; }
+.check-desc { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
+.check-item.ok .check-desc { color: #06874A; }
+.check-item.err .check-desc { color: var(--danger); }
+
+/* ── 主操作区 ── */
+
+.setup-action {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 16px;
+  background: linear-gradient(135deg, #F3FCF7 0%, #FFFFFF 70%);
+  border: 1px solid var(--primary-line);
+  border-radius: var(--r);
+}
+.btn-lg { padding: 11px 22px; font-size: 14.5px; font-weight: 600; }
+.setup-hint { font-size: 12.5px; color: var(--text-2); flex: 1; min-width: 200px; line-height: 1.6; }
+
+/* ── 进度条 ── */
+
+.progress-box {
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.progress-bar {
+  height: 6px; border-radius: 4px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, #07C160, #4ADE80);
+  border-radius: 4px;
+  transition: width .4s ease;
+}
+.progress-text { font-size: 12.5px; color: var(--text-2); margin-top: 9px; }
+
+/* ── 需要用户操作 ── */
+
+.action-needed {
+  padding: 16px;
+  background: var(--warn-soft);
+  border: 1px solid #F5DFAE;
+  border-radius: var(--r);
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.an-head { display: flex; align-items: center; gap: 8px; }
+.an-head strong { font-size: 13.5px; color: #96650A; }
+.an-icon {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--warn); color: #fff;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700;
+}
+.an-body { font-size: 12.5px; color: #7A5409; line-height: 1.7; }
+.an-body ol { margin: 6px 0 0 18px; padding: 0; }
+.an-body li { margin-bottom: 3px; }
+.an-body code {
+  background: rgba(255,255,255,.7); padding: 1px 6px; border-radius: 5px;
+  font-family: var(--mono); font-size: 11.5px;
+}
+
 /* ══════════ 响应式 ══════════ */
 
 /* 尊重系统「减少动态效果」设置（无障碍） */
