@@ -13,6 +13,8 @@ let STATE = {
   editingGroup: null,
   qrTimer: null,
   pollTimer: null,
+  qqStatus: null,
+  qqLoginTimer: null,
 };
 
 /* ══════════ 工具 ══════════ */
@@ -88,7 +90,11 @@ function switchPage(name) {
 function startDockerPolling() {
   stopDockerPolling();
   refreshDockerStatus();
-  dockerPollTimer = setInterval(refreshDockerStatus, 3000);
+  refreshQQStatus();
+  dockerPollTimer = setInterval(() => {
+    refreshDockerStatus();
+    refreshQQStatus();
+  }, 3000);
 }
 
 function stopDockerPolling() {
@@ -96,6 +102,8 @@ function stopDockerPolling() {
     clearInterval(dockerPollTimer);
     dockerPollTimer = null;
   }
+  // 离开「接入设置」页要停掉扫码轮询，避免定时器泄漏
+  stopQQLoginPolling();
 }
 
 window.addEventListener('hashchange', () => {
@@ -235,17 +243,15 @@ async function loadConfig() {
   CHANNELS.qq = !!a.qq_enabled;
   CHANNELS.wechat_type = a.wechat_type || 'gewechat';
 
-  $$('#adapter-type .choice').forEach(el => {
+  $$('#adapter-type .pcard').forEach(el => {
     const cb = el.querySelector('input[type=checkbox]');
-    if (!cb) return;
-    if (cb.value === 'wechat') cb.checked = CHANNELS.wechat;
-    if (cb.value === 'qq') cb.checked = CHANNELS.qq;
+    if (cb) cb.checked = (cb.value === 'wechat') ? CHANNELS.wechat : CHANNELS.qq;
   });
-  // 微信子选项
   $$('#wechat-sub input[name=wechat_type]').forEach(r => {
     r.checked = r.value === CHANNELS.wechat_type;
   });
   $('#hybrid-enabled').checked = !!a.hybrid_enabled;
+  renderPlatformCards();
 
   $('#gewe-base').value = a.gewe_base_url || '';
   $('#gewe-token').value = a.gewe_token || '';
@@ -283,13 +289,27 @@ async function loadConfig() {
   updateWizardStatus(c);
 }
 
+/** 平台卡片：显式 .is-selected 类驱动选中外观，禁用态置灰 */
+function renderPlatformCards() {
+  $$('#adapter-type .pcard').forEach(el => {
+    const cb = el.querySelector('input[type=checkbox]');
+    if (!cb) return;
+    const on = cb.checked;
+    el.classList.toggle('is-selected', on);
+    el.classList.toggle('is-disabled', !on);
+  });
+  $$('#wechat-sub .seg-item').forEach(el => {
+    const r = el.querySelector('input[type=radio]');
+    if (r) el.classList.toggle('is-selected', r.checked);
+  });
+}
+
 /** 根据通道勾选状态显示/隐藏对应步骤 */
 function applyChannels() {
   const wechatOn = CHANNELS.wechat;
   const qqOn = CHANNELS.qq;
   const isGeWe = wechatOn && CHANNELS.wechat_type === 'gewechat';
 
-  $('#wechat-sub').hidden = !wechatOn;
   $('#step-2').hidden = !isGeWe;
   $('#step-2-qq').hidden = !qqOn;
   $('#step-3').hidden = !wechatOn;   // 微信需要扫码，QQ 在网关侧登录
@@ -328,14 +348,16 @@ function updateWizardStatus(cfg) {
     }
   }
 
-  // QQ 通道状态
+  // QQ 通道状态：优先用后端实时状态（容器/登录态），没有再退回配置判断
   const qqBadge = $('#qq-badge');
   if (qqBadge) {
-    const hasUrl = !!a.onebot_http_url;
-    if (a.bot_qq) {
+    const live = STATE.qqStatus;
+    if (live && (live.napcat || live.task)) {
+      renderQQBadge(live);
+    } else if (a.bot_qq) {
       qqBadge.className = 'wz-status ok';
       qqBadge.textContent = `已连接 ${a.bot_qq}`;
-    } else if (hasUrl) {
+    } else if (a.onebot_http_url) {
       qqBadge.className = 'wz-status';
       qqBadge.textContent = '待连接';
     } else {
@@ -619,13 +641,19 @@ function renderChecklist(st) {
     gw.running ? '已就绪 · 127.0.0.1:2531' : (gw.message || '等待中'),
     (!gw.running && d.running && !gwBusy) ? { label: '启动网关', action: startGateway } : null);
 
-  // 全部就绪时更新徽标
+  // 徽标：**配置完成 = 网关在跑 且 Token 已就位**（端口通不等于可用）
   const badge = $('#gw-badge');
   if (badge) {
-    if (gw.running) { badge.className = 'wz-status ok'; badge.textContent = '已就绪'; }
-    else if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '配置中…'; }
-    else if (task.needsUser) { badge.className = 'wz-status warn'; badge.textContent = '待你操作'; }
-    else { badge.className = 'wz-status'; badge.textContent = '待配置'; }
+    if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '配置中…'; }
+    else if (gw.running && gw.tokenConfigured) {
+      badge.className = 'wz-status ok'; badge.textContent = '已就绪';
+    } else if (gw.running) {
+      badge.className = 'wz-status warn'; badge.textContent = '待填 Token';
+    } else if (task.needsUser) {
+      badge.className = 'wz-status warn'; badge.textContent = '待你操作';
+    } else {
+      badge.className = 'wz-status'; badge.textContent = '待配置';
+    }
   }
 }
 
@@ -656,10 +684,11 @@ function renderProgress(task) {
   const box = $('#progress-box');
   const fill = $('#progress-fill');
   const text = $('#progress-text');
-  if (!task) { box.hidden = true; return; }
+  if (!box) return;
 
-  const active = task.running;
-  if (!active && !task.stage) { box.hidden = true; return; }
+  // 与 QQ 一致：任务结束后收起进度条，只有进行中/出错/超时才显示
+  const show = !!task && (task.running || task.stage === 'error' || task.stage === 'timeout');
+  if (!show) { box.hidden = true; return; }
 
   box.hidden = false;
   fill.style.width = (task.progress || 0) + '%';
@@ -737,7 +766,14 @@ async function pollTask(maxMs = 30 * 60 * 1000) {
   return await refreshDockerStatus();
 }
 
-/** 一键：准备 Docker → 启动网关 → 回填地址 */
+/** 一键：准备 Docker → 启动网关 → 自动取 Token
+ *
+ * 三个容易做错的地方（历史 bug 都出在这里）：
+ *   ① 操作前要**先保存表单**，否则后端读到的还是旧配置；
+ *   ② 容器已在跑时也要调 gateway/setup —— 否则后端的"补 Token"流程不会触发；
+ *   ③ 成功判据是 **tokenConfigured**，不是"端口通"。
+ *      端口通只说明容器起来了，Token 仍可能是空的。
+ */
 async function runOneClick() {
   const btn = $('#btn-oneclick');
   const st0 = STATE.dockerStatus || {};
@@ -757,51 +793,100 @@ async function runOneClick() {
 
   btn.disabled = true;
   $('#setup-hint').textContent = '正在自动配置，请稍候…';
+  let failure = '';
 
   try {
-    // ① 准备 Docker 环境
+    // ① 先保存当前表单（含勾选项），再发操作请求
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+
     await api('/api/docker/prepare', { method: 'POST' });
     let st = await pollTask();
 
-    // 中途需要用户操作 → 停下来提示
     if (st && st.task && st.task.needsUser) {
       toast('需要你手动完成一步操作', 'err');
       return;
     }
 
-    // ② Docker 就绪 → 启动网关
-    if (st && st.docker && st.docker.running && !(st.gateway && st.gateway.running)) {
+    // ② Docker 就绪 → 拉起网关（**已在运行也要调**，让后端补 Token）
+    if (st && st.docker && st.docker.running) {
       await api('/api/gateway/setup', { method: 'POST' });
       st = await pollTask();
     }
 
-    // ③ 检查结果
-    if (st && st.gateway && st.gateway.running) {
-      await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
-      await loadConfig();
-      // 网关就绪了，但 Token 可能还没填 —— 不能骗用户说"可以扫码了"
-      const cfg = STATE.config || {};
-      const hasToken = !!(cfg.adapter && cfg.adapter.gewe_token);
-      if (hasToken) {
-        toast('配置完成，可以扫码登录了', 'ok');
-        $('#setup-hint').textContent = '配置完成。下一步：扫码登录。';
-      } else {
-        toast('网关已就绪，还差一步', 'ok');
-        $('#setup-hint').textContent = '网关已启动。请在上方「高级设置」里填写 GeWe Token，然后获取二维码。';
-        // 把 Token 输入框滚动到可视区并高亮
-        const tokEl = $('#gewe-token');
-        if (tokEl) { tokEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); tokEl.focus(); }
-      }
-    } else {
+    if (!(st && st.gateway && st.gateway.running)) {
+      failure = (st && st.task && (st.task.message || st.task.error)) || '网关还没启动成功';
       toast('还没配置完成，请看下方提示', 'err');
+      return;
+    }
+
+    // ③ 网关就绪 → 自动取 Token
+    $('#setup-hint').textContent = '网关已启动，正在自动获取 Token…';
+    const tok = await fetchGeweToken({ silent: true });
+    await loadConfig();
+
+    const configured = !!(tok && tok.ok) ||
+      !!((STATE.config || {}).adapter || {}).gewe_token;
+    if (configured) {
+      toast('配置完成，可以扫码登录了', 'ok');
+      $('#setup-hint').textContent = '配置完成。下一步：扫码登录。';
+    } else {
+      failure = (tok && tok.message) || '没能自动取到 Token';
+      $('#setup-hint').textContent = '网关已启动，但 Token 需要你手动填一下';
+      const el = $('#gewe-token');
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
     }
   } catch (e) {
+    failure = e.message;
     toast('配置失败：' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    if (!($('#setup-hint').textContent.includes('完成'))) {
+    // ⚠️ 失败信息不能被默认文案覆盖：只有确实成功时才改提示
+    if (failure && $('#setup-hint').textContent.includes('完成')) {
+      $('#setup-hint').textContent = '没配置成功：' + failure;
+    } else if (!failure && !$('#setup-hint').textContent.includes('完成')) {
       $('#setup-hint').textContent = '自动检测并安装 Docker、启动服务、拉起网关';
     }
+  }
+}
+
+/** 自动获取 GeWe Token（也可由用户手动点按钮触发） */
+async function fetchGeweToken(opts = {}) {
+  const hint = $('#gewe-token-hint');
+  const btn = $('#btn-fetch-token');
+  const base = ($('#gewe-base') || {}).value || '';
+  if (btn) { btn.disabled = true; btn.textContent = '获取中…'; }
+  if (hint && !opts.silent) {
+    hint.className = 'cred-hint';
+    hint.textContent = '正在向本地网关申请 Token…';
+  }
+  try {
+    const r = await api('/api/gateway/token', {
+      method: 'POST', body: JSON.stringify({ base_url: base.trim() }),
+    });
+    if (r.ok) {
+      if (hint) {
+        hint.className = 'cred-hint ok';
+        hint.textContent = (r.message || 'Token 已自动获取并保存') +
+          (r.verified ? '' : '（有效性待确认，可点「测试连接」复验）');
+      }
+      if (!opts.silent) toast('Token 已自动获取', 'ok');
+      await loadConfig();
+    } else {
+      if (hint) {
+        hint.className = 'cred-hint err';
+        hint.textContent = (r.message || '自动获取失败') +
+          (r.detail ? '（' + r.detail + '）' : '') +
+          (r.hint ? ' ' + r.hint : '');
+      }
+      if (!opts.silent) toast(r.message || '自动获取失败', 'err');
+    }
+    return r;
+  } catch (e) {
+    if (hint) { hint.className = 'cred-hint err'; hint.textContent = '自动获取失败：' + e.message; }
+    if (!opts.silent) toast('自动获取失败：' + e.message, 'err');
+    return { ok: false, message: e.message };
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '自动获取 Token'; }
   }
 }
 
@@ -926,36 +1011,255 @@ async function copyText(text, btn) {
 
 /* ══════════ QQ / OneBot ══════════ */
 
+/** 一键部署 NapCat（非阻塞，靠轮询 /api/qq/status 看进度）*/
+async function setupQQ() {
+  const btn = $('#btn-setup-qq');
+  const st0 = STATE.qqStatus || {};
+  const dk = st0.docker || {};
+
+  // 需要装 Docker 时才弹确认框（与 GeWe 一致）
+  if (!dk.installed) {
+    const ok = confirm(
+      '即将在你的电脑上安装 Docker。\n\n' +
+      '过程中需要你操作的地方：\n· 按提示完成安装（可能要输入密码）\n\n' +
+      '安装包约 600MB，是否继续？'
+    );
+    if (!ok) return;
+  }
+
+  btn.disabled = true;
+  $('#qq-detect-hint').textContent = '正在自动部署，请稍候…';
+  let failure = '';
+
+  try {
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+
+    // ① 先把 Docker 环境弄好
+    if (!(dk.installed && dk.running)) {
+      await api('/api/docker/prepare', { method: 'POST' });
+      await pollQQStatus();
+      const st = STATE.qqStatus || {};
+      if (!(st.docker && st.docker.running)) {
+        failure = 'Docker 还没就绪';
+        toast('需要你先把 Docker 装好', 'err');
+        return;
+      }
+    }
+
+    // ② 部署 NapCat
+    const r = await api('/api/qq/setup', { method: 'POST' });
+    if (!r.ok) { failure = r.message; toast(r.message || '部署失败', 'err'); return; }
+
+    const st = await pollQQStatus();
+    const task = st.task || {};
+    if (task.stage === 'error') {
+      failure = task.message || task.error;
+      toast('部署失败：' + failure, 'err');
+      return;
+    }
+    if (task.needsUser) { toast('需要你手动完成一步操作', 'err'); return; }
+
+    // ③ 部署完成后自动勾选 QQ 通道，并直接出二维码
+    if (task.stage === 'waiting_login' || (st.napcat && st.napcat.running)) {
+      CHANNELS.qq = true;
+      $('#qq-qr-wrap').hidden = false;
+      $('#qq-detect-hint').textContent = '部署完成。请用手机 QQ 扫码登录。';
+      // 先保存（把 QQ 通道勾上、地址回填），再取二维码
+      await saveConfigQuiet();
+      await getQQQr();
+      toast('QQ 网关已部署，请扫码登录', 'ok');
+    } else {
+      failure = task.message || '还没部署完成';
+      toast('还没部署完成，请看下方提示', 'err');
+    }
+  } catch (e) {
+    failure = e.message;
+    toast('部署失败：' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    if (failure) {
+      $('#qq-detect-hint').textContent = '没部署成功：' + failure;
+    } else if (!$('#qq-detect-hint').textContent.includes('完成')) {
+      $('#qq-detect-hint').textContent =
+        '自动拉取 NapCat 镜像、写好网络配置并启动，全程无需你操作';
+    }
+  }
+}
+
+/** 静默保存配置（不提示、不刷新表单），用于自动化流程中途落盘 */
+async function saveConfigQuiet() {
+  try {
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    await loadConfig();
+    return true;
+  } catch (e) {
+    toast('保存配置失败：' + e.message, 'err');
+    return false;
+  }
+}
+
+/** 刷新 QQ 状态并渲染 */
+async function refreshQQStatus() {
+  let st;
+  try {
+    st = await api('/api/qq/status');
+  } catch (_) {
+    return null;
+  }
+  STATE.qqStatus = st;
+  renderQQChecklist(st);
+  renderQQProgress(st.task);
+  renderQQBadge(st);
+  return st;
+}
+
+function renderQQChecklist(st) {
+  const d = st.docker || {};
+  const n = st.napcat || {};
+  const task = st.task || {};
+
+  setCheck('qq-docker',
+    d.installed ? (d.running ? 'ok' : 'err') : 'err',
+    d.installed ? (d.running ? `已就绪 · v${d.version || '?'}` : '已安装但未启动') : '未安装');
+
+  const busy = task.running && task.stage === 'napcat';
+  setCheck('qq-container',
+    n.running ? 'ok' : (busy ? 'busy' : (d.running ? 'err' : '')),
+    n.running ? '正在运行 · 127.0.0.1:6099' : (busy ? '部署中…' : (n.message || '等待中')));
+
+  setCheck('qq-login',
+    st.loggedIn ? 'ok' : (n.running ? 'err' : ''),
+    st.loggedIn ? ('已登录 ' + (st.botQq || '')) : (n.running ? '未登录，请扫码' : '等待网关就绪'));
+}
+
+function renderQQProgress(task) {
+  const box = $('#qq-progress');
+  const fill = $('#qq-progress-fill');
+  const text = $('#qq-progress-text');
+  if (!box) return;
+  // 任务结束后**收起进度条**，只在真正进行中或出错/超时时显示 ——
+  // 否则部署完成后会留一条满格的绿条，看着像还没结束
+  const show = !!task && (task.running || task.stage === 'error' || task.stage === 'timeout');
+  if (!show) { box.hidden = true; return; }
+  box.hidden = false;
+  fill.style.width = (task.progress || 0) + '%';
+  text.textContent = task.message || task.stage || '';
+  text.style.color = task.stage === 'error' ? 'var(--danger)' : '';
+  if (task.stage === 'waiting_login') {
+    // 只等扫码，不是"已登录"——文案不能说过头
+    text.textContent = '部署完成，请用手机 QQ 扫码登录';
+    text.style.color = '';
+  }
+}
+
+function renderQQBadge(st) {
+  const badge = $('#qq-badge');
+  if (!badge) return;
+  const n = st.napcat || {};
+  const task = st.task || {};
+  if (st.loggedIn) { badge.className = 'wz-status ok'; badge.textContent = '已登录'; }
+  else if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '部署中…'; }
+  else if (n.running) { badge.className = 'wz-status warn'; badge.textContent = '待扫码'; }
+  else { badge.className = 'wz-status'; badge.textContent = '待配置'; }
+}
+
+/** 轮询 QQ 部署任务 */
+async function pollQQStatus(maxMs = 30 * 60 * 1000) {
+  const t0 = Date.now();
+  let st = null;
+  while (Date.now() - t0 < maxMs) {
+    st = await refreshQQStatus();
+    if (!st) break;
+    if (!(st.task || {}).running) return st;
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return st || await refreshQQStatus();
+}
+
+/** 获取 QQ 登录二维码 */
+async function getQQQr() {
+  const box = $('#qq-qr-box');
+  const wrap = $('#qq-qr-wrap');
+  const status = $('#qq-qr-status');
+  if (!box) return;
+  wrap.hidden = false;
+  box.innerHTML = '<div class="qr-empty"><span>正在获取二维码…</span></div>';
+  try {
+    const r = await api('/api/qq/login/qrcode', { method: 'POST' });
+    if (!r.ok) {
+      box.innerHTML = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span>` +
+        (r.hint ? `<p style="margin-top:8px;font-size:12px;color:var(--text-2);line-height:1.6;">${esc(r.hint)}</p>` : '') +
+        '</div>';
+      status.textContent = r.message || '获取失败';
+      toast(r.message || '获取二维码失败', 'err');
+      return;
+    }
+    box.innerHTML = `<img src="${esc(r.image)}" alt="QQ 登录二维码">`;
+    status.textContent = r.message || '等待扫码…';
+    startQQLoginPolling();
+  } catch (e) {
+    box.innerHTML = `<div class="qr-empty"><span>获取失败：${esc(e.message)}</span></div>`;
+    toast('获取二维码失败：' + e.message, 'err');
+  }
+}
+
+/** 扫码状态轮询：3 秒一次、上限 5 分钟；切页/异常都要停表 */
+function startQQLoginPolling() {
+  stopQQLoginPolling();
+  const t0 = Date.now();
+  STATE.qqLoginTimer = setInterval(async () => {
+    if (Date.now() - t0 > 5 * 60 * 1000) {
+      stopQQLoginPolling();
+      $('#qq-qr-status').textContent = '二维码已过期，请重新获取';
+      return;
+    }
+    if (STATE.page !== 'connect') { stopQQLoginPolling(); return; }
+    try {
+      const r = await api('/api/qq/login/check');
+      if (r.loggedIn) {
+        stopQQLoginPolling();
+        $('#qq-qr-status').textContent = '✅ 登录成功' + (r.qq ? `（${r.qq}）` : '');
+        toast('QQ 登录成功', 'ok');
+        await loadConfig();
+        await refreshQQStatus();
+      } else {
+        $('#qq-qr-status').textContent = r.message || '等待扫码…';
+      }
+    } catch (_) { /* 单次失败不打断轮询 */ }
+  }, 3000);
+}
+
+function stopQQLoginPolling() {
+  if (STATE.qqLoginTimer) { clearInterval(STATE.qqLoginTimer); STATE.qqLoginTimer = null; }
+}
+
+/** 探测已有 OneBot 网关 */
 async function detectQQ() {
   const btn = $('#btn-detect-qq');
   const hint = $('#qq-detect-hint');
   const statusBox = $('#qq-test-status');
   btn.disabled = true;
-  const oldText = btn.innerHTML;
-  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> 探测中…';
   hint.textContent = '正在扫描本机常见端口…';
   statusBox.className = 'test-status';
   statusBox.innerHTML = '';
-
   try {
     const r = await api('/api/qq/detect', { method: 'POST' });
     if (r.ok && r.found && r.found.length) {
       const item = r.found[0];
       hint.textContent = `发现网关：${item.url}${item.qq ? '（' + item.qq + '）' : ''}`;
       toast('已自动填充网关地址', 'ok');
-      await loadConfig();  // 刷新表单（地址已回填）
-      // 自动再测一次连接
+      await loadConfig();
       await testQQ();
     } else {
-      hint.textContent = '没有探测到运行的网关。若已装 Docker，可复制上方命令一键启动 NapCat。';
+      hint.textContent = '没探测到运行中的网关。可以直接点「一键部署 QQ 网关」。';
       statusBox.className = 'test-status err';
-      statusBox.innerHTML = '<div class="ts-line"><span class="ts-icon">✗</span><span>未探测到 OneBot 网关</span></div><div class="ts-hint">请确认 NapCat 已启动，或运行上方 Docker 命令后再试。</div>';
+      statusBox.innerHTML = '<div class="ts-line"><span class="ts-icon">✗</span><span>未探测到 OneBot 网关</span></div>' +
+        '<div class="ts-hint">点左侧「一键部署 QQ 网关」让程序自动装一个。</div>';
     }
   } catch (e) {
     hint.textContent = '探测失败：' + e.message;
   }
   btn.disabled = false;
-  btn.innerHTML = oldText;
 }
 
 async function testQQ() {
@@ -967,12 +1271,14 @@ async function testQQ() {
   box.innerHTML = '<div class="ts-line">正在连接…</div>';
 
   try {
+    const tok = $('#onebot-token').value.trim();
     await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
     const r = await api('/api/qq/test', {
       method: 'POST',
       body: JSON.stringify({
         http_url: $('#onebot-http').value.trim(),
-        token: $('#onebot-token').value.trim(),
+        // 掩码值不要回传（那会把真实 Token 覆盖成 ••••1234）
+        token: tok.includes('•') ? '' : tok,
       }),
     });
     if (r.ok) {
@@ -994,6 +1300,22 @@ async function testQQ() {
   }
   btn.disabled = false;
   btn.textContent = '测试连接';
+}
+
+/** 查看 / 隐藏 QQ 网关日志 */
+async function toggleQQLogs() {
+  const box = $('#qq-logview');
+  const btn = $('#btn-qq-logs');
+  if (!box.hidden) { box.hidden = true; btn.textContent = '查看网关日志'; return; }
+  box.hidden = false;
+  box.textContent = '正在读取日志…';
+  btn.textContent = '收起日志';
+  try {
+    const r = await api('/api/qq/logs?lines=120');
+    box.textContent = r.log || '(无日志)';
+  } catch (e) {
+    box.textContent = '读取失败：' + e.message;
+  }
 }
 
 /* ══════════ 人格知识库 ══════════ */
@@ -1116,17 +1438,30 @@ function bind() {
     toast('已刷新');
   });
 
-  // 通道复选卡片
+  // 平台卡片：勾选 / 取消
   $$('#adapter-type input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', () => {
       CHANNELS[cb.value] = cb.checked;
+      renderPlatformCards();
       applyChannels();
     });
   });
-  // 微信子选项
+  // 整张卡片可点（label 已带 checkbox，这里只处理键盘可达性）
+  $$('#adapter-type .pcard-head').forEach(el => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' && e.key !== 'Enter') return;
+      const cb = el.querySelector('input[type=checkbox]');
+      if (!cb) return;
+      e.preventDefault();
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+  // 微信接入方式（分段选择）
   $$('#wechat-sub input[name=wechat_type]').forEach(r => {
     r.addEventListener('change', () => {
       if (r.checked) CHANNELS.wechat_type = r.value;
+      renderPlatformCards();
       applyChannels();
     });
   });
@@ -1142,10 +1477,20 @@ function bind() {
   $('#btn-continue').addEventListener('click', runOneClick);
   $('#btn-test-gw').addEventListener('click', testGateway);
   $('#btn-gw-logs').addEventListener('click', toggleGatewayLogs);
+  $('#btn-fetch-token').addEventListener('click', () => fetchGeweToken());
 
   // QQ / OneBot
+  $('#btn-setup-qq').addEventListener('click', setupQQ);
   $('#btn-detect-qq').addEventListener('click', detectQQ);
   $('#btn-test-qq').addEventListener('click', testQQ);
+  $('#btn-qq-get-qr').addEventListener('click', getQQQr);
+  $('#btn-qq-qr').addEventListener('click', async () => {
+    const wrap = $('#qq-qr-wrap');
+    wrap.hidden = false;
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await getQQQr();
+  });
+  $('#btn-qq-logs').addEventListener('click', toggleQQLogs);
   $('#btn-save-qq').addEventListener('click', async () => {
     await saveConfig();
     await loadConfig();
@@ -1155,13 +1500,6 @@ function bind() {
     const el = $('#qq-ws-url');
     copyText(el.textContent.trim(), $('#btn-copy-ws'));
   });
-  const napcatCmdEl = $('#btn-copy-napcat');
-  if (napcatCmdEl) {
-    napcatCmdEl.addEventListener('click', () => {
-      const el = $('#napcat-docker-cmd');
-      copyText(el.textContent.trim(), napcatCmdEl);
-    });
-  }
 
   // 人格知识库
   $('#btn-mem-refresh').addEventListener('click', loadMemory);
