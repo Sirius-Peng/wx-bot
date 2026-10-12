@@ -71,8 +71,6 @@ class OneBotAdapter(BaseAdapter):
     """OneBot 11 协议适配器（QQ）。私聊 + 群聊全支持。"""
 
     platform = "onebot"
-    supports_private = True
-    supports_group = True
 
     def __init__(self, http_url: str = "http://127.0.0.1:3000",
                  access_token: str = "", bot_qq: str = "",
@@ -208,7 +206,6 @@ class OneBotAdapter(BaseAdapter):
                 content=content,
                 raw_content=str(e.get("raw_message") or ""),
                 msg_type="text",
-                mentions=[],
                 timestamp=int(e.get("time") or time.time()) * 1000,
                 is_at_me=is_at_me,
                 group_id=group_id or None,

@@ -43,6 +43,10 @@ CATEGORIES = {
 SCOPE_USER = "user"     # 跟着人走，跨群共享
 SCOPE_GROUP = "group"   # 只在某个群生效
 
+# owner_id 取这些值时，表示"对所有人都生效"（界面上手动添加、留空对象时用）
+# ⚠️ 没有这一步，"手动添加"的记忆永远不会被召回 —— 用户会认为知识库坏了
+GLOBAL_OWNERS = {"", "global", "*", "all"}
+
 # 检索参数
 MAX_INJECT = 6          # 每次最多注入几条记忆
 MAX_ITEMS = 3000        # 总量上限，超出后淘汰低分项
@@ -273,9 +277,12 @@ class PersonaMemory:
         scored: list[tuple[float, MemoryItem]] = []
 
         for it in self._items.values():
-            # 只取属于该用户，或该群作用域的记忆
-            if not ((it.scope == SCOPE_USER and it.owner_id == user_id) or
-                    (it.scope == SCOPE_GROUP and it.owner_id == chat_id)):
+            # 取该用户本人的、全局通用的、以及该群作用域的记忆
+            if not (
+                (it.scope == SCOPE_USER and it.owner_id in GLOBAL_OWNERS) or
+                (it.scope == SCOPE_USER and it.owner_id == user_id) or
+                (it.scope == SCOPE_GROUP and it.owner_id == chat_id)
+            ):
                 continue
 
             score = 0.0

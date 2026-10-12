@@ -11,15 +11,30 @@ from typing import Optional
 
 from .types import WxMessage
 
-SYSTEM_PROMPT = """你是微信里的 AI 助手"小助手"。
-
-行为准则：
+#: 固定行为准则（与用户配置的"人设"拼接使用）
+BASE_RULES = """行为准则：
 1. 回复简洁自然，像朋友聊天，不要长篇大论，控制在 200 字以内
-2. 群聊场景下，如果不确定该不该插话，就保持沉默
-3. 不要暴露你是机器人，除非被直接询问
-4. 不讨论政治、不传播谣言、不输出违规内容
-5. 不确定的事情如实说不知道，不要编造
-"""
+2. 不要暴露你是机器人，除非被直接询问
+3. 不讨论政治、不传播谣言、不输出违规内容
+4. 不确定的事情如实说不知道，不要编造"""
+
+
+def build_system_prompt(name: str = "", persona: str = "") -> str:
+    """拼出系统提示词。
+
+    ⚠️ 这里是"用户配置的人设"真正生效的地方。
+    早期版本把 SYSTEM_PROMPT 写死成「你是微信里的 AI 助手"小助手"」，
+    用户在「模型与行为」里改的名称与人设**完全没有传给模型** ——
+    表现就是"人设改了没反应 / 人格无法正确加载"。
+    """
+    bot = (name or "").strip() or "小助手"
+    lines = [f'你是"{bot}"，一个聊天助手。']
+    p = (persona or "").strip()
+    if p:
+        lines.append(f"\n【你的人物设定】\n{p}")
+    lines.append(f"\n{BASE_RULES}")
+    return "\n".join(lines)
+
 
 WINDOW_BUDGET = 5000      # L2 短期窗口 token 预算
 COMPACT_THRESHOLD = 5000  # 超过则触发滚动摘要
@@ -35,9 +50,12 @@ def approx_tokens(text: str) -> int:
 class ContextManager:
     """装配与维护会话上下文。存储抽象注入，可换 Redis / 内存。"""
 
-    def __init__(self, store, compactor=None):
+    def __init__(self, store, compactor=None, bot_name: str = "",
+                 persona: str = ""):
         self.store = store            # 需实现 get_recent / get_summary / push / set_summary
         self.compactor = compactor    # 摘要压缩器，需实现 summarize(turns) -> str
+        # ⚠️ 这两个必须传进来，否则用户配置的人设不生效（见 build_system_prompt）
+        self.system_prompt = build_system_prompt(bot_name, persona)
 
     async def build(self, msg: WxMessage, rag_context: str = "",
                     memory_context: str = "") -> list[dict]:
@@ -50,7 +68,7 @@ class ContextManager:
         history = await self.store.get_recent(key)
         summary = await self.store.get_summary(key)
 
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
         if summary:
             messages.append({"role": "system", "content": f"[历史对话摘要] {summary}"})
         if memory_context:

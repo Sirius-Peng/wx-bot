@@ -208,6 +208,35 @@ async def main() -> None:
         else:
             print("  ✗ 未观察到发送 —— 链路可能有问题")
 
+    ws_url = f"ws://127.0.0.1:{app_port}/ws/onebot"
+
+    # ── 7b. 群里没 @ 机器人 → 必须保持沉默（不刷屏是群聊场景的底线）──
+    before = len(RECEIVED)
+    event_quiet = {**event, "message_id": 12346,
+                   "message": [{"type": "text",
+                                "data": {"text": "大家早上好，今天天气不错"}}]}
+    await push_event_via_ws(ws_url, event_quiet)
+    await asyncio.sleep(2)
+    quiet_ok = len(RECEIVED) == before
+    print(f"[7b] {'✓' if quiet_ok else '✗'} 群里没 @ 机器人时不回复"
+          f"（新增发送 {len(RECEIVED) - before} 条）")
+
+    # ── 7c. 私聊 → 一律回复 ──
+    before = len(RECEIVED)
+    event_private = {
+        "time": int(time.time()), "self_id": 10001, "post_type": "message",
+        "message_type": "private", "sub_type": "friend", "message_id": 12347,
+        "user_id": 55555, "raw_message": "在吗",
+        "message": [{"type": "text", "data": {"text": "在吗，帮我看看这个报错"}}],
+        "sender": {"user_id": 55555, "nickname": "小李"},
+    }
+    await push_event_via_ws(ws_url, event_private)
+    await asyncio.sleep(4)
+    new_msgs = RECEIVED[before:]
+    private_ok = bool(new_msgs) and new_msgs[-1].get("action") == "send_private_msg"
+    print(f"[7c] {'✓' if private_ok else '✗'} 私聊一律回复"
+          f"（action={(new_msgs[-1].get('action') if new_msgs else '无')}）")
+
     # ── 8. 检查知识库 ──
     async with httpx.AsyncClient(timeout=10) as c:
         st = (await c.get(f"{base}/api/memory/stats")).json()

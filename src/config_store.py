@@ -21,31 +21,24 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 @dataclass
 class AdapterConfig:
-    """接入通道配置。支持微信与 QQ 同时启用。"""
+    """接入通道配置。微信与 QQ 可同时启用。"""
 
     # ── 向后兼容：旧版 type 字段 ──────────────────────────────
     # 旧版用 type 单选；新版用 wechat_enabled + qq_enabled 多选。
     # 读取时若检测到旧版 type，自动迁移。
-    type: str = "gewechat"            # deprecated，仅用于迁移旧配置
+    type: str = ""                    # deprecated，仅用于迁移旧配置
 
     # ── 微信通道 ──────────────────────────────────────────────
-    wechat_enabled: bool = True       # 是否启用微信
-    # 微信接入方式：
-    #   wechatpadpro —— iPad 协议，私聊+群聊（默认；接替已停服的 GeWe）
-    #   ilink        —— 腾讯官方，仅私聊，零封号
-    #   gewechat     —— **已停止维护**，仅保留旧配置兼容，不要在新部署里用
-    wechat_type: str = "wechatpadpro"
+    # 只保留腾讯官方 iLink（合规、零封号、仅私聊）。个人微信的群聊能力已整体下线：
+    # 非官方协议端维护状态不可控，与其留一个随时会坏的通道，不如只保留官方这一条。
+    wechat_enabled: bool = True
+    bot_nickname: str = ""            # QQ 群 @ 用的昵称（同时作为机器人名的兜底）
 
-    # GeWe / Gewechat
-    gewe_base_url: str = "http://127.0.0.1:2531"
-    gewe_token: str = ""
-    gewe_app_id: str = ""
-    bot_wxid: str = ""
-    bot_nickname: str = ""
-
-    # 官方 iLink
+    # 官方 iLink Bot API
     ilink_state_dir: str = "./data/ilink"
-    hybrid_enabled: bool = False      # 混合：私聊走官方、群聊走协议
+
+    # 旧配置里的 wechat_type 已无意义，保留字段只为读旧文件时不报错
+    wechat_type: str = "ilink"
 
     # ── QQ 通道 ───────────────────────────────────────────────
     qq_enabled: bool = False          # 是否启用 QQ
@@ -55,13 +48,6 @@ class AdapterConfig:
     # NapCat WebUI Token：一键部署时自动生成并写进容器，
     # 保存下来是为了重启后还能登录同一个容器的 WebUI 拿二维码
     napcat_webui_token: str = ""
-
-    # ── WeChatPadPro（接替已停服的 GeWe，用于微信群聊）────────
-    # 首选：本地协议端进程（原生 macOS arm64 二进制，无需 Docker）
-    wpp_base_url: str = "http://127.0.0.1:1238"
-    wpp_admin_key: str = ""      # 管理员密钥，用来生成授权码
-    wpp_auth_key: str = ""       # 授权码，业务接口的 ?key= 就是它
-    wpp_binary: str = ""         # 协议端可执行文件路径（留空则自动探测）
 
 
 @dataclass
@@ -80,17 +66,16 @@ class LLMConfig:
 
 @dataclass
 class BotConfig:
-    """机器人行为配置。"""
+    """机器人行为配置。
+
+    这些字段**必须真正生效**：`name` / `persona` 会拼进系统提示词
+    （见 `core/context.py::build_system_prompt`），
+    `memory_*` 控制人格知识库。改了界面上的值就必须能看到行为变化。
+    """
     name: str = "小助手"
-    persona: str = "友好、简洁、乐于助人的群聊助手"
-    # 群聊回复策略：
-    #   mention_only —— 仅 @ 机器人时回复（默认）
-    #   smart        —— 智能插话（启发式 + 小模型判定，约 1-2% 消息被回复）
-    group_reply_mode: str = "mention_only"
-    reply_prob: float = 0.7           # 概率闸门（仅智能模式生效）
-    quiet_hours: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
-    global_daily_limit: int = 800
-    group_reply_at_sender: bool = True  # 群聊回复时 @ 提问者
+    persona: str = "友好、简洁、乐于助人的助手"
+    # 群聊里回复时是否 @ 提问者（QQ 群用）
+    group_reply_at_sender: bool = True
 
     # ── 人格知识库 ────────────────────────────────────────────
     memory_enabled: bool = True       # 是否随对话积累记忆
@@ -99,28 +84,10 @@ class BotConfig:
 
 
 @dataclass
-class GroupConfigItem:
-    """单个群的配置。未显式设置时跟随全局策略。"""
-    chat_id: str = ""
-    name: str = ""
-    enabled: bool = True
-    mode: str = ""                    # 空 = 跟随全局策略；mention_only | smart | keyword_only
-    wake_words: list[str] = field(default_factory=lambda: ["小助手"])
-    cooldown_sec: int = 0             # 0 = 不限速
-    hourly_limit: int = 60
-    reply_prob: float = 1.0
-    quiet_hours: list[int] = field(default_factory=list)   # 空 = 不设静默时段
-    persona: str = ""
-
-
-@dataclass
 class AppConfig:
     adapter: AdapterConfig = field(default_factory=AdapterConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     bot: BotConfig = field(default_factory=BotConfig)
-    groups: dict[str, GroupConfigItem] = field(default_factory=dict)
-    whitelist_users: list[str] = field(default_factory=list)
-    blacklist_users: list[str] = field(default_factory=list)
 
 
 class ConfigStore:
@@ -153,24 +120,19 @@ class ConfigStore:
             if old_type == "onebot":
                 a["wechat_enabled"] = False
                 a["qq_enabled"] = True
-                a["wechat_type"] = "gewechat"
-            elif old_type == "ilink":
-                a["wechat_enabled"] = True
-                a["qq_enabled"] = False
-                a["wechat_type"] = "ilink"
             else:
                 a["wechat_enabled"] = True
                 a["qq_enabled"] = False
-                a["wechat_type"] = old_type or "gewechat"
+            a["wechat_type"] = "ilink"
 
         cfg.adapter = AdapterConfig(**{k: v for k, v in a.items()
                                        if k in AdapterConfig.__dataclass_fields__})
 
-        # ⚠️ gewechat 上游已停止维护（README 首行即「技术归档」，
-        # 运行服务 / Docker 镜像 / 技术支持全部不再提供）。
-        # 旧配置里指向它的，自动迁到 WeChatPadPro，避免用户对着死通道排查。
-        if cfg.adapter.wechat_type == "gewechat" and not cfg.adapter.wpp_auth_key:
-            cfg.adapter.wechat_type = "wechatpadpro"
+        # ⚠️ 个人微信的群聊通道（GeWe / WeChatPadPro 等非官方协议端）已整体下线，
+        # 旧配置一律归到腾讯官方 iLink —— 与其留一个随时会坏的通道，
+        # 不如只保留官方这一条（合规、零封号，仅私聊）。
+        if cfg.adapter.wechat_type != "ilink":
+            cfg.adapter.wechat_type = "ilink"
 
         l = raw.get("llm") or {}
         cfg.llm = LLMConfig(**{k: v for k, v in l.items()
@@ -180,16 +142,6 @@ class ConfigStore:
         cfg.bot = BotConfig(**{k: v for k, v in b.items()
                                if k in BotConfig.__dataclass_fields__})
 
-        for cid, g in (raw.get("groups") or {}).items():
-            if not isinstance(g, dict):
-                continue
-            item = GroupConfigItem(**{k: v for k, v in g.items()
-                                      if k in GroupConfigItem.__dataclass_fields__})
-            item.chat_id = cid
-            cfg.groups[cid] = item
-
-        cfg.whitelist_users = list(raw.get("whitelist_users") or [])
-        cfg.blacklist_users = list(raw.get("blacklist_users") or [])
         return cfg
 
     # ── 写 ────────────────────────────────────────────────────
@@ -200,9 +152,6 @@ class ConfigStore:
             "adapter": asdict(cfg.adapter),
             "llm": asdict(cfg.llm),
             "bot": asdict(cfg.bot),
-            "groups": {cid: asdict(g) for cid, g in cfg.groups.items()},
-            "whitelist_users": cfg.whitelist_users,
-            "blacklist_users": cfg.blacklist_users,
         }
         text = json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -224,19 +173,13 @@ class ConfigStore:
             "adapter": asdict(cfg.adapter),
             "llm": asdict(cfg.llm),
             "bot": asdict(cfg.bot),
-            "groups": {cid: asdict(g) for cid, g in cfg.groups.items()},
-            "whitelist_users": cfg.whitelist_users,
-            "blacklist_users": cfg.blacklist_users,
         }
         for k in ("primary_key", "fallback_key", "judge_key"):
             d["llm"][k] = _mask(d["llm"].get(k, ""))
-        d["adapter"]["gewe_token"] = _mask(d["adapter"].get("gewe_token", ""))
         d["adapter"]["onebot_token"] = _mask(d["adapter"].get("onebot_token", ""))
         d["adapter"]["napcat_webui_token"] = _mask(
             d["adapter"].get("napcat_webui_token", "")
         )
-        for k in ("wpp_admin_key", "wpp_auth_key"):
-            d["adapter"][k] = _mask(d["adapter"].get(k, ""))
         return d
 
 
