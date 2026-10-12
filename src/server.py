@@ -117,6 +117,31 @@ async def api_restart() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  网关连接（自动探测 + 连通性测试）
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/gateway/detect")
+async def api_gateway_detect() -> dict:
+    """自动探测常见的网关地址，省去用户自己猜地址。"""
+    return await runtime.detect_gateway()
+
+
+@app.post("/api/gateway/test")
+async def api_gateway_test(request: Request) -> dict:
+    """测试网关连通性与 Token 有效性，失败时给出可操作的提示。"""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    return await runtime.test_gateway(
+        base_url=body.get("base_url", ""),
+        token=body.get("token", ""),
+        app_id=body.get("app_id", ""),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  扫码登录
 # ═══════════════════════════════════════════════════════════════════
 

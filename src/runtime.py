@@ -15,12 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import httpx
+
 from .adapters.base import BaseAdapter
 from .adapters.gewechat import GewechatAdapter
 from .adapters.hybrid import HybridAdapterRouter
 from .adapters.ilink import ILinkAdapter
 from .config_store import AppConfig, ConfigStore, GroupConfigItem
 from .core.context import ContextManager
+from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.sender import HumanLikeSender
 from .core.trigger import GroupConfig, TriggerRouter, default_group_config
@@ -364,56 +367,191 @@ class BotRuntime:
 
         adapter.send_text = send_wrapped            # type: ignore[method-assign]
 
+    # ══ 网关连接：自动探测 + 连通性测试 ═══════════════════════
+    #
+    # 对非技术用户来说，"填写网关地址和 Token"是最容易卡住的一步。
+    # 所以这里提供两个能力，让界面可以引导用户而不是让他自己猜：
+    #   · detect_gateway()  自动探测常见地址，告诉用户"哪个能用"
+    #   · test_gateway()    验证连通性与 Token，出错时给出人话解释
+
+    # 常见网关地址，按"最可能可用"排序
+    GATEWAY_CANDIDATES = [
+        ("http://127.0.0.1:2531", "本机自建网关", "自建部署的默认端口"),
+        ("http://localhost:2531", "本机自建网关", "自建部署的默认端口"),
+        ("http://127.0.0.1:2532", "本机自建网关（备用端口）", "部分部署方式用 2532"),
+        ("https://api.geweapi.com/gewe", "GeWe 云端服务", "无需自己部署，按量付费"),
+    ]
+
+    async def _gateway_call(self, endpoint: str, body: dict,
+                            base_url: str = "", token: str = "",
+                            timeout: float = 25.0) -> dict:
+        """调用 GeWe 网关。
+
+        统一处理两件容易出错的事：
+          1. **代理绕过** —— 本机地址若走系统代理会返回 502（见 core/http.py）
+          2. **错误翻译** —— 把技术异常转成用户能看懂并知道怎么处理的话
+
+        返回 {"ok": bool, "data": dict, "error": str, "status": int}
+        """
+        a = self.cfg.adapter
+        base = (base_url or a.gewe_base_url or "").rstrip("/")
+        tok = token or a.gewe_token
+        if not base:
+            return {"ok": False, "status": 0, "error": "还没有填写网关地址"}
+        if not tok:
+            return {"ok": False, "status": 0, "error": "还没有填写 Token"}
+
+        url = f"{base}/v2/api/{endpoint}"
+        try:
+            async with make_client(base, timeout=timeout) as c:
+                r = await c.post(url, json=body, headers={"X-GEWE-TOKEN": tok})
+                if r.status_code >= 400:
+                    return {
+                        "ok": False, "status": r.status_code,
+                        "error": explain_error(
+                            httpx.HTTPStatusError(
+                                f"HTTP {r.status_code}", request=r.request, response=r
+                            ), url,
+                        ),
+                    }
+                return {"ok": True, "status": r.status_code, "data": r.json()}
+        except httpx.HTTPStatusError as e:
+            return {"ok": False, "status": e.response.status_code,
+                    "error": explain_error(e, url)}
+        except Exception as e:
+            return {"ok": False, "status": 0, "error": explain_error(e, url)}
+
+    async def detect_gateway(self) -> dict:
+        """自动探测可用的网关地址。
+
+        对每个候选地址做一次轻量请求：
+          · 拿到任何 HTTP 响应 → 该地址上有服务在运行
+          · 连接失败        → 跳过
+        """
+        results = []
+        for url, label, note in self.GATEWAY_CANDIDATES:
+            r = await self._gateway_call(
+                "login/checkLogin", {"appId": self.cfg.adapter.gewe_app_id},
+                base_url=url, timeout=6.0,
+            )
+            reachable = r.get("status", 0) > 0
+            results.append({
+                "url": url, "label": label, "note": note,
+                "reachable": reachable,
+                "status": r.get("status", 0),
+                "error": "" if reachable else r.get("error", ""),
+            })
+
+        found = [x for x in results if x["reachable"]]
+        return {
+            "ok": True,
+            "found": found,
+            "all": results,
+            "message": (
+                f"发现 {len(found)} 个可用的网关地址"
+                if found else
+                "没有探测到正在运行的网关服务。若尚未部署，请先按下方指引启动一个。"
+            ),
+        }
+
+    async def test_gateway(self, base_url: str = "", token: str = "",
+                           app_id: str = "") -> dict:
+        """测试网关连通性与 Token 有效性。"""
+        a = self.cfg.adapter
+        base = (base_url or a.gewe_base_url or "").rstrip("/")
+        tok = token or a.gewe_token
+
+        if not base:
+            return {"ok": False, "stage": "config", "message": "请先填写网关地址"}
+        if not tok:
+            return {"ok": False, "stage": "config", "message": "请先填写 Token"}
+
+        # 第 1 步：能不能连上
+        r = await self._gateway_call(
+            "login/checkLogin", {"appId": app_id or a.gewe_app_id},
+            base_url=base, token=tok, timeout=10.0,
+        )
+        if r.get("status", 0) == 0:
+            return {
+                "ok": False, "stage": "connect",
+                "message": f"连不上网关 {base}",
+                "detail": r.get("error", ""),
+                "hint": "请确认网关服务已启动；若你本机装了代理软件，"
+                        "本机地址不应经过代理（系统已自动绕过，但请确认地址填写正确）。",
+            }
+
+        # 第 2 步：Token 是否有效
+        body = r.get("data") or {}
+        ret = body.get("ret")
+        if ret not in (200, 0):
+            return {
+                "ok": False, "stage": "auth",
+                "message": "网关可以连接，但 Token 校验未通过",
+                "detail": f"ret={ret} msg={body.get('msg') or ''}",
+                "hint": "请到 GeWe 控制台重新复制 Token（注意不要带多余空格）。",
+            }
+
+        # 第 3 步：设备是否已登录
+        data = body.get("data") or {}
+        logged_in = bool(data.get("wxid") or data.get("nickName"))
+        return {
+            "ok": True, "stage": "ok",
+            "message": "网关连接正常，Token 有效" + ("，且已登录微信" if logged_in else ""),
+            "logged_in": logged_in,
+            "wxid": data.get("wxid", ""),
+            "nickName": data.get("nickName", ""),
+            "detail": "",
+            "hint": "" if logged_in else "下一步：点击「获取登录二维码」完成微信登录。",
+        }
+
     # ── 扫码登录 ──────────────────────────────────────────────
 
     async def login_qrcode(self) -> dict:
         """获取登录二维码。
 
-        GeWe 自建网关：POST {base}/v2/api/login/getLoginQrCode
-        云端 SaaS：    POST https://api.geweapi.com/gewe/v2/api/login/getLoginQrCode
-        （用户只需把「网关地址」填对即可，两种部署方式都兼容）
-
-        接口命名在不同版本间略有差异，这里按候选列表依次尝试。
+        接口命名在不同 GeWe 版本间略有差异，这里按候选列表依次尝试。
         """
         a = self.cfg.adapter
         if a.type == "ilink":
             return {"ok": False, "message": "官方通道请用命令行扫码：openclaw channels login"}
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=25.0) as c:
-                data = None
-                last_err = ""
-                for ep in ("login/getLoginQrCode", "login/getQrCode", "login/getQr"):
-                    try:
-                        r = await c.post(
-                            f"{a.gewe_base_url.rstrip('/')}/v2/api/{ep}",
-                            json={"appId": a.gewe_app_id, "proxyIp": ""},
-                            headers={"X-GEWE-TOKEN": a.gewe_token},
-                        )
-                        if r.status_code != 200:
-                            last_err = f"HTTP {r.status_code}"
-                            continue
-                        j = r.json()
-                        if j.get("ret") == 200:
-                            data = j.get("data") or {}
-                            break
-                        last_err = f"ret={j.get('ret')} {j.get('msg')}"
-                    except Exception as e:
-                        last_err = str(e)
-                if data is None:
-                    return {"ok": False, "message": f"获取二维码失败：{last_err}"}
+        if not a.gewe_base_url:
+            return {"ok": False, "message": "请先填写网关地址（可点「自动探测」）"}
+        if not a.gewe_token:
+            return {"ok": False, "message": "请先填写 GeWe Token"}
 
-            self._login = {
-                "status": "waiting",
-                "qrcode": data.get("qrData", ""),
-                "image": data.get("qrImgBase64") or data.get("qrData", ""),
-                "uuid": data.get("uuid", ""),
-                "app_id": data.get("appId") or a.gewe_app_id,
-                "message": "请用微信扫码（二维码 150 秒内有效）",
+        data, last_error = None, ""
+        for ep in ("login/getLoginQrCode", "login/getQrCode", "login/getQr"):
+            r = await self._gateway_call(
+                ep, {"appId": a.gewe_app_id, "proxyIp": ""}, timeout=25.0,
+            )
+            if not r.get("ok"):
+                last_error = r.get("error", "")
+                # 连不上就不必再试其它接口名了
+                if r.get("status", 0) == 0:
+                    break
+                continue
+            body = r.get("data") or {}
+            if body.get("ret") == 200:
+                data = body.get("data") or {}
+                break
+            last_error = f"网关返回 ret={body.get('ret')} {body.get('msg') or ''}"
+
+        if data is None:
+            return {
+                "ok": False,
+                "message": last_error or "获取二维码失败",
+                "hint": "可先点「测试连接」确认网关是否正常。",
             }
-            return {"ok": True, **self._login}
-        except Exception as e:
-            return {"ok": False, "message": f"获取二维码失败：{e}"}
+
+        self._login = {
+            "status": "waiting",
+            "qrcode": data.get("qrData", ""),
+            "image": data.get("qrImgBase64") or data.get("qrData", ""),
+            "uuid": data.get("uuid", ""),
+            "app_id": data.get("appId") or a.gewe_app_id,
+            "message": "请用微信扫码（二维码 150 秒内有效）",
+        }
+        return {"ok": True, **self._login}
 
     async def login_check(self, captcha: str = "") -> dict:
         """轮询登录状态。
@@ -422,52 +560,45 @@ class BotRuntime:
         返回 data.status：1 = 已扫码待确认；成功时 data 里会带 wxid / nickName。
         若返回 data.url，表示需要人脸/滑块验证。
         """
-        a = self.cfg.adapter
         if not self._login.get("uuid"):
             return {"ok": False, "message": "请先获取二维码"}
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=25.0) as c:
-                r = await c.post(
-                    f"{a.gewe_base_url.rstrip('/')}/v2/api/login/checkLogin",
-                    json={
-                        "appId": self._login["app_id"],
-                        "proxyIp": "",
-                        "uuid": self._login["uuid"],
-                        "autoSliding": False,
-                    },
-                    headers={"X-GEWE-TOKEN": a.gewe_token},
-                )
-                r.raise_for_status()
-                d = r.json()
-            data = d.get("data") or {}
 
-            # 需要人脸/滑块验证
-            if data.get("url") and not data.get("wxid"):
-                self._login["status"] = "verify"
-                self._login["message"] = "需要人脸/滑块验证，请在手机端完成"
-                self._login["verify_url"] = data["url"]
-                return {"ok": True, **self._login}
+        r = await self._gateway_call("login/checkLogin", {
+            "appId": self._login["app_id"],
+            "proxyIp": "",
+            "uuid": self._login["uuid"],
+            "autoSliding": False,
+        }, timeout=25.0)
 
-            if data.get("wxid"):
-                self._login["status"] = "confirmed"
-                self._login["message"] = "登录成功"
-                # 登录后自动回填配置，免去用户手抄 wxid
-                cfg = self.config_store.load()
-                cfg.adapter.bot_wxid = data.get("wxid", "")
-                cfg.adapter.gewe_app_id = self._login["app_id"]
-                if data.get("nickName"):
-                    cfg.adapter.bot_nickname = cfg.adapter.bot_nickname or data["nickName"]
-                self.config_store.save(cfg)
-                self.cfg = cfg
-                return {"ok": True, **self._login}
-
-            return {"ok": True, "status": self._login["status"],
-                    "message": self._login.get("message") or "等待扫码…"}
-        except Exception as e:
+        if not r.get("ok"):
             self._login["status"] = "failed"
-            self._login["message"] = str(e)
-            return {"ok": False, "message": f"检查登录失败：{e}"}
+            self._login["message"] = r.get("error", "检查登录失败")
+            return {"ok": False, "message": r.get("error", "检查登录失败")}
+
+        data = (r.get("data") or {}).get("data") or {}
+
+        # 需要人脸/滑块验证
+        if data.get("url") and not data.get("wxid"):
+            self._login["status"] = "verify"
+            self._login["message"] = "需要人脸/滑块验证，请在手机端完成"
+            self._login["verify_url"] = data["url"]
+            return {"ok": True, **self._login}
+
+        if data.get("wxid"):
+            self._login["status"] = "confirmed"
+            self._login["message"] = "登录成功"
+            # 登录后自动回填配置，免去用户手抄 wxid
+            cfg = self.config_store.load()
+            cfg.adapter.bot_wxid = data.get("wxid", "")
+            cfg.adapter.gewe_app_id = self._login["app_id"]
+            if data.get("nickName"):
+                cfg.adapter.bot_nickname = cfg.adapter.bot_nickname or data["nickName"]
+            self.config_store.save(cfg)
+            self.cfg = cfg
+            return {"ok": True, **self._login}
+
+        return {"ok": True, "status": self._login["status"],
+                "message": self._login.get("message") or "等待扫码…"}
 
     # ── 群配置 ────────────────────────────────────────────────
 

@@ -204,10 +204,12 @@ async function loadConfig() {
   const c = await api('/api/config');
   STATE.config = c;
 
-  // 通道
+  // 通道（单选卡片）
   adapterType = c.adapter.type || 'gewechat';
-  $$('#adapter-type button').forEach(b =>
-    b.classList.toggle('active', b.dataset.value === adapterType));
+  $$('#adapter-type .choice').forEach(el => {
+    const radio = el.querySelector('input');
+    if (radio) radio.checked = el.dataset.value === adapterType;
+  });
   $('#hybrid-enabled').checked = !!c.adapter.hybrid_enabled;
   $('#gewe-base').value = c.adapter.gewe_base_url || '';
   $('#gewe-token').value = c.adapter.gewe_token || '';
@@ -236,8 +238,48 @@ async function loadConfig() {
   $('#reply-prob-val').textContent = prob + '%';
   $('#quiet-hours').value = (c.bot.quiet_hours || []).join(',');
 
-  // 官方通道时隐藏 GeWe 卡片
-  $('#card-gewe').style.display = adapterType === 'gewechat' ? '' : 'none';
+  applyAdapterType(adapterType);
+  updateWizardStatus(c);
+}
+
+/** 根据接入方式显示/隐藏对应步骤 */
+function applyAdapterType(type) {
+  adapterType = type;
+  const isGeWe = type === 'gewechat';
+  $('#step-2').hidden = !isGeWe;
+  $('#step-3').hidden = !isGeWe;
+  $('#hybrid-row').hidden = !isGeWe;
+  if (!isGeWe) {
+    $('#step-1').querySelector('.wz-status')?.remove();
+  }
+}
+
+/** 更新向导各步骤的状态徽标 */
+function updateWizardStatus(cfg) {
+  const a = (cfg || STATE.config || {}).adapter || {};
+  const gwBadge = $('#gw-badge');
+  if (gwBadge) {
+    const hasBase = !!a.gewe_base_url;
+    const hasToken = !!a.gewe_token;
+    if (hasBase && hasToken) {
+      gwBadge.className = 'wz-status ok';
+      gwBadge.textContent = '已配置';
+    } else {
+      gwBadge.className = 'wz-status';
+      gwBadge.textContent = '待配置';
+    }
+  }
+  const loginBadge = $('#login-badge');
+  if (loginBadge) {
+    const wxid = a.bot_wxid || '';
+    if (wxid) {
+      loginBadge.className = 'wz-status ok';
+      loginBadge.textContent = '已登录';
+    } else {
+      loginBadge.className = 'wz-status';
+      loginBadge.textContent = '未登录';
+    }
+  }
 }
 
 function collectConfig() {
@@ -453,6 +495,114 @@ async function stopBot() {
   await refreshStatus();
 }
 
+/* ══════════ 网关探测与测试 ══════════ */
+
+async function detectGateway() {
+  const btn = $('#btn-detect');
+  const box = $('#detect-result');
+  btn.disabled = true;
+  btn.textContent = '探测中…';
+  box.hidden = false;
+  box.innerHTML = '<div class="detect-empty">正在检查常见网关地址…</div>';
+  try {
+    const r = await api('/api/gateway/detect', { method: 'POST' });
+    renderDetectResult(r);
+  } catch (e) {
+    box.innerHTML = `<div class="detect-empty">探测失败：${esc(e.message)}</div>`;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg> 自动探测可用网关';
+}
+
+function renderDetectResult(r) {
+  const box = $('#detect-result');
+  if (!r.found || !r.found.length) {
+    box.innerHTML = `<div class="detect-empty">
+      <strong>没有探测到正在运行的网关</strong><br>
+      如果你还没部署，展开上方的「还没有网关服务？」看指引；<br>
+      如果已经部署在其他地址，直接在下面手动填写即可。
+    </div>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="detect-empty" style="margin-bottom:4px">找到 ${r.found.length} 个可用地址，点一下即可填入：</div>` +
+    r.found.map(x => `
+      <div class="detect-item" data-url="${esc(x.url)}">
+        <span class="dot"></span>
+        <span class="detect-item-url">${esc(x.url)}</span>
+        <span class="detect-item-label">${esc(x.label)}</span>
+      </div>`).join('');
+
+  $$('#detect-result .detect-item').forEach(el =>
+    el.addEventListener('click', () => {
+      $('#gewe-base').value = el.dataset.url;
+      toast('已填入网关地址，接着点「测试连接」');
+      testGateway();
+    }));
+}
+
+async function testGateway() {
+  const btn = $('#btn-test-gw');
+  const box = $('#test-status');
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+  box.className = 'test-status';
+  box.innerHTML = '<div class="ts-line">正在连接…</div>';
+
+  try {
+    // 先把当前填写的内容存下来，测试用的就是即将保存的值
+    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    const r = await api('/api/gateway/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        base_url: $('#gewe-base').value.trim(),
+        token: $('#gewe-token').value.trim(),
+      }),
+    });
+    renderTestResult(r);
+    await loadConfig();
+  } catch (e) {
+    box.className = 'test-status err';
+    box.innerHTML = `<div class="ts-line"><span class="ts-icon">✗</span><span>测试失败：${esc(e.message)}</span></div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '测试连接';
+}
+
+function renderTestResult(r) {
+  const box = $('#test-status');
+  if (r.ok) {
+    box.className = 'test-status ok';
+    box.innerHTML = `
+      <div class="ts-line"><span class="ts-icon">✓</span><span>${esc(r.message)}</span></div>
+      ${r.hint ? `<div class="ts-hint">${esc(r.hint)}</div>` : ''}`;
+  } else {
+    box.className = 'test-status err';
+    box.innerHTML = `
+      <div class="ts-line"><span class="ts-icon">✗</span><span>${esc(r.message)}</span></div>
+      ${r.detail ? `<div class="ts-detail">${esc(r.detail)}</div>` : ''}
+      ${r.hint ? `<div class="ts-hint">${esc(r.hint)}</div>` : ''}`;
+  }
+}
+
+/** 复制文本到剪贴板 */
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // 剪贴板 API 不可用时退回旧方案
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  const old = btn.textContent;
+  btn.textContent = '已复制';
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+
 /* ══════════ 事件绑定 ══════════ */
 
 function bind() {
@@ -469,13 +619,26 @@ function bind() {
     toast('已刷新');
   });
 
-  // 通道类型
-  $$('#adapter-type button').forEach(b => b.addEventListener('click', () => {
-    adapterType = b.dataset.value;
-    $$('#adapter-type button').forEach(x => x.classList.toggle('active', x === b));
-    $('#card-gewe').style.display = adapterType === 'gewechat' ? '' : 'none';
-  }));
-  $('#btn-save-connect').addEventListener('click', saveConfig);
+  // 接入方式（单选卡片）
+  $$('#adapter-type input[type=radio]').forEach(r =>
+    r.addEventListener('change', () => applyAdapterType(r.value)));
+
+  $('#btn-save-connect').addEventListener('click', async () => {
+    await saveConfig();
+    await loadConfig();
+    toast('已保存，可以继续下一步了', 'ok');
+  });
+
+  // 网关探测与连接测试
+  $('#btn-detect').addEventListener('click', detectGateway);
+  $('#btn-test-gw').addEventListener('click', testGateway);
+
+  // 代码块复制按钮
+  $$('[data-copy]').forEach(b =>
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      copyText(b.dataset.copy, b);
+    }));
 
   // 群聊回复策略
   $$('#group-mode button').forEach(b =>

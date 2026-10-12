@@ -125,78 +125,197 @@
         </div>
       </section>
 
-      <!-- ─────── 接入设置 ─────── -->
+      <!-- ─────── 接入设置（向导式）─────── -->
       <section class="page" id="page-connect">
-        <div class="notice notice-info">
-          <strong>两种接入方式</strong>
-          <p><b>GeWe 协议</b>：支持私聊 + 群聊，需自行部署网关（推荐，功能完整）。<br>
-             <b>官方 iLink</b>：腾讯官方接口，合规零封号，但<b>仅支持私聊</b>，不支持群聊。</p>
-        </div>
 
-        <div class="card">
-          <div class="card-head"><h3>通道类型</h3></div>
-          <div class="segmented" id="adapter-type">
-            <button data-value="gewechat" class="active">GeWe 协议（私聊 + 群聊）</button>
-            <button data-value="ilink">官方 iLink（仅私聊）</button>
-          </div>
-          <label class="switch-row">
-            <div>
-              <strong>混合模式</strong>
-              <span>私聊走官方 iLink（合规），群聊走 GeWe 协议 —— 把风险压到最小</span>
+        <!-- 步骤 1：选接入方式 -->
+        <div class="card wizard-step" id="step-1">
+          <div class="wz-head">
+            <span class="wz-num">1</span>
+            <div class="wz-title">
+              <h3>选择接入方式</h3>
+              <p>决定机器人通过哪种通道连接微信</p>
             </div>
-            <input type="checkbox" id="hybrid-enabled">
-          </label>
-        </div>
+          </div>
+          <div class="wz-body">
+            <div class="choice-list" id="adapter-type">
+              <label class="choice" data-value="gewechat">
+                <input type="radio" name="adapter" value="gewechat" checked>
+                <div class="choice-main">
+                  <div class="choice-title">
+                    GeWe 协议
+                    <span class="tag on">推荐</span>
+                  </div>
+                  <div class="choice-desc">
+                    支持<b>私聊 + 群聊</b>，能力完整。需要先准备一个网关服务（下方有指引）。
+                  </div>
+                </div>
+              </label>
+              <label class="choice" data-value="ilink">
+                <input type="radio" name="adapter" value="ilink">
+                <div class="choice-main">
+                  <div class="choice-title">
+                    官方 iLink
+                    <span class="tag info">合规</span>
+                  </div>
+                  <div class="choice-desc">
+                    腾讯官方接口，<b>零封号风险</b>，但<b>不支持群聊</b>，且需用命令行登录。
+                  </div>
+                </div>
+              </label>
+            </div>
 
-        <div class="card" id="card-gewe">
-          <div class="card-head"><h3>GeWe 网关</h3></div>
-          <div class="field-grid">
-            <label class="field">
-              <span>网关地址</span>
-              <input type="text" id="gewe-base" placeholder="http://127.0.0.1:2531">
-              <em>GeWe 服务所在地址，本机部署填 127.0.0.1</em>
-            </label>
-            <label class="field">
-              <span>Token</span>
-              <input type="password" id="gewe-token" placeholder="X-GEWE-TOKEN">
-              <em>GeWe 控制台获取</em>
-            </label>
-            <label class="field">
-              <span>设备 ID (appId)</span>
-              <input type="text" id="gewe-appid" placeholder="登录后自动填充">
-            </label>
-            <label class="field">
-              <span>机器人微信号</span>
-              <input type="text" id="bot-wxid" placeholder="扫码登录后自动填充">
-            </label>
-            <label class="field">
-              <span>机器人群昵称</span>
-              <input type="text" id="bot-nickname" placeholder="小助手">
-              <em>群里的 @ 名称，需与群昵称一致</em>
+            <label class="switch-row" id="hybrid-row">
+              <div>
+                <strong>混合模式</strong>
+                <span>私聊走官方 iLink（合规），群聊走 GeWe 协议 —— 把风险压到最小</span>
+              </div>
+              <input type="checkbox" id="hybrid-enabled">
             </label>
           </div>
-          <div class="card-foot">
-            <button class="btn btn-primary" id="btn-save-connect">保存</button>
+        </div>
+
+        <!-- 步骤 2：连接网关 -->
+        <div class="card wizard-step" id="step-2">
+          <div class="wz-head">
+            <span class="wz-num">2</span>
+            <div class="wz-title">
+              <h3>连接网关</h3>
+              <p>填写网关地址与 Token，然后测试是否可用</p>
+            </div>
+            <span class="wz-status" id="gw-badge">待配置</span>
+          </div>
+          <div class="wz-body">
+
+            <!-- 还没部署网关？展开指引 -->
+            <details class="help-panel" id="gw-help">
+              <summary>还没有网关服务？点这里看部署指引</summary>
+              <div class="help-body">
+                <p class="help-lead">
+                  群聊功能依赖一个协议网关程序。两种选择，任选其一：
+                </p>
+
+                <div class="help-option">
+                  <div class="help-option-head">
+                    <strong>方式 A · 用云端服务（最简单）</strong>
+                    <span class="tag on">免部署</span>
+                  </div>
+                  <p>无需自己装任何东西。到 GeWe 控制台注册后复制 Token，然后把上方「网关地址」填成：</p>
+                  <div class="code-block">
+                    <code>https://api.geweapi.com/gewe</code>
+                    <button class="btn btn-ghost btn-sm" data-copy="https://api.geweapi.com/gewe">复制</button>
+                  </div>
+                  <p class="help-note">按量付费，适合先试用。</p>
+                </div>
+
+                <div class="help-option">
+                  <div class="help-option-head">
+                    <strong>方式 B · 本机自建（免费）</strong>
+                    <span class="tag">需 Docker</span>
+                  </div>
+                  <p>需要先装好 Docker Desktop，然后执行：</p>
+                  <div class="code-block code-block-multi">
+                    <code>docker run -itd -p 2531:2531 -p 2532:2532 \
+  --privileged=true --name=gewe \
+  registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest</code>
+                    <button class="btn btn-ghost btn-sm" data-copy="docker run -itd -p 2531:2531 -p 2532:2532 --privileged=true --name=gewe registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest">复制</button>
+                  </div>
+                  <p class="help-note">启动后网关地址填 <code>http://127.0.0.1:2531</code>。</p>
+                </div>
+
+                <div class="help-option">
+                  <div class="help-option-head"><strong>怎么拿 Token？</strong></div>
+                  <p>登录 GeWe 控制台 → 复制页面上的 Token（一串字母数字）。自建方式在启动日志里也能看到。</p>
+                </div>
+              </div>
+            </details>
+
+            <!-- 自动探测 -->
+            <div class="auto-detect">
+              <button class="btn btn-primary" id="btn-detect">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                自动探测可用网关
+              </button>
+              <span class="auto-detect-hint">不确定地址？点这个，自动帮你找</span>
+            </div>
+            <div class="detect-result" id="detect-result" hidden></div>
+
+            <!-- 表单 -->
+            <div class="field-grid">
+              <label class="field field-full">
+                <span>网关地址</span>
+                <input type="text" id="gewe-base" placeholder="http://127.0.0.1:2531 或 https://api.geweapi.com/gewe">
+                <em>自建填本机地址，云端填服务商地址</em>
+              </label>
+              <label class="field field-full">
+                <span>Token</span>
+                <input type="password" id="gewe-token" placeholder="从 GeWe 控制台复制">
+                <em>用于验证身份，只保存在你本机</em>
+              </label>
+            </div>
+
+            <!-- 测试连接 -->
+            <div class="test-row">
+              <button class="btn btn-ghost" id="btn-test-gw">测试连接</button>
+              <div class="test-status" id="test-status"></div>
+            </div>
+
+            <!-- 高级（默认折叠）-->
+            <details class="help-panel help-panel-sm">
+              <summary>高级设置（通常不用改）</summary>
+              <div class="help-body">
+                <div class="field-grid">
+                  <label class="field">
+                    <span>设备 ID（appId）</span>
+                    <input type="text" id="gewe-appid" placeholder="登录后自动填充">
+                  </label>
+                  <label class="field">
+                    <span>机器人微信号</span>
+                    <input type="text" id="bot-wxid" placeholder="扫码登录后自动填充">
+                  </label>
+                  <label class="field field-full">
+                    <span>机器人群昵称</span>
+                    <input type="text" id="bot-nickname" placeholder="小助手">
+                    <em>群里 @ 它时用的名字，需与群昵称一致</em>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <div class="wz-foot">
+              <button class="btn btn-primary" id="btn-save-connect">保存并继续</button>
+            </div>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h3>扫码登录</h3></div>
-          <div class="qr-wrap">
-            <div class="qr-box" id="qr-box">
-              <div class="qr-empty">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v3M17 20h3"/></svg>
-                <span>点击下方按钮获取二维码</span>
+        <!-- 步骤 3：扫码登录 -->
+        <div class="card wizard-step" id="step-3">
+          <div class="wz-head">
+            <span class="wz-num">3</span>
+            <div class="wz-title">
+              <h3>扫码登录微信</h3>
+              <p>用手机微信扫描二维码完成登录</p>
+            </div>
+            <span class="wz-status" id="login-badge">未登录</span>
+          </div>
+          <div class="wz-body">
+            <div class="qr-wrap">
+              <div class="qr-box" id="qr-box">
+                <div class="qr-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v3M17 20h3"/></svg>
+                  <span>点击下方按钮获取二维码</span>
+                </div>
+              </div>
+              <div class="qr-info">
+                <p id="qr-status">尚未登录</p>
+                <button class="btn btn-primary" id="btn-get-qr">获取登录二维码</button>
+                <button class="btn btn-ghost" id="btn-check-login">我已扫码，检查状态</button>
+                <p class="hint">用手机微信扫描二维码。二维码 150 秒内有效，过期后重新获取即可。</p>
               </div>
             </div>
-            <div class="qr-info">
-              <p id="qr-status">尚未登录</p>
-              <button class="btn btn-primary" id="btn-get-qr">获取登录二维码</button>
-              <button class="btn btn-ghost" id="btn-check-login">我已扫码，检查状态</button>
-              <p class="hint">用手机微信扫描二维码即可完成登录。登录后微信号会自动填入上方表单。</p>
-            </div>
           </div>
         </div>
+
       </section>
 
       <!-- ─────── 群聊管理 ─────── -->

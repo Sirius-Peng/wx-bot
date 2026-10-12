@@ -31,10 +31,19 @@ from ..core.group import (
     parse_sender_prefix,
     should_invalidate_members,
 )
+from ..core.http import explain_error, make_client
 from ..core.types import WxMessage
 from .base import BaseAdapter, MessageHandler
 
 log = logging.getLogger(__name__)
+
+
+class GeWeError(RuntimeError):
+    """网关调用失败。带上 HTTP 状态码，便于上层区分故障类型。"""
+
+    def __init__(self, message: str, status: int = 0):
+        super().__init__(message)
+        self.status = status
 
 # GeWe 的 MsgType 字符串 → 统一 WxMessage.msg_type
 _MSG_TYPE_MAP = {
@@ -109,7 +118,10 @@ class GewechatAdapter(BaseAdapter):
         self.app_id = app_id
         self.bot_wxid = bot_wxid
         self.bot_nickname = bot_nickname
-        self._client = httpx.AsyncClient(timeout=20.0)
+        # ⚠️ 用 make_client 而非直接 httpx.AsyncClient：
+        # 网关常在本机（127.0.0.1:2531），而 httpx 默认会把本机请求也走系统代理，
+        # 导致返回 502。make_client 会自动对内网地址绕过代理。
+        self._client = make_client(self.base_url, timeout=20.0)
         self._handler: Optional[MessageHandler] = None
         self._running = False
 
@@ -399,12 +411,22 @@ class GewechatAdapter(BaseAdapter):
     async def _api(self, endpoint: str, body: dict) -> dict:
         """统一调用 GeWe API。路径规则：{base}/v2/api/{endpoint}"""
         url = f"{self.base_url}/v2/api/{endpoint}"
-        r = await self._client.post(url, json=body, headers={"X-GEWE-TOKEN": self.token})
-        r.raise_for_status()
+        try:
+            r = await self._client.post(url, json=body, headers={"X-GEWE-TOKEN": self.token})
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # 带上状态码，让上层能区分"网关活着但报错"和"根本连不上"
+            raise GeWeError(
+                f"{explain_error(e, url)}（HTTP {e.response.status_code}）",
+                status=e.response.status_code,
+            ) from e
+        except httpx.HTTPError as e:
+            raise GeWeError(explain_error(e, url)) from e
+
         data = r.json()
         if data.get("ret") not in (200, 0):
-            raise RuntimeError(
-                f"GeWe API 失败 endpoint={endpoint} ret={data.get('ret')} msg={data.get('msg')}"
+            raise GeWeError(
+                f"网关返回错误：ret={data.get('ret')} msg={data.get('msg')}"
             )
         return data
 
