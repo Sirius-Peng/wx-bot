@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import sys
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,7 +31,30 @@ logging.basicConfig(
 log = logging.getLogger("wxbot")
 
 DATA_DIR = Path(os.environ.get("WXBOT_DATA_DIR", "./data"))
-WEB_DIR = Path(__file__).parent / "web"
+
+
+def _resolve_web_dir() -> Path:
+    """定位网页界面目录。
+
+    三种运行环境下的位置完全不同：
+      1. 环境变量显式指定（Electron 打包后由 extraResources 提供）
+      2. PyInstaller 冻结环境（资源解压在 sys._MEIPASS）
+      3. 源码直接运行（就在本文件旁边）
+    """
+    env = os.environ.get("WXBOT_WEB_DIR")
+    if env and Path(env).is_dir():
+        return Path(env)
+
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        for cand in (base / "web", base / "src" / "web"):
+            if cand.is_dir():
+                return cand
+
+    return Path(__file__).parent / "web"
+
+
+WEB_DIR = _resolve_web_dir()
 HOST = os.environ.get("WXBOT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WXBOT_PORT", "8000"))
 
@@ -265,12 +289,15 @@ def main() -> None:
 
     port = _pick_port(PORT)
     url = f"http://{HOST}:{port}"
-    if os.environ.get("WXBOT_NO_BROWSER") != "1":
+    if os.environ.get("WXBOT_NO_BROWSER") == "1":
+        # 由 Electron 等外壳托管，不主动开浏览器
+        log.info("服务已就绪：%s", url)
+    else:
+        log.info("打开浏览器访问：%s", url)
         try:
             webbrowser.open(url)
         except Exception:
             pass
-    log.info("打开浏览器访问：%s", url)
     uvicorn.run(app, host=HOST, port=port, log_level="info", access_log=False)
 
 

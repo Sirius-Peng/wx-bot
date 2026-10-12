@@ -1,0 +1,23 @@
+{
+  "name": "wxbot-desktop",
+  "version": "1.0.0",
+  "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
+  "main": "src/main/index.js",
+  "author": "Sirius-Peng",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "WXBOT_DEV=1 electron .",
+    "build:backend": "bash scripts/build-backend.sh",
+    "build:backend:win": "scripts\\build-backend.bat",
+    "icons": "python3 scripts/make-icons.py",
+    "pack:mac": "npm run build:backend && electron-builder --mac",
+    "pack:win": "electron-builder --win",
+    "pack:all": "npm run build:backend && electron-builder --mac --win"
+  },
+  "devDependencies": {
+    "electron": "^36.9.5",
+    "electron-builder": "^25.1.8"
+  }
+}

@@ -44,6 +44,16 @@ logs/
 tmp/
 .cache/
 
+# ── 桌面版（Electron）────────────────────────────────────────
+desktop/node_modules/
+desktop/dist/
+desktop/build/
+desktop/.pyinstaller-cache/
+# PyInstaller 产出的后端二进制体积大，由 npm run build:backend 现场生成
+desktop/resources/backend/
+# 图标由 scripts/make-icons.py 生成，但保留它们方便直接打包
+!desktop/assets/
+
 # ── 环境变量 ─────────────────────────────────────────────────
 .env
 .env.*

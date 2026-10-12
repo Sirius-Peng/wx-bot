@@ -5,6 +5,33 @@
 
 ---
 
+## 三种使用方式
+
+| 方式 | 适合谁 | 怎么开始 |
+|---|---|---|
+| **桌面应用**（推荐给非技术用户） | 不想碰命令行 | 下载安装包，双击运行 |
+| **一键脚本** | 会双击文件就行 | 双击 `start-mac.command` / `start-windows.bat` |
+| **Docker / 命令行** | 有运维经验 | `docker compose up -d` 或 `python -m src.server` |
+
+### 桌面应用版
+
+有原生窗口、系统托盘，**关掉窗口后机器人在后台继续静默运行**，可打包成单一安装包（`.dmg` / `.exe`）。
+
+```bash
+cd desktop
+npm install
+npm run icons            # 首次：生成图标
+npm start                # 开发调试
+
+npm run build:backend    # 打包 Python 引擎为单文件
+npm run pack:mac         # 产出 .dmg
+npm run pack:win         # 产出 NSIS 安装包 + 免安装 exe
+```
+
+详见 [`desktop/README.md`](desktop/README.md)。
+
+---
+
 ## 快速开始（三步）
 
 ### 1️⃣ 启动

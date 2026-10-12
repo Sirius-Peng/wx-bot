@@ -1,0 +1,91 @@
+# ═══════════════════════════════════════════════════════════════
+#  electron-builder 打包配置
+#
+#  产出：
+#    macOS   → dist/微信AI助手-<版本>-arm64.dmg / -x64.dmg
+#    Windows → dist/微信AI助手 Setup <版本>.exe（NSIS 安装包）
+#              dist/微信AI助手 <版本>.exe（免安装单文件）
+# ═══════════════════════════════════════════════════════════════
+
+appId: com.siriuspeng.wxbot
+productName: 微信AI助手
+copyright: Copyright © 2026 Sirius-Peng
+
+directories:
+  output: dist
+  buildResources: assets
+
+# 打进 asar 的文件
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+  - '!**/*.map'
+
+# 不打进 asar、以独立文件形式放在 Resources/ 下
+extraResources:
+  # 网页界面（Python 后端直接读这个目录）
+  - from: ../src/web
+    to: web
+  # Python 后端二进制（由 scripts/build-backend.sh 产出）
+  - from: resources/backend
+    to: backend
+  # 图标资源
+  - from: assets
+    to: assets
+
+# ── macOS ────────────────────────────────────────────────────
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.icns
+  darkModeSupport: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # 应用需要访问网络（调大模型 API 与微信网关）
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 Sirius-Peng
+    LSMinimumSystemVersion: '11.0'
+  # 未签名分发时，用户首次打开需右键→打开
+  identity: null
+
+dmg:
+  title: 微信 AI 助手 ${version}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+# ── Windows ──────────────────────────────────────────────────
+win:
+  icon: assets/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # 若需指定签名证书，在此配置 certificateFile / certificatePassword
+
+nsis:
+  oneClick: false                      # 显示安装向导，用户可自选目录
+  perMachine: false                    # 按用户安装，无需管理员权限
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 微信 AI 助手
+  deleteAppDataOnUninstall: false      # 卸载不删数据，避免误删配置与聊天记录
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+# ── Linux（可选，配置留好方便扩展）──────────────────────────
+linux:
+  icon: assets/icon.png
+  category: Utility
+  target:
+    - AppImage

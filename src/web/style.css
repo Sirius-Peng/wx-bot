@@ -589,6 +589,39 @@ input[type="checkbox"]:checked::after { transform: translateX(17px); }
   background: currentColor; opacity: .75; flex-shrink: 0;
 }
 
+/* ══════════ 桌面版专属区域 ══════════ */
+
+.desk-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 16px 20px 4px;
+}
+
+.desk-meta {
+  display: flex; flex-wrap: wrap; gap: 28px;
+  padding: 14px 20px 18px;
+}
+.desk-meta > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.desk-meta span { font-size: 11.5px; color: var(--text-3); }
+.desk-meta strong {
+  font-size: 12.5px; font-weight: 500; font-family: var(--mono);
+  color: var(--text-2); word-break: break-all;
+}
+
+.log-view {
+  margin: 0 20px 20px;
+  padding: 14px 16px;
+  max-height: 300px; overflow: auto;
+  background: #1F2429; color: #C9D3DC;
+  border-radius: var(--r);
+  font-family: var(--mono);
+  font-size: 11.5px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* macOS 隐藏式标题栏：给侧边栏留出红绿灯按钮的位置 */
+body.is-electron.is-mac .sidebar { padding-top: 40px; }
+body.is-electron.is-mac .brand { padding-top: 4px; }
+
 /* ══════════ 响应式 ══════════ */
 
 /* 尊重系统「减少动态效果」设置（无障碍） */
