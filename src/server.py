@@ -71,9 +71,14 @@ async def lifespan(app: FastAPI):
     log.info("  管理界面： http://%s:%s", HOST, PORT)
     log.info("=" * 60)
     # 若上次是运行状态，尝试自动恢复
-    if config_store.load().llm.primary_key:
-        res = await runtime.start()
-        log.info("自动启动机器人：%s", res.get("message"))
+    # ⚠️ 自动启动失败不能拖垮服务 —— 用户可能还没配完，需要在界面里手动启动
+    cfg = config_store.load()
+    if cfg.llm.primary_key and (cfg.adapter.wechat_enabled or cfg.adapter.qq_enabled):
+        try:
+            res = await runtime.start()
+            log.info("自动启动机器人：%s", res.get("message"))
+        except Exception:
+            log.warning("自动启动失败，用户可检查配置后手动启动", exc_info=True)
     yield
     await runtime.stop()
 
