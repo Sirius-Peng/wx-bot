@@ -324,11 +324,22 @@
             <span class="wz-num">2</span>
             <div class="wz-title">
               <h3>连接 QQ 网关</h3>
-              <p>填写 OneBot 网关信息，然后测试连接</p>
+              <p>自动探测或手动填写 OneBot 网关信息</p>
             </div>
             <span class="wz-status" id="qq-badge">待配置</span>
           </div>
           <div class="wz-body">
+
+            <!-- 自动探测 -->
+            <div class="setup-action" style="margin-bottom:16px;">
+              <button class="btn btn-primary btn-lg" id="btn-detect-qq">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                自动探测 QQ 网关
+              </button>
+              <span class="setup-hint" id="qq-detect-hint">
+                探测本机 3000/3001 等常见端口，自动填充地址并测试连接
+              </span>
+            </div>
 
             <details class="help-panel" open>
               <summary>还没装 QQ 网关？点这里看指引</summary>
@@ -340,10 +351,22 @@
 
                 <div class="help-option">
                   <div class="help-option-head">
-                    <strong>方式 A · NapCat（推荐）</strong>
-                    <span class="tag on">维护活跃</span>
+                    <strong>方式 A · NapCat Docker 一键启动</strong>
+                    <span class="tag on">推荐</span>
                   </div>
-                  <p>下载后启动，扫码登录 QQ，然后在 NapCat 的网络配置里添加一个
+                  <p>如果你已装 Docker，复制下面命令运行即可启动 NapCat：</p>
+                  <div class="code-block">
+                    <code id="napcat-docker-cmd">docker run -d --name napcat --restart always -p 3000:3000 -p 3001:3001 mlikiowa/napcat-docker</code>
+                    <button class="btn btn-ghost btn-sm" id="btn-copy-napcat">复制</button>
+                  </div>
+                  <p class="help-note">
+                    启动后需要扫码登录 QQ。然后在本页点「自动探测」即可自动识别。
+                  </p>
+                </div>
+
+                <div class="help-option">
+                  <div class="help-option-head"><strong>方式 B · 手动安装 NapCat</strong></div>
+                  <p>下载 NapCat 后启动，扫码登录 QQ，然后在 NapCat 的网络配置里添加一个
                     <b>反向 WebSocket</b>，地址填下方这个：</p>
                   <div class="code-block">
                     <code id="qq-ws-url">ws://127.0.0.1:8000/ws/onebot</code>
@@ -356,7 +379,7 @@
                 </div>
 
                 <div class="help-option">
-                  <div class="help-option-head"><strong>方式 B · Lagrange</strong></div>
+                  <div class="help-option-head"><strong>方式 C · Lagrange</strong></div>
                   <p>同样是 OneBot 11 实现，配置方式类似：填反向 WS 地址 + 开启 HTTP API。
                     本程序对两者完全兼容，换实现不用改代码。</p>
                 </div>

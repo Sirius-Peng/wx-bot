@@ -400,9 +400,19 @@ async function getQR() {
   box.innerHTML = '<div class="qr-empty"><span>正在获取二维码…</span></div>';
   const r = await api('/api/login/qrcode', { method: 'POST' });
   if (!r.ok) {
-    box.innerHTML = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span></div>`;
+    let html = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span>`;
+    if (r.hint) {
+      html += `<p style="margin-top:8px;font-size:12px;color:var(--text-2);line-height:1.6;">${esc(r.hint)}</p>`;
+    }
+    html += '</div>';
+    box.innerHTML = html;
     $('#qr-status').textContent = r.message || '获取失败';
     toast(r.message || '获取二维码失败', 'err');
+    // 如果是 Token 没填，把 Token 输入框高亮
+    if (r.message && r.message.includes('Token')) {
+      const tokEl = $('#gewe-token');
+      if (tokEl) { tokEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); tokEl.focus(); }
+    }
     return;
   }
   const src = r.image || '';
@@ -769,8 +779,19 @@ async function runOneClick() {
     if (st && st.gateway && st.gateway.running) {
       await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
       await loadConfig();
-      toast('配置完成，可以扫码登录了', 'ok');
-      $('#setup-hint').textContent = '配置完成。下一步：扫码登录。';
+      // 网关就绪了，但 Token 可能还没填 —— 不能骗用户说"可以扫码了"
+      const cfg = STATE.config || {};
+      const hasToken = !!(cfg.adapter && cfg.adapter.gewe_token);
+      if (hasToken) {
+        toast('配置完成，可以扫码登录了', 'ok');
+        $('#setup-hint').textContent = '配置完成。下一步：扫码登录。';
+      } else {
+        toast('网关已就绪，还差一步', 'ok');
+        $('#setup-hint').textContent = '网关已启动。请在上方「高级设置」里填写 GeWe Token，然后获取二维码。';
+        // 把 Token 输入框滚动到可视区并高亮
+        const tokEl = $('#gewe-token');
+        if (tokEl) { tokEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); tokEl.focus(); }
+      }
     } else {
       toast('还没配置完成，请看下方提示', 'err');
     }
@@ -904,6 +925,38 @@ async function copyText(text, btn) {
 }
 
 /* ══════════ QQ / OneBot ══════════ */
+
+async function detectQQ() {
+  const btn = $('#btn-detect-qq');
+  const hint = $('#qq-detect-hint');
+  const statusBox = $('#qq-test-status');
+  btn.disabled = true;
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> 探测中…';
+  hint.textContent = '正在扫描本机常见端口…';
+  statusBox.className = 'test-status';
+  statusBox.innerHTML = '';
+
+  try {
+    const r = await api('/api/qq/detect', { method: 'POST' });
+    if (r.ok && r.found && r.found.length) {
+      const item = r.found[0];
+      hint.textContent = `发现网关：${item.url}${item.qq ? '（' + item.qq + '）' : ''}`;
+      toast('已自动填充网关地址', 'ok');
+      await loadConfig();  // 刷新表单（地址已回填）
+      // 自动再测一次连接
+      await testQQ();
+    } else {
+      hint.textContent = '没有探测到运行的网关。若已装 Docker，可复制上方命令一键启动 NapCat。';
+      statusBox.className = 'test-status err';
+      statusBox.innerHTML = '<div class="ts-line"><span class="ts-icon">✗</span><span>未探测到 OneBot 网关</span></div><div class="ts-hint">请确认 NapCat 已启动，或运行上方 Docker 命令后再试。</div>';
+    }
+  } catch (e) {
+    hint.textContent = '探测失败：' + e.message;
+  }
+  btn.disabled = false;
+  btn.innerHTML = oldText;
+}
 
 async function testQQ() {
   const btn = $('#btn-test-qq');
@@ -1091,6 +1144,7 @@ function bind() {
   $('#btn-gw-logs').addEventListener('click', toggleGatewayLogs);
 
   // QQ / OneBot
+  $('#btn-detect-qq').addEventListener('click', detectQQ);
   $('#btn-test-qq').addEventListener('click', testQQ);
   $('#btn-save-qq').addEventListener('click', async () => {
     await saveConfig();
@@ -1101,6 +1155,13 @@ function bind() {
     const el = $('#qq-ws-url');
     copyText(el.textContent.trim(), $('#btn-copy-ws'));
   });
+  const napcatCmdEl = $('#btn-copy-napcat');
+  if (napcatCmdEl) {
+    napcatCmdEl.addEventListener('click', () => {
+      const el = $('#napcat-docker-cmd');
+      copyText(el.textContent.trim(), napcatCmdEl);
+    });
+  }
 
   // 人格知识库
   $('#btn-mem-refresh').addEventListener('click', loadMemory);

@@ -228,6 +228,12 @@ async def api_qq_test(request: Request) -> dict:
     )
 
 
+@app.post("/api/qq/detect")
+async def api_qq_detect() -> dict:
+    """自动探测本地 OneBot / NapCat 网关。"""
+    return await runtime.detect_napcat()
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  人格知识库
 # ═══════════════════════════════════════════════════════════════════

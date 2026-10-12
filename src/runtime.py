@@ -505,6 +505,58 @@ class BotRuntime:
             except Exception:
                 pass
 
+    # ══ QQ / NapCat 自动探测 ═══════════════════════════════════
+
+    QQ_PROBE_CANDIDATES = [
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
+
+    async def detect_napcat(self) -> dict:
+        """自动探测本地是否已有 OneBot / NapCat 网关在运行。"""
+        found = []
+        for url in self.QQ_PROBE_CANDIDATES:
+            try:
+                async with make_client(url, timeout=3.0) as c:
+                    r = await c.post(f"{url}/get_login_info", json={},
+                                     headers={"Authorization": "Bearer "})
+                    if r.status_code == 200:
+                        d = r.json()
+                        if d.get("status") == "ok":
+                            data = d.get("data") or {}
+                            found.append({
+                                "url": url,
+                                "qq": str(data.get("user_id") or ""),
+                                "nickname": data.get("nickname") or "",
+                            })
+                            break  # 找到一个就够了
+            except Exception:
+                continue
+
+        if found:
+            # 自动回填到配置
+            cfg = self.config_store.load()
+            cfg.adapter.onebot_http_url = found[0]["url"]
+            qq = found[0]["qq"]
+            if qq and not cfg.adapter.bot_qq:
+                cfg.adapter.bot_qq = qq
+            self.config_store.save(cfg)
+            self.cfg = cfg
+
+        return {
+            "ok": bool(found),
+            "found": found,
+            "message": (
+                f"发现 {len(found)} 个本地 OneBot 网关"
+                if found else
+                "没有探测到正在运行的 OneBot 网关。"
+                "若尚未部署，请按下方指引启动一个。"
+            ),
+        }
+
     # ══ 人格知识库 ════════════════════════════════════════════
 
     def _ensure_memory(self) -> PersonaMemory:
@@ -736,17 +788,20 @@ class BotRuntime:
     # ── 扫码登录 ──────────────────────────────────────────────
 
     async def login_qrcode(self) -> dict:
-        """获取登录二维码。
-
-        接口命名在不同 GeWe 版本间略有差异，这里按候选列表依次尝试。
-        """
+        """获取登录二维码。"""
         a = self.cfg.adapter
         if a.wechat_type == "ilink":
             return {"ok": False, "message": "官方通道请用命令行扫码：openclaw channels login"}
         if not a.gewe_base_url:
             return {"ok": False, "message": "请先填写网关地址（可点「自动探测」）"}
         if not a.gewe_token:
-            return {"ok": False, "message": "请先填写 GeWe Token"}
+            return {
+                "ok": False,
+                "message": "请先填写 GeWe Token",
+                "hint": "网关已就绪，但 Token 还没填。"
+                         "请去 GeWe 控制台复制 Token 贴到上面的输入框里，"
+                         "然后再点「获取二维码」。",
+            }
 
         data, last_error = None, ""
         for ep in ("login/getLoginQrCode", "login/getQrCode", "login/getQr"):
@@ -755,7 +810,6 @@ class BotRuntime:
             )
             if not r.get("ok"):
                 last_error = r.get("error", "")
-                # 连不上就不必再试其它接口名了
                 if r.get("status", 0) == 0:
                     break
                 continue
