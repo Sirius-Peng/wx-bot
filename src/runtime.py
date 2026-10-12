@@ -21,11 +21,13 @@ from .adapters.base import BaseAdapter
 from .adapters.gewechat import GewechatAdapter
 from .adapters.hybrid import HybridAdapterRouter
 from .adapters.ilink import ILinkAdapter
+from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore, GroupConfigItem
 from .core.context import ContextManager
 from .core.docker import DockerManager, GATEWAY_URL
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
+from .core.memory import CATEGORIES, SCOPE_GROUP, SCOPE_USER, PersonaMemory
 from .core.sender import HumanLikeSender
 from .core.trigger import GroupConfig, TriggerRouter, default_group_config
 from .core.types import WxMessage
@@ -188,6 +190,8 @@ class BotRuntime:
         self.log = MessageLog(self.data_dir / "messages.jsonl")
         # Docker 环境与网关容器管理（GeWe 恒定走本地 Docker）
         self.docker = DockerManager()
+        # 人格知识库（机器人运行后才有实例）
+        self.memory: Optional[PersonaMemory] = None
 
         self.cfg: AppConfig = store.load()
         self.adapter: Optional[BaseAdapter] = None
@@ -258,11 +262,21 @@ class BotRuntime:
         a, l = self.cfg.adapter, self.cfg.llm
         if a.type == "gewechat" and not a.gewe_token:
             raise ValueError("未填写 GeWe Token，请到「接入设置」完善")
+        if a.type == "onebot" and not a.onebot_http_url:
+            raise ValueError("未填写 OneBot 网关地址，请到「接入设置」完善")
         if not l.primary_key:
             raise ValueError("未填写大模型 API Key，请到「模型设置」完善")
 
     def _build_adapter(self) -> BaseAdapter:
         a = self.cfg.adapter
+
+        # QQ：OneBot 11 协议（兼容 NapCat / Lagrange / LLOneBot 等）
+        if a.type == "onebot":
+            return OneBotAdapter(
+                http_url=a.onebot_http_url, access_token=a.onebot_token,
+                bot_qq=a.bot_qq, bot_nickname=a.bot_nickname or self.cfg.bot.name,
+            )
+
         gewe = GewechatAdapter(
             base_url=a.gewe_base_url, token=a.gewe_token, app_id=a.gewe_app_id,
             bot_wxid=a.bot_wxid, bot_nickname=a.bot_nickname or self.cfg.bot.name,
@@ -297,10 +311,19 @@ class BotRuntime:
             default_mode=cfg.bot.group_reply_mode or "mention_only",
         )
 
+        # 人格知识库：用便宜模型抽取记忆，随对话不断积累
+        memory = PersonaMemory(
+            self.data_dir / "memory.json", llm=judge_gw,
+            enabled=bool(cfg.bot.memory_enabled),
+        )
+        memory.extract_interval = max(1, int(cfg.bot.memory_extract_interval or 3))
+        memory.inject = bool(cfg.bot.memory_inject)
+        self.memory = memory
+
         orch = Orchestrator(
             adapter=adapter, store=store, llm=chat_gw, judge=judge,
             ctx=ContextManager(store), router=router,
-            sender=HumanLikeSender(adapter),
+            sender=HumanLikeSender(adapter), memory=memory,
         )
         self._wire_logging(orch, adapter)
         return orch
@@ -369,6 +392,109 @@ class BotRuntime:
             return mid
 
         adapter.send_text = send_wrapped            # type: ignore[method-assign]
+
+    # ══ QQ / OneBot 连接测试 ═══════════════════════════════════
+
+    async def test_onebot(self, http_url: str = "", token: str = "") -> dict:
+        """测试 OneBot 网关连通性与 Token 有效性。"""
+        a = self.cfg.adapter
+        base = (http_url or a.onebot_http_url or "").rstrip("/")
+        tok = token if token else a.onebot_token
+
+        if not base:
+            return {"ok": False, "stage": "config", "message": "请先填写 HTTP 接口地址"}
+
+        probe = OneBotAdapter(http_url=base, access_token=tok)
+        try:
+            r = await probe._call("get_login_info")
+
+            if r.get("status") == "failed":
+                code = r.get("retcode")
+                if code == 403:
+                    return {"ok": False, "stage": "auth",
+                            "message": "网关可以连接，但 Access Token 不正确",
+                            "detail": "网关返回 403",
+                            "hint": "请检查 Token 是否与网关配置里的一致。"}
+                return {"ok": False, "stage": "connect",
+                        "message": f"连不上 OneBot 网关 {base}",
+                        "detail": r.get("message", ""),
+                        "hint": "请确认网关已启动、HTTP 服务已开启，"
+                                "且地址与端口填写正确。"}
+
+            data = r.get("data") or {}
+            qq = str(data.get("user_id") or "")
+            nick = data.get("nickname") or ""
+
+            # 顺便把 QQ 号回填，省得用户手填
+            if qq:
+                cfg = self.config_store.load()
+                cfg.adapter.bot_qq = qq
+                if nick and not cfg.adapter.bot_nickname:
+                    cfg.adapter.bot_nickname = nick
+                self.config_store.save(cfg)
+                self.cfg = cfg
+
+            return {
+                "ok": True, "stage": "ok",
+                "message": f"网关连接正常，已登录：{nick}（{qq}）" if qq else "网关连接正常",
+                "qq": qq, "nickname": nick,
+                "hint": "下一步：在网关里把反向 WebSocket 指向本程序，"
+                        "然后就可以在 QQ 里对话了。",
+            }
+        finally:
+            try:
+                await probe._client.aclose()
+            except Exception:
+                pass
+
+    # ══ 人格知识库 ════════════════════════════════════════════
+
+    def _ensure_memory(self) -> PersonaMemory:
+        """知识库实例在机器人启动时创建；未启动时按需创建一个只读实例，
+        这样用户不启动机器人也能查看/编辑已有记忆。"""
+        if self.memory is None:
+            self.memory = PersonaMemory(
+                self.data_dir / "memory.json", llm=None,
+                enabled=bool(self.cfg.bot.memory_enabled),
+            )
+        return self.memory
+
+    def memory_list(self, scope: str = "", owner_id: str = "",
+                    category: str = "", keyword: str = "") -> dict:
+        m = self._ensure_memory()
+        return {
+            "items": m.list_items(scope, owner_id, category, keyword),
+            "stats": m.stats(),
+            "categories": CATEGORIES,
+        }
+
+    def memory_add(self, scope: str, owner_id: str, category: str,
+                   content: str, keywords: list[str] | None = None) -> dict:
+        m = self._ensure_memory()
+        if not content.strip():
+            return {"ok": False, "message": "内容不能为空"}
+        item = m.add_manual(
+            scope=scope if scope in (SCOPE_USER, SCOPE_GROUP) else SCOPE_USER,
+            owner_id=owner_id, category=category if category in CATEGORIES else "fact",
+            content=content, keywords=keywords,
+        )
+        return {"ok": True, "item": item}
+
+    def memory_delete(self, item_id: str) -> dict:
+        ok = self._ensure_memory().delete(item_id)
+        return {"ok": ok, "message": "已删除" if ok else "未找到该条记忆"}
+
+    def memory_clear(self, scope: str = "", owner_id: str = "") -> dict:
+        n = self._ensure_memory().clear(scope, owner_id)
+        return {"ok": True, "message": f"已清除 {n} 条记忆"}
+
+    def memory_stats(self) -> dict:
+        m = self._ensure_memory()
+        s = m.stats()
+        s["enabled"] = bool(self.cfg.bot.memory_enabled)
+        s["inject"] = bool(self.cfg.bot.memory_inject)
+        s["categories"] = CATEGORIES
+        return s
 
     # ══ Docker 环境与网关容器 ═════════════════════════════════
     #

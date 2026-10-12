@@ -911,6 +911,63 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
   font-family: var(--mono); font-size: 11.5px;
 }
 
+/* ══════════ 人格知识库 ══════════ */
+
+.input-sm {
+  padding: 6px 11px; font-size: 12.5px;
+  width: 180px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.memory-list { display: flex; flex-direction: column; }
+
+.memory-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--border);
+  transition: background .14s;
+}
+.memory-item:last-child { border-bottom: none; }
+.memory-item:hover { background: var(--surface-2); }
+
+.mem-cat {
+  flex-shrink: 0;
+  font-size: 11px; font-weight: 500;
+  padding: 3px 9px; border-radius: 20px;
+  border: 1px solid; white-space: nowrap;
+  margin-top: 1px;
+}
+.mem-cat.fact       { background: #EBF2FE; color: #1D4FA8; border-color: #CFE0FB; }
+.mem-cat.preference { background: #E7F8EE; color: #06874A; border-color: var(--primary-line); }
+.mem-cat.relation   { background: #F3EEFE; color: #5B3FA8; border-color: #DDD3F8; }
+.mem-cat.event      { background: var(--warn-soft); color: #96650A; border-color: #F5DFAE; }
+.mem-cat.style      { background: #FBEAF0; color: #993556; border-color: #F4C0D1; }
+
+.mem-main { flex: 1; min-width: 0; }
+.mem-content { font-size: 13.5px; line-height: 1.6; word-break: break-word; }
+.mem-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 5px;
+  font-size: 11.5px; color: var(--text-3);
+}
+.mem-meta .kw {
+  background: var(--surface-3); border-radius: 4px;
+  padding: 1px 6px; font-family: var(--mono); font-size: 11px;
+}
+.mem-conf {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.mem-conf .bar {
+  width: 42px; height: 4px; border-radius: 3px;
+  background: var(--surface-3); overflow: hidden;
+}
+.mem-conf .bar > i {
+  display: block; height: 100%; border-radius: 3px;
+  background: var(--primary);
+}
+.mem-actions { flex-shrink: 0; }
+
 /* ══════════ 响应式 ══════════ */
 
 /* 尊重系统「减少动态效果」设置（无障碍） */
