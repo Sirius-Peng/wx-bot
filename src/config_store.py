@@ -21,22 +21,33 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 @dataclass
 class AdapterConfig:
-    """接入通道配置。"""
-    type: str = "gewechat"            # gewechat（微信） | onebot（QQ） | ilink（官方，仅私聊）
-    # GeWe / Gewechat（微信）
+    """接入通道配置。支持微信与 QQ 同时启用。"""
+
+    # ── 向后兼容：旧版 type 字段 ──────────────────────────────
+    # 旧版用 type 单选；新版用 wechat_enabled + qq_enabled 多选。
+    # 读取时若检测到旧版 type，自动迁移。
+    type: str = "gewechat"            # deprecated，仅用于迁移旧配置
+
+    # ── 微信通道 ──────────────────────────────────────────────
+    wechat_enabled: bool = True       # 是否启用微信
+    wechat_type: str = "gewechat"     # gewechat | ilink | hybrid
+
+    # GeWe / Gewechat
     gewe_base_url: str = "http://127.0.0.1:2531"
     gewe_token: str = ""
     gewe_app_id: str = ""
     bot_wxid: str = ""
     bot_nickname: str = ""
-    # 官方 iLink（微信私聊）
+
+    # 官方 iLink
     ilink_state_dir: str = "./data/ilink"
-    # OneBot 11（QQ，兼容 NapCat / Lagrange / LLOneBot 等）
+    hybrid_enabled: bool = False      # 混合：私聊走官方、群聊走协议
+
+    # ── QQ 通道 ───────────────────────────────────────────────
+    qq_enabled: bool = False          # 是否启用 QQ
     onebot_http_url: str = "http://127.0.0.1:3000"
     onebot_token: str = ""
     bot_qq: str = ""
-    # 混合模式：私聊走官方、群聊走协议
-    hybrid_enabled: bool = False
 
 
 @dataclass
@@ -121,6 +132,23 @@ class ConfigStore:
         cfg = AppConfig()
 
         a = raw.get("adapter") or {}
+        # ── 旧版配置迁移 ──────────────────────────────────────
+        # 旧版用 type 单选（gewechat/ilink/onebot）；新版用 wechat_enabled + qq_enabled
+        old_type = a.get("type", "")
+        if old_type and "wechat_enabled" not in a and "qq_enabled" not in a:
+            if old_type == "onebot":
+                a["wechat_enabled"] = False
+                a["qq_enabled"] = True
+                a["wechat_type"] = "gewechat"
+            elif old_type == "ilink":
+                a["wechat_enabled"] = True
+                a["qq_enabled"] = False
+                a["wechat_type"] = "ilink"
+            else:
+                a["wechat_enabled"] = True
+                a["qq_enabled"] = False
+                a["wechat_type"] = old_type or "gewechat"
+
         cfg.adapter = AdapterConfig(**{k: v for k, v in a.items()
                                        if k in AdapterConfig.__dataclass_fields__})
 
