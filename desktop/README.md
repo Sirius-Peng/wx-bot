@@ -104,21 +104,42 @@ npm run build:backend:win    # Windows
 ### 第二步：打包桌面应用
 
 ```bash
-npm run pack:mac     # 产出 .dmg（arm64 + x64）
-npm run pack:win     # 产出 NSIS 安装包 + 免安装 exe
-npm run pack:all     # 两个平台都打
+npm run pack:mac      # 产出 .dmg（arm64）
+npm run pack:mac:x64  # 产出 .dmg（Intel Mac 用）
+npm run pack:win      # 产出 NSIS 安装包 + 免安装 exe
+npm run pack:all      # mac(arm64) + win
 ```
 
 产物在 `desktop/dist/`：
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS | `微信AI助手-1.0.0-arm64.dmg` | 拖进 Applications 即可 |
-| macOS | `微信AI助手-1.0.0-x64.dmg` | Intel Mac |
+| macOS | `WxBot-1.0.0-macOS-arm64.dmg` | Apple Silicon，拖进 Applications 即可 |
+| macOS | `WxBot-1.0.0-macOS-x64.dmg` | Intel Mac（需用 `pack:mac:x64`） |
 | Windows | `微信AI助手-Setup-1.0.0.exe` | 安装向导，可自选目录 |
 | Windows | `微信AI助手-1.0.0-portable.exe` | 免安装单文件 |
 
 > **跨平台限制**：macOS 上只能打 mac 包，Windows 上只能打 win 包。要同时出两个平台的包，需要在对应系统上分别执行（或用 CI）。
+
+#### ⚠️ 架构必须显式且唯一
+
+打包脚本末尾会自动执行 `scripts/verify-arch.sh` 校验架构，**校验不过就直接失败**。
+
+这个校验是有必要的 —— 曾经踩过坑：`electron-builder.yml` 里 `mac.target.arch`
+写成了 `[arm64, x64]`，命令行的 `--arm64` **并未覆盖它**，结果两个架构都被构建，
+最终产出的 DMG 落到了 x64 那份上。用户装到 Apple Silicon 机器上，macOS 提示
+"此应用为 Intel 芯片设计，将来不会再被支持"，只能通过 Rosetta 运行。
+**这类问题在打包日志里完全看不出来**，必须主动校验二进制。
+
+手动校验：
+
+```bash
+npm run verify:arch          # 校验 arm64
+bash scripts/verify-arch.sh x64
+```
+
+它会检查主程序、Electron Framework、Python 后端三个二进制，并统计包内是否有
+架构不一致的残留。
 
 ### 未签名应用首次打开
 
@@ -197,6 +218,7 @@ app.on('window-all-closed', () => {
 
 | 现象 | 原因与处理 |
 |---|---|
+| macOS 提示"此应用为 Intel 芯片设计" | 打成了 x64 包。检查 `electron-builder.yml` 的 `mac.target.arch` 是否为单一 `[arm64]`，然后重新打包并跑 `npm run verify:arch` |
 | 窗口显示"后台服务启动失败" | 点「查看运行日志」看 `backend.log`；常见原因是端口被占或后端二进制缺失 |
 | 托盘图标不见了 | 菜单栏图标可能被系统折叠；macOS 可在「系统设置 → 控制中心」里调整 |
 | 关闭窗口后找不到应用 | 看菜单栏托盘图标；macOS 也可点 Dock 图标 |
@@ -205,6 +227,18 @@ app.on('window-all-closed', () => {
 | 打包报 `asar` 写入失败 | 若你的环境有文件写入限制（企业沙箱等），可临时加 `--config.asar=false` 跳过归档。正式发布建议保持 asar 开启（体积更小、启动更快） |
 | 打包报 `hdiutil detach` 失败 | DMG 其实已经生成，只是卸载虚拟磁盘失败。检查 `dist/*.dmg` 是否存在，存在即成功 |
 | 启动报 `NODE_OPTIONS is not supported` | 无害提示，是外部环境设置了 `NODE_OPTIONS`，Electron 打包应用会忽略它 |
+
+---
+
+## 已知限制
+
+- **未签名**：首次打开需要用户手动放行（见上文）
+- **不支持跨平台交叉打包**：在 mac 上打不出 win 包
+- **不提供 universal 包**：macOS 的 arm64 与 x64 是两个独立产物。
+  做 universal 需要 Electron 与 Python 后端**两者**都是 fat binary，
+  而 PyInstaller 无法直接产出 universal 二进制（需分别构建再 `lipo -create` 合并）
+- **sidecar 体积**：打包后约 120-130 MB（Electron 运行时占大头，Python 引擎约 22 MB）
+- **仅 x64/arm64**：未提供 32 位版本
 
 ---
 
@@ -220,8 +254,10 @@ app.on('window-all-closed', () => {
 
 ② 桌面应用打包
    $ npm run pack:mac
-   ✓ dist/微信AI助手-1.0.0.dmg（128M）
-   ✓ dist/mac-arm64/微信AI助手.app（270M）
+   • packaging  platform=darwin arch=arm64 electron=36.9.5
+   • building   target=DMG arch=arm64 file=dist/WxBot-1.0.0-macOS-arm64.dmg
+   ✓ dist/WxBot-1.0.0-macOS-arm64.dmg（124M）
+   ✓ dist/mac-arm64/微信AI助手.app
 
 ③ 打包产物核查
    ✓ Contents/MacOS/微信AI助手
@@ -233,13 +269,11 @@ app.on('window-all-closed', () => {
    [spawn] .../微信AI助手.app/Contents/Resources/backend/wxbot-server (port=49413)
    [ready] http://127.0.0.1:49413
    → 打包版正确识别打包态，使用内置二进制而非系统 Python
+
+⑤ 架构校验
+   $ npm run verify:arch
+   ✓ 主可执行文件       —— arm64
+   ✓ Electron Framework —— arm64
+   ✓ Python 后端 sidecar —— arm64
+   架构校验通过 —— 可以分发
 ```
-
----
-
-## 已知限制
-
-- **未签名**：首次打开需要用户手动放行（见上文）
-- **不支持跨平台交叉打包**：在 mac 上打不出 win 包
-- **sidecar 体积**：打包后约 120-150 MB（Electron 运行时占大头，Python 引擎约 25 MB）
-- **仅 x64/arm64**：未提供 32 位版本

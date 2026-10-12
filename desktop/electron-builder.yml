@@ -39,13 +39,28 @@ mac:
   category: public.app-category.productivity
   icon: assets/icon.icns
   darkModeSupport: true
+
+  # ⚠️ 架构必须显式且唯一，且只能有一个。
+  #
+  # 踩坑记录：这里曾写成 arch: [arm64, x64]，结果命令行的 --arm64 并未覆盖它，
+  # 两个架构都被构建，而最终产出的 DMG 落到了 x64 那份上。用户装到
+  # Apple Silicon 机器上，macOS 会提示"此应用为 Intel 芯片设计，将来不会再被支持"，
+  # 且只能通过 Rosetta 运行。
+  #
+  # 需要 Intel 版时，用 npm run pack:mac:x64（它会在命令行覆盖为 x64），
+  # 不要在这里同时写两个架构。
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [arm64]
+
+  # 产物名带上架构，避免再次出现"分不清哪个包是哪个架构"
+  artifactName: WxBot-${version}-macOS-${arch}.${ext}
+
   # 应用需要访问网络（调大模型 API 与微信网关）
   extendInfo:
     NSHumanReadableCopyright: Copyright © 2026 Sirius-Peng
     LSMinimumSystemVersion: '11.0'
+
   # 未签名分发时，用户首次打开需右键→打开
   identity: null
 

@@ -12,9 +12,11 @@
     "build:backend": "bash scripts/build-backend.sh",
     "build:backend:win": "scripts\\build-backend.bat",
     "icons": "python3 scripts/make-icons.py",
-    "pack:mac": "npm run build:backend && electron-builder --mac",
+    "verify:arch": "bash scripts/verify-arch.sh",
+    "pack:mac": "npm run build:backend && electron-builder --mac --arm64 && npm run verify:arch arm64",
+    "pack:mac:x64": "npm run build:backend && electron-builder --mac --x64 && npm run verify:arch x64",
     "pack:win": "electron-builder --win",
-    "pack:all": "npm run build:backend && electron-builder --mac --win"
+    "pack:all": "npm run build:backend && electron-builder --mac --arm64 --win && npm run verify:arch arm64"
   },
   "devDependencies": {
     "electron": "^36.9.5",
