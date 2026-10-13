@@ -125,11 +125,13 @@ class MemoryLearningQueue:
             self.contexts.append(key)
         job = self.pending.setdefault(key, {
             "user_id": msg.sender_id, "user_name": msg.sender_name or msg.sender_id,
-            "chat_id": msg.chat_id, "chat_type": msg.chat_type, "turns": [],
+            "chat_id": msg.chat_id, "chat_type": msg.chat_type, "platform":msg.platform,"turns": [],
             "due_at": now + self.IDLE_SECONDS, "retry_at": 0.0, "failures": 0,
         })
         # Extract only this user's actual incoming text, never persona examples/replies.
-        job["turns"].append({"id": event, "user": msg.render(), "assistant": ""})
+        source_time = msg.timestamp / 1000 if isinstance(msg.timestamp, (int, float)) else 0
+        observed_at = source_time if 1_000_000_000 <= source_time <= now + 300 else now
+        job["turns"].append({"id": event, "user": msg.render(), "assistant": "", "observed_at": observed_at})
         self.seen.append(event)
         self.seen = self.seen[-5000:]
         interval = max(1, int(getattr(self.memory, "extract_interval", 3)))
@@ -222,7 +224,8 @@ class MemoryLearningQueue:
             self._save()  # Do not send a non-durable batch to the model.
             learned = await asyncio.wait_for(self.memory.observe(
                 chat_id=job["chat_id"], chat_type=job["chat_type"],
-                user_id=job["user_id"], user_name=job["user_name"], history=turns), self.timeout)
+                user_id=job["user_id"], user_name=job["user_name"], history=turns,
+                **({"platform":job.get("platform",key.split(":",1)[0])} if getattr(self.memory,"supports_platform_scope",False) else {})), self.timeout)
             current = self.pending.get(key)
             before_ack = copy.deepcopy(current)
             if current is not None:

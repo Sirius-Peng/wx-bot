@@ -36,6 +36,10 @@ class WxMessage:
     session_id: Optional[str] = None
     group_id: Optional[str] = None       # 群号（OneBot 归一化时填入）
 
+    images: list[dict] = field(default_factory=list)  # refs only, never base64 pixels
+    content_parts: list[dict] = field(default_factory=list)  # text/image-index in original order
+    batch_messages: list[dict] = field(default_factory=list)  # original envelopes
+
     @property
     def is_group(self) -> bool:
         return self.chat_type == "group"
@@ -43,7 +47,7 @@ class WxMessage:
     @property
     def ctx_key(self) -> str:
         """上下文存储 key：群聊按群隔离，私聊按会话隔离。"""
-        return f"ctx:{self.chat_type}:{self.chat_id}"
+        return f"ctx:{self.platform}:{self.chat_type}:{self.chat_id}"
 
     def render(self) -> str:
         """渲染成给 LLM 的文本。群聊必须标注发言人，否则模型分不清谁在说话。"""

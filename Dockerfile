@@ -1,5 +1,6 @@
 # 微信 AI 助手 · 容器镜像
-FROM python:3.12-slim
+ARG PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.12-slim
+FROM ${PYTHON_IMAGE}
 
 WORKDIR /app
 
@@ -16,7 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir -r requirements.txt --index-url "$PIP_INDEX_URL" \
+    || pip install --no-cache-dir -r requirements.txt --index-url https://pypi.org/simple
 
 COPY src/ ./src/
 

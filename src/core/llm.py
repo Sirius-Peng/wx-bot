@@ -6,14 +6,31 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
+import json
+import httpx
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
 
 try:
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, Timeout as SDKTimeout
 except ImportError:  # 允许无依赖下导入（测试用）
     AsyncOpenAI = None
+    SDKTimeout = httpx.Timeout
+
+
+log = logging.getLogger(__name__)
+
+def is_transient_llm_error(error: BaseException) -> bool:
+    """Classify SDK-native httpx2 as well as httpx without exposing exception bodies."""
+    if isinstance(error, (httpx.TransportError, TimeoutError)):
+        return True
+    if type(error).__name__ in {'APIConnectionError', 'APITimeoutError', 'ConnectError', 'ConnectTimeout',
+                               'ReadTimeout', 'ReadError', 'WriteError', 'RemoteProtocolError', 'PoolTimeout'}:
+        return True
+    status = getattr(error, 'status_code', None)
+    return isinstance(status, int) and (status == 429 or 500 <= status <= 599)
 
 
 @dataclass
@@ -45,20 +62,24 @@ class LLMGateway:
     """
 
     def __init__(self, primary: ProviderCfg, fallback: Optional[ProviderCfg] = None,
-                 usage_sink=None):
+                 usage_sink=None, vision: Optional[ProviderCfg] = None, web_search=None):
+        self.web_search = web_search
+        self.vision = vision
         self.primary = primary
         self.fallback = fallback
         self.usage_sink = usage_sink       # 可注入 DB 写入回调
         self._clients: dict[tuple, "AsyncOpenAI"] = {}
 
+    def _new_client(self, cfg: ProviderCfg):
+        # Use the SDK's public Timeout: current OpenAI SDK uses httpx2 internally.
+        return AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url,
+            timeout=SDKTimeout(cfg.timeout, connect=min(8.0,cfg.timeout), pool=min(3.0,cfg.timeout)),
+            max_retries=0)
+
     def _client(self, cfg: ProviderCfg):
-        # 配置热更新后不能继续复用旧地址/旧 Key 的客户端。
         key = (cfg.name, cfg.base_url, cfg.api_key, cfg.timeout)
         if key not in self._clients:
-            self._clients[key] = AsyncOpenAI(
-                api_key=cfg.api_key, base_url=cfg.base_url, timeout=cfg.timeout,
-                max_retries=0
-            )
+            self._clients[key] = self._new_client(cfg)
         return self._clients[key]
 
     async def aclose(self) -> None:
@@ -69,44 +90,59 @@ class LLMGateway:
     async def chat(self, messages: list[dict], chat_id: str = "",
                    cfg: Optional[ProviderCfg] = None) -> str:
         """非流式调用，带降级。"""
-        cfg = cfg or self.primary
+        has_images = any(isinstance(m.get("content"), list) and any(p.get("type")=="image_url" for p in m["content"] if isinstance(p,dict)) for m in messages)
+        use_web = cfg is None and bool(chat_id) and self.web_search is not None
+        cfg = cfg or (self.vision if has_images and self.vision else self.primary)
+        if use_web: return await self._web_answer(cfg, messages, chat_id, has_images)
         try:
             return await self._call(cfg, messages, chat_id)
         except Exception as e:
-            if self.fallback and cfg is not self.fallback:
+            if not has_images and self.fallback and cfg is not self.fallback:
                 await self._report_error(cfg, e)
                 return await self._call(self.fallback, messages, chat_id)
             raise
 
     async def stream(self, messages: list[dict], chat_id: str = "",
                      cfg: Optional[ProviderCfg] = None) -> AsyncIterator[str]:
-        """流式调用。微信收集完整流后一次发送，不拆气泡。"""
-        cfg = cfg or self.primary
+        """One bounded retry before any token; never concatenate a second generation."""
+        has_images = any(isinstance(m.get('content'),list) and any(p.get('type')=='image_url'
+                         for p in m['content'] if isinstance(p,dict)) for m in messages)
+        if cfg is None and self.web_search is not None:
+            selected = self.vision if has_images and self.vision else self.primary
+            yield await self._web_answer(selected, messages, chat_id, has_images)
+            return
+        cfg = cfg or (self.vision if has_images and self.vision else self.primary)
         emitted = False
-        stream = None
         try:
-            client = self._client(cfg)
-            stream = await client.chat.completions.create(
-                model=cfg.model, messages=messages, stream=True,
-                max_tokens=cfg.max_tokens, temperature=cfg.temperature,
-            )
-            async for chunk in stream:
-                delta = chunk.choices[0].delta.content if chunk.choices else None
-                if delta:
-                    emitted = True
-                    yield delta
-        except Exception as e:
-            # 已经开始输出时不拼接另一模型的回答，避免重复/矛盾回复。
-            fallback = self.fallback
+            for attempt in range(2):
+                stream = None; retry_client = None
+                try:
+                    client = self._client(cfg) if attempt == 0 else self._new_client(cfg)
+                    if attempt: retry_client = client
+                    stream = await client.chat.completions.create(model=cfg.model, messages=messages,
+                        stream=True, max_tokens=cfg.max_tokens, temperature=cfg.temperature)
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta.content if chunk.choices else None
+                        if delta:
+                            emitted = True
+                            yield delta
+                    return
+                except Exception as error:
+                    if attempt == 0 and not emitted and is_transient_llm_error(error):
+                        log.warning('Model connection retry provider=%s error_type=%s',cfg.name,type(error).__name__)
+                    else:
+                        raise
+                finally:
+                    if stream is not None and hasattr(stream,'close'): await stream.close()
+                    if retry_client is not None: await retry_client.close()
+                await asyncio.sleep(.25)
+        except Exception as error:
+            fallback = None if has_images else self.fallback
             if not emitted and fallback and cfg is not fallback:
-                await self._report_error(cfg, e)
-                async for delta in self.stream(messages, chat_id, cfg=fallback):
-                    yield delta
+                await self._report_error(cfg, error)
+                async for delta in self.stream(messages, chat_id, cfg=fallback):yield delta
             else:
                 raise
-        finally:
-            if stream is not None and hasattr(stream, "close"):
-                await stream.close()
 
     async def complete(self, prompt: str, max_tokens: int = 256) -> str:
         """单轮补全，用于摘要/判定等内部任务（走便宜模型）。"""
@@ -116,25 +152,85 @@ class LLMGateway:
 
     # ── 内部 ──────────────────────────────────────────────────
 
-    async def _call(self, cfg: ProviderCfg, messages: list[dict], chat_id: str) -> str:
-        client = self._client(cfg)
+    async def _response(self, cfg, messages, chat_id, **extra):
         t0 = time.monotonic()
-        resp = await client.chat.completions.create(
-            model=cfg.model, messages=messages,
-            max_tokens=cfg.max_tokens, temperature=cfg.temperature,
-        )
-        text = resp.choices[0].message.content or ""
+        for attempt in range(2):
+            client = self._client(cfg) if attempt == 0 else self._new_client(cfg)
+            try:
+                resp = await client.chat.completions.create(model=cfg.model, messages=messages,
+                    max_tokens=cfg.max_tokens, temperature=cfg.temperature, **extra)
+                break
+            except Exception as error:
+                if attempt or not is_transient_llm_error(error):raise
+                log.warning('Model connection retry provider=%s error_type=%s',cfg.name,type(error).__name__)
+            finally:
+                if attempt:await client.close()
+            await asyncio.sleep(.25)
         usage = Usage(
             prompt_tokens=getattr(resp.usage, "prompt_tokens", 0),
             completion_tokens=getattr(resp.usage, "completion_tokens", 0),
         )
         if self.usage_sink:
             await self.usage_sink(chat_id, cfg.model, usage, time.monotonic() - t0)
+        return resp
+
+    async def _call(self, cfg, messages, chat_id):
+        resp = await self._response(cfg, messages, chat_id)
+        return resp.choices[0].message.content or ""
+
+    async def _web_answer(self, cfg, messages, chat_id, has_images=False):
+        from .web_search import SEARCH_TOOL, SEARCH_RULES
+        # Request-local snapshots: hot configuration never mixes credentials mid-turn.
+        search = self.web_search
+        work = [*messages, {"role":"system", "content":SEARCH_RULES}]
+        sources = []; calls_used = 0
+        for round_index in range(3):
+            extra = {"tools":[SEARCH_TOOL], "tool_choice":"auto" if round_index < 2 else "none"}
+            try:
+                resp = await self._response(cfg, work, chat_id, **extra)
+            except Exception as error:
+                if getattr(error,'status_code',None) in (400,404,422):
+                    work.append({'role':'system','content':'本轮联网工具调用未成功。对实时问题如实说明本次未能核实；不要声称已搜索。'})
+                    return self._with_sources(await self._call(cfg,work,chat_id),sources)
+                if has_images or not self.fallback or cfg is self.fallback: raise
+                await self._report_error(cfg, error)
+                cfg = self.fallback
+                resp = await self._response(cfg, work, chat_id, **extra)
+            message = resp.choices[0].message
+            tool_calls = getattr(message, 'tool_calls', None) or []
+            if not tool_calls:
+                return self._with_sources(message.content or "",sources)
+            if round_index == 2: raise RuntimeError('Model ignored tool_choice=none')
+            # Include reasoning_content for DeepSeek thinking/tool-use compatibility.
+            assistant = {'role':'assistant','content':message.content,
+                         'tool_calls':[t.model_dump(exclude_none=True) for t in tool_calls]}
+            reasoning = getattr(message, 'reasoning_content', None)
+            if reasoning is not None: assistant['reasoning_content'] = reasoning
+            work.append(assistant)
+            for tool in tool_calls:
+                result = {'ok':False,'error':'tool_budget_exhausted','sources':[]}
+                if tool.function.name == 'web_search' and calls_used < 2:
+                    calls_used += 1
+                    try:
+                        args = json.loads(tool.function.arguments)
+                        result = await search.search(args.get('query') if isinstance(args,dict) else None)
+                    except (ValueError, TypeError): result = {'ok':False,'error':'invalid_query','sources':[]}
+                for source in result.get('sources',[]):
+                    if source['url'] not in {s['url'] for s in sources}:sources.append(source)
+                work.append({'role':'tool','tool_call_id':tool.id,
+                             'content':json.dumps(result,ensure_ascii=False)})
+        raise RuntimeError('Search turn budget exhausted')
+
+    @staticmethod
+    def _with_sources(text, sources):
+        # Keep provenance even if a provider omitted URLs; one complete bubble.
+        missing = [s for s in sources if s['url'] not in text][:3]
+        if missing: text += " 参考来源：" + "；".join(s['title'] + " " + s['url'] for s in missing)
         return text
 
     async def _report_error(self, cfg: ProviderCfg, err: Exception) -> None:
         # 实际实现写 Prometheus counter / 日志
-        print(f"[LLMGateway] provider={cfg.name} failed: {err!r}, falling back")
+        log.warning('Model fallback provider=%s error_type=%s',cfg.name,type(err).__name__)
 
 
 class JudgeLLM:

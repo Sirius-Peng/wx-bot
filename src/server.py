@@ -24,12 +24,13 @@ import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .core.admin_auth import AdminAuth
 from .core.personality import public_profiles
+from .core.onboarding import OnboardingStore, model_fingerprint, test_primary_model
 from .config_store import AppConfig, ConfigStore
 from .runtime import BotRuntime
 
@@ -40,7 +41,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("wxbot")
 
-DATA_DIR = Path(os.environ.get("WXBOT_DATA_DIR", "./data"))
+from .core.storage import resolve_data_dir, initialize_storage, create_backup
+
+DATA_DIR = resolve_data_dir()
+STORAGE_REPORT = initialize_storage(DATA_DIR)
 
 
 def _resolve_web_dir() -> Path:
@@ -71,6 +75,9 @@ PORT = int(os.environ.get("WXBOT_PORT", "8000"))
 config_store = ConfigStore(DATA_DIR / "config.json")
 runtime = BotRuntime(config_store, DATA_DIR)
 admin_auth = AdminAuth(DATA_DIR, HOST)
+onboarding_store = OnboardingStore(DATA_DIR / "onboarding.json")
+_model_test_lock = asyncio.Lock()
+_backup_lock = asyncio.Lock()
 
 
 @asynccontextmanager
@@ -82,9 +89,12 @@ async def lifespan(app: FastAPI):
     # 若上次是运行状态，尝试自动恢复
     # ⚠️ 自动启动失败不能拖垮服务 —— 用户可能还没配完，需要在界面里手动启动
     cfg = config_store.load()
-    if cfg.llm.primary_key and cfg.bot.memory_enabled:
+    if cfg.adapter.qq_enabled and cfg.adapter.onebot_token:
+        await runtime.ensure_onebot_ingress()
+    setup_completed = onboarding_store.load(cfg)['completed']
+    if setup_completed and cfg.llm.primary_key and cfg.bot.memory_enabled:
         runtime.start_learning()
-    if cfg.llm.primary_key and (cfg.adapter.wechat_enabled or cfg.adapter.qq_enabled):
+    if setup_completed and cfg.llm.primary_key and (cfg.adapter.wechat_enabled or cfg.adapter.qq_enabled):
         try:
             res = await runtime.start()
             log.info("自动启动机器人：%s", res.get("message"))
@@ -92,6 +102,7 @@ async def lifespan(app: FastAPI):
             log.warning("自动启动失败，用户可检查配置后手动启动", exc_info=True)
     yield
     await runtime.stop()
+    await runtime.close_onebot_ingress()
 
 
 app = FastAPI(title="微信 AI 助手", lifespan=lifespan)
@@ -196,14 +207,17 @@ async def ws_onebot(websocket: WebSocket) -> None:
 
     log.info("OneBot 反向 WebSocket 已连接")
     # 让适配器记住这条连接：界面上要显示"网关有没有把消息推过来"
-    adapter0 = runtime.qq_adapter
-    if adapter0 is not None and hasattr(adapter0, "attach_ws"):
-        adapter0.attach_ws(websocket)
+    runtime.attach_onebot_ws(websocket)
     warned = False
     try:
         while True:
             raw = await websocket.receive_text()
+            try:event=json.loads(raw)
+            except json.JSONDecodeError:continue
+            if not isinstance(event,dict):continue
+            runtime.note_onebot_event('ws')
             adapter = runtime.qq_adapter
+            if adapter is not None and hasattr(adapter,'attach_ws') and getattr(adapter,'_ws',None) is not websocket:adapter.attach_ws(websocket)
             if adapter is None or getattr(adapter, "platform", "") != "onebot":
                 if not warned:
                     log.warning("收到 QQ 消息，但机器人尚未启动，消息将被忽略 —— "
@@ -211,19 +225,13 @@ async def ws_onebot(websocket: WebSocket) -> None:
                     warned = True
                 continue
             warned = False
-            try:
-                event = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
             await adapter.handle_event(event)
     except WebSocketDisconnect:
         pass
     except Exception:
         log.debug("OneBot WebSocket 异常", exc_info=True)
     finally:
-        adapter = runtime.qq_adapter
-        if adapter is not None and hasattr(adapter, "detach_ws"):
-            adapter.detach_ws(websocket)
+        runtime.detach_onebot_ws(websocket)
         log.info("OneBot 反向 WebSocket 已断开")
 
 
@@ -247,6 +255,8 @@ async def onebot_event(request: Request) -> Response:
     except Exception:
         return JSONResponse({"status": "failed", "retcode": 100, "message": "无效的 JSON"})
 
+    if not isinstance(event,dict):return JSONResponse({'status':'failed','retcode':100})
+    runtime.note_onebot_event('http')
     adapter = runtime.qq_adapter
     if adapter is None or getattr(adapter, "platform", "") != "onebot":
         return JSONResponse({"status": "failed", "retcode": 100,
@@ -308,6 +318,15 @@ async def api_qq_stop() -> dict:
     return await runtime.qq_stop()
 
 
+@app.get('/api/qq/login/accounts')
+async def api_qq_accounts():return await runtime.qq_quick_accounts()
+
+@app.post('/api/qq/login/quick')
+async def api_qq_quick(request:Request):
+    body=await request.json()
+    if not isinstance(body,dict):raise HTTPException(400,'登录参数格式错误')
+    return await runtime.qq_quick_login(str(body.get('qq') or ''),body.get('remember') is True)
+
 @app.get("/api/qq/logs")
 async def api_qq_logs(lines: int = 100) -> dict:
     return await runtime.qq_logs(lines)
@@ -353,8 +372,8 @@ async def api_login_check(captcha: str = "") -> dict:
 
 @app.get("/api/memory")
 async def api_memory_list(scope: str = "", owner_id: str = "",
-                          category: str = "", keyword: str = "") -> dict:
-    return runtime.memory_list(scope, owner_id, category, keyword)
+                          category: str = "", keyword: str = "", include_history: bool = False) -> dict:
+    return runtime.memory_list(scope, owner_id, category, keyword, include_history)
 
 
 @app.get("/api/memory/stats")
@@ -367,13 +386,29 @@ async def api_memory_retry() -> dict:
     return runtime.memory_retry_learning()
 
 
+@app.post("/api/memory/identities")
+async def api_memory_link(request: Request) -> dict:
+    body = await request.json()
+    try:
+        identity = runtime._ensure_memory().link_accounts(
+            str(body.get('wechat_id', '')), str(body.get('qq_id', '')), str(body.get('label', '')))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {'ok': True, 'identity': identity}
+
+
+@app.delete("/api/memory/identities/{identity_id}")
+async def api_memory_unlink(identity_id: str) -> dict:
+    return {'ok': runtime._ensure_memory().unlink_accounts(identity_id)}
+
+
 @app.post("/api/memory")
 async def api_memory_add(request: Request) -> dict:
     b = await request.json()
     return runtime.memory_add(
         scope=b.get("scope", "user"), owner_id=str(b.get("owner_id", "")),
         category=b.get("category", "fact"), content=b.get("content", ""),
-        keywords=b.get("keywords") or [],
+        keywords=b.get("keywords") or [], platform=b.get("platform", ""),
     )
 
 
@@ -417,6 +452,142 @@ async def api_get_config() -> dict:
     return config_store.masked(config_store.load())
 
 
+@app.get('/api/onboarding')
+async def api_onboarding():
+    cfg = config_store.load()
+    return onboarding_store.public(cfg, runtime.ilink_status().get('loggedIn', False))
+
+
+@app.patch('/api/onboarding')
+async def api_onboarding_progress(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) - {'step', 'dismissed'}:
+        raise HTTPException(400, '引导进度格式错误')
+    if 'step' in body and (type(body['step']) is not int or not 1 <= body['step'] <= 5):
+        raise HTTPException(400, '引导步骤需要为1到5')
+    if 'dismissed' in body and type(body['dismissed']) is not bool:
+        raise HTTPException(400, '引导显示设置格式错误')
+    cfg = config_store.load(); state = onboarding_store.load(cfg)
+    state.update(body); onboarding_store.save(state)
+    return onboarding_store.public(cfg, runtime.ilink_status().get('loggedIn', False))
+
+
+@app.post('/api/llm/test')
+async def api_test_primary_model():
+    if _model_test_lock.locked():
+        return {'ok': False, 'code': 'busy', 'message': '模型连接测试正在进行，请稍候'}
+    async with _model_test_lock:
+        cfg = config_store.load()
+        result = await test_primary_model(cfg)
+        # Persist only a fingerprint, not the key or model-generated test output.
+        latest = config_store.load(); state = onboarding_store.load(latest)
+        state['model_receipt'] = model_fingerprint(cfg.llm) if result.get('ok') else ''
+        onboarding_store.save(state)
+        if result.get('ok') and model_fingerprint(latest.llm) != state['model_receipt']:
+            return {'ok': False, 'code': 'changed', 'message': '模型设置已变化，请对当前配置重新测试'}
+        return result
+
+
+@app.post('/api/onboarding/complete')
+async def api_onboarding_complete(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) - {'start'} or type(body.get('start', True)) is not bool:
+        raise HTTPException(400, '完成引导的参数格式错误')
+    cfg = config_store.load(); state = onboarding_store.load(cfg); missing = []
+    if not cfg.llm.primary_key:
+        missing.append('填写并保存 API Key')
+    if not state['model_receipt'] or state['model_receipt'] != model_fingerprint(cfg.llm):
+        missing.append('测试当前模型连接')
+    if not (cfg.adapter.wechat_enabled or cfg.adapter.qq_enabled):
+        missing.append('至少选择一个聊天通道')
+    if cfg.adapter.wechat_enabled and not runtime.ilink_status().get('loggedIn'):
+        missing.append('完成微信 iLink 扫码登录')
+    if cfg.adapter.qq_enabled and not (await runtime.probe_qq()).get('loggedIn'):
+        missing.append('启动 QQ 网关并完成登录')
+    if missing:
+        return {'ok': False, 'missing': missing, 'message': '还差这些步骤：' + '；'.join(missing)}
+    if body.get('start', True):
+        result = await runtime.start()
+        if not result.get('ok'):
+            return {'ok': False, 'missing': [], 'message': result.get('message') or '机器人启动未完成'}
+    state.update(completed=True, dismissed=False, step=5)
+    onboarding_store.save(state)
+    return {'ok': True, 'message': '配置完成，可以开始聊天了', 'started': body.get('start', True)}
+
+
+@app.get('/api/data/status')
+async def api_data_status():
+    return {'data_dir':str(DATA_DIR), 'backup_dir':str(DATA_DIR/'.backups'),
+            'custom_path':bool(os.environ.get('WXBOT_DATA_DIR') or os.environ.get('WXBOT_USER_DATA_DIR')) and os.environ.get('WXBOT_DEFAULT_DATA_DIR')!='1',
+            'migration':{'status':STORAGE_REPORT.get('status','unknown'),
+                         'imported_files':STORAGE_REPORT.get('imported_files',0),
+                         'other_backups':len(STORAGE_REPORT.get('other_backups',[]))},
+            'retained_on_uninstall':True if not (os.environ.get('WXBOT_DATA_DIR') or os.environ.get('WXBOT_USER_DATA_DIR')) or os.environ.get('WXBOT_DEFAULT_DATA_DIR')=='1' else None}
+
+
+@app.post('/api/data/backup')
+async def api_data_backup():
+    if _backup_lock.locked():raise HTTPException(409,'已有备份正在创建，请稍候')
+    async with _backup_lock:
+        try:
+            file=await asyncio.to_thread(create_backup, DATA_DIR, {'ilink':runtime._ilink_state_dir()})
+        except (OSError,ValueError,RuntimeError):
+            log.error('Local backup did not complete; existing data retained')
+            raise HTTPException(500,'备份未完成，原数据保持不变。请检查目录空间、权限，或停止旧版本后重试。')
+    return {'ok':True,'name':file.name,'path':str(file),'download_url':'/api/data/backup/'+file.name,
+            'message':'本地备份已创建并通过 SHA256 校验'}
+
+
+@app.get('/api/data/backup/{name}')
+async def api_data_backup_download(name:str):
+    import re
+    if not re.fullmatch(r'wxbot-(?:backup|migration)-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.zip',name):raise HTTPException(404,'备份不存在')
+    file=DATA_DIR/'.backups'/name
+    if not file.is_file() or file.is_symlink() or (DATA_DIR/'.backups').is_symlink():raise HTTPException(404,'备份不存在')
+    return FileResponse(file,media_type='application/zip',filename=name,headers={'Cache-Control':'no-store'})
+
+
+CONFIG_SECTIONS={
+ 'primary':('llm',{'primary_base','primary_key','primary_model'}),
+ 'fallback':('llm',{'fallback_base','fallback_key','fallback_model'}),
+ 'judge':('llm',{'judge_base','judge_key','judge_model'}),
+ 'vision':('llm',{'vision_base','vision_key','vision_model'}),
+ 'search':('llm',{'search_enabled','search_key','search_model','context_timezone'}),
+ 'persona':('bot',{'name','persona','persona_profile','persona_relationship'}),
+ 'reply':('bot',{'group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
+ 'memory':('bot',{'memory_enabled','memory_inject','memory_extract_interval'}),
+ 'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror'})}
+
+@app.patch('/api/config/section/{section}')
+async def api_config_section(section:str,request:Request):
+    from dataclasses import asdict
+    if section not in CONFIG_SECTIONS:raise HTTPException(404,'设置分区不存在')
+    values=await request.json();root,allowed=CONFIG_SECTIONS[section]
+    if not isinstance(values,dict) or set(values)-allowed:raise HTTPException(400,'包含其他分区或未知设置')
+    old=config_store.load();raw=asdict(old)
+    for key,value in values.items():
+        original=raw[root][key]
+        if isinstance(original,str):
+            if not isinstance(value,str):raise HTTPException(400,'文本设置格式错误')
+            value=value.strip()
+            if (key.endswith('_key') or key.endswith('_token')) and '•' in value:value=original
+        elif isinstance(original,bool):
+            if not isinstance(value,bool):raise HTTPException(400,'开关设置需要布尔值')
+        elif isinstance(original,(float,int)):
+            import math
+            if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):raise HTTPException(400,'数字设置格式错误')
+        if key=='context_timezone':
+            from .core.reality import is_valid_timezone
+            if not is_valid_timezone(value):raise HTTPException(400,'请填写有效的 IANA 时区，如 Asia/Shanghai')
+        if key=='search_model' and not value:raise HTTPException(400,'搜索模型名称不能为空')
+        if key=='napcat_image_mirror':
+            import re
+            if value and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?',value):raise HTTPException(400,'镜像源请填写域名，可附端口，不含协议或路径')
+        raw[root][key]=value
+    cfg=config_store._from_dict(raw);config_store.save(cfg);restart=runtime.apply_config(cfg)
+    return {'ok':True,'section':section,'requires_restart':restart,'config':config_store.masked(cfg),
+            'message':'本区设置已保存'+('，通道需重启机器人生效' if restart else '并应用')}
+
 @app.put("/api/config")
 async def api_put_config(request: Request) -> dict:
     """保存配置。
@@ -443,8 +614,15 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
 
     inc_llm = incoming.get("llm") or {}
     inc_ad = incoming.get("adapter") or {}
-    for f in ("primary_key", "fallback_key", "judge_key"):
+    for f in ("primary_key", "fallback_key", "judge_key", "vision_key", "search_key"):
         setattr(cfg.llm, f, keep_masked(inc_llm.get(f, ""), getattr(old.llm, f, "")))
+    for f in ('vision_key','search_key'):
+        if f in inc_llm:
+            value=inc_llm.get(f) or ''
+            setattr(cfg.llm,f,getattr(old.llm,f) if '•' in value else value)
+    # Older whole-config clients must not reset newly introduced search/time fields.
+    for f in ('search_enabled','search_key','search_model','context_timezone'):
+        if f not in inc_llm:setattr(cfg.llm,f,getattr(old.llm,f))
     for f in ("onebot_token", "napcat_webui_token"):
         setattr(cfg.adapter, f,
                 keep_masked(inc_ad.get(f, ""), getattr(old.adapter, f, "")))
@@ -454,6 +632,17 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
 # ═══════════════════════════════════════════════════════════════════
 #  消息日志
 # ═══════════════════════════════════════════════════════════════════
+
+@app.get('/api/statistics')
+async def api_statistics(days:int=30,platform:str='',direction:str='in',chat_type:str='',limit:int=20,min_count:int=2):
+    if days not in (0,7,30,90) or platform not in ('','wechat','qq') or direction not in ('in','out','all') or chat_type not in ('','private','group') or not 1<=limit<=50 or not 1<=min_count<=100:
+        raise HTTPException(400,'统计筛选参数无效')
+    try:
+        return await asyncio.to_thread(runtime.analytics.query,days,platform,direction,chat_type,limit,min_count,runtime.cfg.llm.context_timezone)
+    except (OSError,RuntimeError) as error:
+        log.warning('Local statistics unavailable error_type=%s',type(error).__name__)
+        raise HTTPException(503,'本地统计暂未完成，请检查日志读取权限及运行依赖后重试')
+
 
 @app.get("/api/messages")
 async def api_messages(limit: int = 100, chat_id: str = "",

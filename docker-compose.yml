@@ -26,10 +26,15 @@ services:
       - WXBOT_HOST=0.0.0.0
       - WXBOT_PORT=8000
       - WXBOT_DATA_DIR=/app/data
+      - WXBOT_MIGRATE_LEGACY=1
+      - 'WXBOT_LEGACY_DATA_DIRS=["/app/legacy-data"]'
       - WXBOT_NO_BROWSER=1
       - WXBOT_ADMIN_TOKEN=${WXBOT_ADMIN_TOKEN:-}
     volumes:
-      - ./data:/app/data
+      # 宿主机用户目录，不放在项目/镜像内；可用 WXBOT_HOST_DATA_DIR 自定义。
+      - ${WXBOT_HOST_DATA_DIR:-${HOME}/.local/share/wxbot/user-data}:/app/data
+      # 旧版数据只读挂载，首次启动复制迁移；原目录不删除。
+      - ./data:/app/legacy-data:ro
       # ── 要用「一键部署 QQ 网关」时再打开下面这行 ──────────────
       # 程序需要调用宿主机的 Docker 来启动 NapCat 容器。
       # 挂载 Docker socket 等同于把宿主机 root 权限交给该容器，

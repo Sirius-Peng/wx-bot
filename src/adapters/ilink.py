@@ -51,7 +51,10 @@ from typing import Awaitable, Callable, Optional
 import httpx
 
 from ..core.http import explain_error, make_client
+from ..core.llm import is_transient_llm_error
+from ..core.turn_taking import plan_wait,ready
 from ..core.types import WxMessage
+from ..core.conversation import ConversationChanged,merge_messages,MAX_BATCH
 from .base import BaseAdapter, MessageHandler
 
 log = logging.getLogger(__name__)
@@ -129,6 +132,7 @@ class ILinkAdapter(BaseAdapter):
         self._ctx_tokens: dict[str, str] = {}
         # 官方域名是公网地址，走系统代理没问题；make_client 会自动判断
         self._client = make_client(self.base_url, timeout=40.0)
+        self._poll_client = None
         self._reply_context: ContextVar = ContextVar("ilink_reply_context", default=None)
         self._outbox: dict[str, dict] = {}
         self._wakeup = asyncio.Event()
@@ -138,8 +142,15 @@ class ILinkAdapter(BaseAdapter):
         self._failures: dict[str, int] = {}
         self._delivery = {"attempts": 0, "accepted": 0, "failed": 0,
                           "last_status": "idle", "last_ret": None,
-                          "last_errcode": None, "last_send_ms": 0}
+                          "last_errcode": None, "last_send_ms": 0, "network_retries": 0, "last_model_error_type": ""}
         self._handler: Optional[MessageHandler] = None
+        self.humanized_wait=True;self.pause_timeout=120
+        self._collecting=set();self._processing_capacity=asyncio.Semaphore(MAX_ACTIVE_CHATS)
+        self._typing_tickets={}
+        self._typing_active={}
+        self._typing_status={'starts':0,'stops':0,'failed':0,'last_status':'idle','last_error_type':''}
+        self.message_merge_window=0.0
+        self.message_merge_max_wait=10.0
         self._running = False
         self._startup_task: Optional[asyncio.Task] = None
 
@@ -179,6 +190,8 @@ class ILinkAdapter(BaseAdapter):
         except Exception:
             log.warning("notify stop failed", exc_info=True)
         await self._client.aclose()
+        if self._poll_client is not None:
+            await self._poll_client.aclose();self._poll_client=None
 
     def on_message(self, handler: MessageHandler) -> None:
         self._handler = handler
@@ -262,7 +275,7 @@ class ILinkAdapter(BaseAdapter):
     def _raw_key(raw: dict) -> str:
         mid = raw.get("message_id") or raw.get("client_id")
         if not mid:
-            mid = hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
+            mid = hashlib.sha256(json.dumps({k:v for k,v in raw.items() if not k.startswith("_wxbot_")}, sort_keys=True).encode()).hexdigest()
         return str(raw.get("from_user_id", "")) + ":" + str(mid)
 
     @staticmethod
@@ -304,6 +317,7 @@ class ILinkAdapter(BaseAdapter):
             for raw in msgs:
                 key = self._raw_key(raw)
                 if key not in existing:
+                    raw["_wxbot_received_at"]=time.time()
                     self._pending.append(raw)
                     existing.add(key)
                     msg = self._normalize(raw)
@@ -335,9 +349,10 @@ class ILinkAdapter(BaseAdapter):
                 if peer in visited:
                     continue
                 visited.add(peer)  # 重试中的首条消息也占住该会话顺序。
-                if (peer in self._jobs or len(self._jobs) >= MAX_ACTIVE_CHATS
+                if (peer in self._jobs or (len(self._jobs) >= (MAX_PENDING if self.message_merge_window else MAX_ACTIVE_CHATS))
                         or self._retry_after.get(peer, 0) > now):
                     continue
+                self._collecting.add(peer)
                 self._jobs[peer] = asyncio.create_task(self._process_pending(raw, peer))
             delays = [max(0.01, at - time.monotonic())
                       for peer, at in self._retry_after.items()
@@ -347,21 +362,64 @@ class ILinkAdapter(BaseAdapter):
             except asyncio.TimeoutError:
                 pass
 
-    async def _handle_raw(self, raw: dict) -> bool:
-        msg = self._normalize(raw)
-        if msg is not None:
-            if self._handler is None:
-                return False
-            self.remember_context(msg)
-            with self.bind_reply_context(msg):
-                await self._handler(msg)
-        index = self._pending.index(raw)
-        self._pending.pop(index)
-        try:
-            self._save_cursor()
-        except Exception:
-            self._pending.insert(index, raw)
+    def configure_burst(self,window,max_wait,human=True,pause_timeout=120,**kwargs):
+        self.humanized_wait=human;self.pause_timeout=pause_timeout
+        self.message_merge_window=float(window);self.message_merge_max_wait=max(float(max_wait),float(window))
+
+    def _peer_pending(self,raw):
+        return [r for r in self._pending if r.get('from_user_id')==raw.get('from_user_id')
+                and r.get('group_id')==raw.get('group_id')]
+
+    async def _batch_raw(self,raw):
+        if not self.message_merge_window:return [raw]
+        keys=raw.get('_wxbot_batch_keys')
+        if keys:return [r for r in self._pending if self._raw_key(r) in keys]
+        raw.setdefault('_wxbot_received_at',time.time())
+        while True:
+            candidates=self._peer_pending(raw)
+            for r in candidates:r.setdefault('_wxbot_received_at',time.time())
+            now=time.time()
+            timed=[(m,r['_wxbot_received_at']) for r in candidates if (m:=self._normalize(r)) is not None]
+            if not timed:break
+            plan=plan_wait(timed,self.message_merge_window,self.message_merge_max_wait,self.humanized_wait,self.pause_timeout)
+            is_ready,force=ready(plan,now,timed[-1][1],len(timed))
+            if is_ready:break
+            await asyncio.sleep(min(.05,self.message_merge_window))
+        force=locals().get('force',False)
+        selected=candidates[:MAX_BATCH]
+        raw['_wxbot_batch_keys']=[self._raw_key(r) for r in selected]
+        raw['_wxbot_batch_known']=[self._raw_key(r) for r in candidates]
+        raw['_wxbot_batch_force']=force
+        try:self._save_cursor()
+        except BaseException:
+            for key in ('_wxbot_batch_keys','_wxbot_batch_known','_wxbot_batch_force'):raw.pop(key,None)
             raise
+        return selected
+
+    def check_reply_current(self,msg):
+        if not self.message_merge_window:return
+        raw=next((r for r in self._pending if str(r.get('message_id') or r.get('client_id') or self._raw_key(r))==msg.msg_id
+                  and r.get('from_user_id')==msg.sender_id),None)
+        if raw and raw.get('_wxbot_batch_keys') and not raw.get('_wxbot_batch_force'):
+            known=set(raw['_wxbot_batch_known'])
+            if any(self._raw_key(r) not in known for r in self._peer_pending(raw)):
+                raise ConversationChanged('New conversation input')
+
+    async def _handle_raw(self, raw: dict) -> bool:
+        selected=await self._batch_raw(raw)
+        self._collecting.discard(str(raw.get("from_user_id") or "unknown"))
+        messages=[m for r in selected if (m:=self._normalize(r)) is not None]
+        msg=(merge_messages(messages) if self.message_merge_window else messages[0]) if messages else None
+        if msg is not None:
+            if self._handler is None:return False
+            self.remember_context(msg)
+            async with self._processing_capacity:
+                self.check_reply_current(msg)
+                with self.bind_reply_context(msg):await self._handler(msg)
+        before=list(self._pending)
+        for r in selected:self._pending.remove(r)
+        try:self._save_cursor()
+        except BaseException:self._pending[:]=before;raise
         self._capacity_changed.set()
         return True
 
@@ -372,12 +430,18 @@ class ILinkAdapter(BaseAdapter):
                 self._retry_after.pop(peer, None)
             else:
                 self._retry_after[peer] = time.monotonic() + 0.5
+        except ConversationChanged:
+            # A prepared network draft is never reshaped; only unsent generations regroup.
+            for key in ('_wxbot_batch_keys','_wxbot_batch_known','_wxbot_batch_force'):raw.pop(key,None)
+            self._save_cursor()
+            self._retry_after.pop(peer,None)
         except Exception:
             failures = self._failures.get(peer, 0) + 1
             self._failures[peer] = failures
             self._retry_after[peer] = time.monotonic() + min(8.0, 0.5 * 2 ** min(failures - 1, 4))
             log.exception("处理消息失败，将保留收件与完整回复草稿后重试")
         finally:
+            self._collecting.discard(peer)
             self._wakeup.set()
 
     async def _drain_pending(self) -> bool:
@@ -413,9 +477,15 @@ class ILinkAdapter(BaseAdapter):
             self._delivery.update(last_status="missing_context")
             raise RuntimeError("sendmessage: missing context_token")
 
+    def mark_generation_pending(self, error):
+        self._delivery.update(last_status='generation_retry_pending',last_model_error_type=type(error).__name__)
+
+    def typing_cleanup_required(self, chat_id):
+        return bool(self._typing_active.get(chat_id))
+
     def delivery_status(self) -> dict:
-        return {**self._delivery, "pending_inbound": len(self._pending),
-                "active_chats": len(self._jobs),
+        return {**self._delivery, "typing":dict(self._typing_status), "pending_inbound": len(self._pending),
+                "active_chats": len(self._jobs)-len(self._collecting), "collecting_chats":len(self._collecting),
                 "pending_replies": sum(d.get("status") != "api_accepted"
                                        for d in self._outbox.values()),
                 "confirmation": "API acceptance only; no client read receipt"}
@@ -430,29 +500,29 @@ class ILinkAdapter(BaseAdapter):
                 return None
 
             items = raw.get("item_list") or []
-            text, msg_type = "", "text"
+            texts=[];images=[];parts=[];msg_type='text'
             for it in items:
-                t = it.get("type")
-                if t == ITEM_TEXT:
-                    text = (it.get("text_item") or {}).get("text", "")
-                    msg_type = "text"
-                    break
-                if t == ITEM_IMAGE:
-                    msg_type = "image"
-                elif t == ITEM_VOICE:
-                    msg_type = "voice"
-                    # 语音自带转文字结果
-                    text = (it.get("voice_item") or {}).get("text", "")
-                elif t == ITEM_FILE:
-                    msg_type = "file"
-                elif t == ITEM_VIDEO:
-                    msg_type = "video"
+                t=it.get('type')
+                if t==ITEM_TEXT:
+                    text=str((it.get('text_item') or {}).get('text') or '');texts.append(text);parts.append({'type':'text','text':text})
+                elif t==ITEM_IMAGE:
+                    img=it.get('image_item') or {};media=img.get('media') or {}
+                    parts.append({'type':'image','index':len(images)})
+                    images.append({'url':media.get('full_url',''),'encrypt_query_param':media.get('encrypt_query_param',''),
+                                   'aes_key':media.get('aes_key',''),'key_hex':img.get('aeskey','')})
+                    texts.append('[图片]');msg_type='image'
+                elif t==ITEM_VOICE:
+                    voice=it.get('voice_item') or {};text=str(voice.get('text') or voice.get('transcript') or '[语音]');texts.append(text);parts.append({'type':'text','text':text})
+                    if not images:msg_type='voice'
+                elif t in (ITEM_FILE,ITEM_VIDEO):
+                    text='[文件]' if t==ITEM_FILE else '[视频]';texts.append(text);parts.append({'type':'text','text':text})
+            text=''.join(texts)
 
             from_user = raw.get("from_user_id") or ""
             group_id = raw.get("group_id")
 
             return WxMessage(
-                msg_id=str(raw.get("message_id") or raw.get("client_id") or ""),
+                msg_id=str(raw.get("message_id") or raw.get("client_id") or self._raw_key(raw)),
                 platform=self.platform,
                 # 官方协议当前只支持私聊（capabilities.chatTypes=["direct"]）
                 chat_type="group" if group_id else "private",
@@ -463,7 +533,7 @@ class ILinkAdapter(BaseAdapter):
                 bot_id=self.bot_id or "",
                 content=text.strip(),
                 raw_content=text,
-                msg_type=msg_type,  # type: ignore[arg-type]
+                msg_type=msg_type, images=images, content_parts=parts,  # type: ignore[arg-type]
                 timestamp=int(raw.get("create_time_ms") or 0),
                 is_at_me=False,     # 私聊无需 @
                 context_token=raw.get("context_token"),
@@ -483,6 +553,7 @@ class ILinkAdapter(BaseAdapter):
         key = self._reply_key(bound) if bound is not None else "manual:" + uuid.uuid4().hex
         draft = self._outbox.get(key)
         if draft is None:
+            if bound is not None:self.check_reply_current(bound)
             ctx_token = (bound.context_token if bound is not None else None) or self._ctx_tokens.get(chat_id)
             if not ctx_token:
                 self._delivery.update(last_status="missing_context", failed=self._delivery["failed"] + 1)
@@ -513,7 +584,7 @@ class ILinkAdapter(BaseAdapter):
                 raise RuntimeError("sendmessage: missing acknowledgement fields")
             draft.update(status="api_accepted", server_message_id=str(resp.get("message_id") or ""))
             self._save_outbox()
-            self._delivery.update(last_status="api_accepted", accepted=self._delivery["accepted"] + 1)
+            self._delivery.update(last_status="api_accepted", last_model_error_type="", accepted=self._delivery["accepted"] + 1)
             log.info("微信回复接口已接受 client_id=%s server_id_present=%s",
                      draft["client_id"], bool(draft["server_message_id"]))
             return draft["server_message_id"] or draft["client_id"]
@@ -546,22 +617,44 @@ class ILinkAdapter(BaseAdapter):
         finally:
             Path(tmp).unlink(missing_ok=True)
 
-    async def send_typing(self, chat_id: str, on: bool = True) -> None:
-        """发送"正在输入"状态。
-
-        这是官方协议独有的体验优势 —— 微信里机器人也能显示"对方正在输入"，
-        极大缓解长回答的等待焦虑。typing_ticket 来自 getconfig。
-        """
-        if not self.typing_ticket:
-            return
+    async def send_typing(self, chat_id: str, on: bool = True) -> bool:
+        """Peer-specific tickets; auxiliary calls never block the reply pipeline."""
         try:
-            await self._post("ilink/bot/sendtyping", {
-                "ilink_user_id": chat_id,
-                "typing_ticket": self.typing_ticket,
-                "status": TYPING_ON if on else TYPING_OFF,
-            })
-        except Exception:
-            log.debug("sendtyping 失败（不影响主流程）", exc_info=True)
+            cached = self._typing_tickets.get(chat_id)
+            if not on:
+                # Cancel must never fetch a new ticket or wait for a config request.
+                ticket = self._typing_active.get(chat_id) or (cached[0] if cached else '')
+                if not ticket:return False
+            else:
+                if cached is None or cached[1] < time.time():
+                    bound = self._reply_context.get()
+                    context = (bound.context_token if bound is not None and bound.chat_id==chat_id else '') or self._ctx_tokens.get(chat_id,'')
+                    response = await self._post('ilink/bot/getconfig',{'ilink_user_id':chat_id,
+                        'context_token':context,'base_info':self._base_info()})
+                    self._check_response(response,'getconfig')
+                    cached = (response.get('typing_ticket') or '',time.time()+60)
+                    self._typing_tickets[chat_id] = cached
+                ticket = cached[0]
+                if not ticket:
+                    self._typing_status.update(last_status='no_ticket')
+                    return False
+                self._typing_active[chat_id] = ticket  # may be accepted even if the response times out
+            response = await self._post('ilink/bot/sendtyping',{'ilink_user_id':chat_id,'typing_ticket':ticket,
+                'status':TYPING_ON if on else TYPING_OFF,'base_info':self._base_info()})
+            self._check_response(response,'sendtyping')
+            self._typing_status['starts' if on else 'stops'] += 1
+            self._typing_status.update(last_status='on' if on else 'off',last_error_type='')
+            if not on:self._typing_active.pop(chat_id,None)
+            return True
+        except asyncio.CancelledError:
+            self._typing_status.update(last_status='interrupted' if on else 'cleanup_pending',last_error_type='CancelledError')
+            raise
+        except Exception as error:
+            self._typing_tickets.pop(chat_id,None)  # allow a stale ticket to refresh on the next attempt
+            self._typing_status['failed'] += 1
+            self._typing_status.update(last_status='failed',last_error_type=type(error).__name__)
+            log.debug('Typing hint unavailable error_type=%s',type(error).__name__)
+            return False
 
     async def send_image(self, chat_id: str, path_or_url: str) -> str:
         """发送图片（走 CDN，AES-128-ECB 加密）。
@@ -596,12 +689,31 @@ class ILinkAdapter(BaseAdapter):
         return h
 
     async def _post(self, endpoint: str, body: dict) -> dict:
-        url = f"{(self.bot_base_url or self.base_url).rstrip('/')}/{endpoint}"
-        # 长轮询接口不能用默认短超时
-        timeout = 40.0 if "getupdates" in endpoint else 15.0
-        r = await self._client.post(url, json={**body, "base_info": self._base_info()}, headers=self._headers(), timeout=timeout)
-        r.raise_for_status()
-        return r.json()
+        base = (self.bot_base_url or self.base_url).rstrip('/')
+        url = base + '/' + endpoint
+        payload = {**body, 'base_info': self._base_info()}
+        polling = endpoint.endswith('/getupdates')
+        if polling:
+            if self._poll_client is None:self._poll_client = make_client(base,timeout=40)
+            client = self._poll_client
+            timeout = httpx.Timeout(40,connect=8,pool=2)
+        else:
+            client = self._client
+            control = endpoint.endswith(('/getconfig','/sendtyping','/notifystart','/notifystop'))
+            timeout = httpx.Timeout(2.5,connect=1.5,pool=.5) if control else httpx.Timeout(15,connect=3,pool=2)
+        try:
+            response = await client.post(url,json=payload,headers=self._headers(),timeout=timeout)
+        except (httpx.TimeoutException,httpx.NetworkError,httpx.RemoteProtocolError) as error:
+            if not endpoint.endswith('/sendmessage'):raise
+            # Do not reset the shared pool: other peers may have requests in flight.
+            # A fresh, short-lived retry uses the exact persisted client_id/context/text.
+            self._delivery['network_retries'] += 1
+            log.warning('Wechat send connection retry error_type=%s',type(error).__name__)
+            await asyncio.sleep(.25)
+            async with make_client(base,timeout=15) as retry_client:
+                response = await retry_client.post(url,json=payload,headers=self._headers(),timeout=timeout)
+        response.raise_for_status()
+        return response.json()
 
     async def _notify(self, which: str) -> None:
         """上报告知服务端本端启动/停止，便于服务端做在线状态对账。"""
@@ -617,7 +729,10 @@ class ILinkAdapter(BaseAdapter):
                 "ilink_user_id": self.owner_user_id or "",
                 "base_info": self._base_info(),
             })
+            self._check_response(resp,'getconfig')
             self.typing_ticket = resp.get("typing_ticket")
+            if self.owner_user_id and self.typing_ticket:
+                self._typing_tickets[self.owner_user_id]=(self.typing_ticket,time.time()+60)
         except Exception:
             log.debug("getconfig 失败", exc_info=True)
 

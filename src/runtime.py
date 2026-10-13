@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import secrets
+import sys
 import time
 from collections import deque
 from contextvars import ContextVar
@@ -38,11 +39,14 @@ from .adapters.base import BaseAdapter
 from .adapters.ilink import ILinkAdapter, derive_bot_id
 from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore
-from .core.context import ContextManager, build_system_prompt
+from .core.context import ContextManager,LLMCompactor, build_system_prompt
 from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
                           NAPCAT_WEBUI_PORT, DockerManager)
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
+from .core.web_search import configured_search
+from .core.storage import migrated_state_path
+from .core.analytics import ConversationAnalytics
 from .core.memory import CATEGORIES, SCOPE_USER, PersonaMemory
 from .core.napcat import NapCatWebUI
 from .core.qr import QRDataTooLong, data_url
@@ -50,6 +54,7 @@ from .core.sender import HumanLikeSender
 from .core.trigger import TriggerRouter
 from .core.types import WxMessage
 from .orchestrator import Orchestrator
+from .core.conversation import ConversationChanged,members
 from .store_memory import MemoryStore
 
 log = logging.getLogger(__name__)
@@ -80,12 +85,13 @@ class LogEntry:
     trigger_reason: str = ""
     replied: bool = False
     platform: str = ""      # wechat | qq
+    sender_id: str = ""
 
     def to_dict(self) -> dict:
         return {
             "ts": self.ts, "direction": self.direction,
             "chat_type": self.chat_type, "chat_id": self.chat_id,
-            "chat_name": self.chat_name, "sender": self.sender,
+            "chat_name": self.chat_name, "sender": self.sender, "sender_id": self.sender_id,
             "content": self.content,
             "trigger_layer": self.trigger_layer,
             "trigger_reason": self.trigger_reason,
@@ -144,7 +150,7 @@ class MessageLog:
                 f.write(json.dumps({
                     "ts": entry.ts, "direction": entry.direction,
                     "chat_type": entry.chat_type, "chat_id": entry.chat_id,
-                    "chat_name": entry.chat_name, "sender": entry.sender,
+                    "chat_name": entry.chat_name, "sender": entry.sender, "sender_id": entry.sender_id,
                     "content": entry.content,
                     "trigger_layer": entry.trigger_layer,
                     "trigger_reason": entry.trigger_reason,
@@ -160,7 +166,7 @@ class MessageLog:
             ts=msg.timestamp or int(time.time() * 1000), direction="in",
             chat_type=msg.chat_type, chat_id=msg.chat_id,
             chat_name=msg.sender_name if not msg.is_group else "",
-            sender=msg.sender_name or msg.sender_id, content=msg.content,
+            sender=msg.sender_name or msg.sender_id, sender_id=msg.sender_id, content=msg.content,
             trigger_layer=layer, trigger_reason=reason, replied=replied,
             platform=platform or msg.platform,
         )
@@ -224,6 +230,7 @@ class BotRuntime:
         self.config_store = store
         self.data_dir = Path(data_dir)
         self.log = MessageLog(self.data_dir / "messages.jsonl")
+        self.analytics = ConversationAnalytics(self.log.path)
         self.docker = DockerManager()
         self._napcat_webui_token = ""
         self._napcat_webui: Optional[NapCatWebUI] = None
@@ -250,6 +257,13 @@ class BotRuntime:
         self._qq_sync_task: Optional[asyncio.Task] = None
         # 实际监听端口：由 server.main() 在端口顺延后回填（见 set_http_port）
         self.http_port: int = 0
+        self.onebot_ws = set()
+        self._qq_event_count = 0
+        self._qq_last_event_at = 0
+        self._qq_http_event_at = 0
+        self._onebot_ingress = None
+        self._qq_login_lock = asyncio.Lock()
+        self._qq_quick_pending = ('', 0.0)
 
         self._login: dict = {"status": "idle", "qrcode": "", "image": "",
                              "uuid": "", "app_id": "", "message": "",
@@ -299,10 +313,15 @@ class BotRuntime:
             try:
                 if self.qq_adapter is not None:
                     await self.qq_adapter.stop()
+                if a.napcat_webui_token and not a.onebot_token:
+                    a.onebot_token = secrets.token_urlsafe(32)
+                    self.config_store.save(self.cfg)
+                await self.ensure_onebot_ingress()
                 self.qq_adapter = self._build_qq_adapter()
                 self.qq_orch = self._build_orchestrator(
                     self.qq_adapter, platform="qq")
                 await self.qq_adapter.start()
+                for socket in self.onebot_ws:self.qq_adapter.attach_ws(socket)
                 self.platforms_running.add("qq")
                 results.append({"ok": True, "platform": "qq",
                                 "message": "QQ 通道已启动"})
@@ -430,6 +449,13 @@ class BotRuntime:
                 cfg.bot.persona_relationship)
             orch.group_reply_at_sender = bool(cfg.bot.group_reply_at_sender)
             orch.router.bot_name = cfg.bot.name
+            if hasattr(orch.adapter,'configure_burst'):
+                orch.adapter.configure_burst(cfg.bot.message_merge_window,cfg.bot.message_merge_max_wait,
+                                            state_path=self.data_dir/'qq-bursts.json',human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
+            orch.ctx.context_timezone = cfg.llm.context_timezone
+            orch.llm.web_search = configured_search(cfg.llm)
+            orch.llm.vision=self._vision_provider(cfg)
+            orch.typing_indicator=bool(cfg.bot.typing_indicator)
             orch.llm.primary = ProviderCfg(
                 "primary", cfg.llm.primary_base, cfg.llm.primary_key,
                 cfg.llm.primary_model)
@@ -511,6 +537,12 @@ class BotRuntime:
     def start_learning(self) -> None:
         self._ensure_memory().learner.start()
 
+    @staticmethod
+    def _vision_provider(cfg):
+        l=cfg.llm
+        return (ProviderCfg('vision',l.vision_base or l.primary_base,l.vision_key or l.primary_key,
+                            l.vision_model,timeout=45.0) if l.vision_model else None)
+
     def _build_orchestrator(self, adapter: BaseAdapter,
                             platform: str = "") -> Orchestrator:
         cfg = self.cfg
@@ -526,9 +558,11 @@ class BotRuntime:
                 name="fallback", base_url=cfg.llm.fallback_base,
                 api_key=cfg.llm.fallback_key, model=cfg.llm.fallback_model,
             ) if cfg.llm.fallback_key else None,
+            vision=self._vision_provider(cfg),
+            web_search=configured_search(cfg.llm),
         )
         judge = JudgeLLM(judge_gw, timeout=8.0)
-        store = MemoryStore()
+        store = MemoryStore(path=self.data_dir/f"context-{platform or adapter.platform}.json")
 
         memory = self._ensure_memory()
         memory.enabled = bool(cfg.bot.memory_enabled)
@@ -539,14 +573,19 @@ class BotRuntime:
         # ⚠️ bot 名称与人设必须传给 ContextManager，否则界面上改了不生效
         orch = Orchestrator(
             adapter=adapter, store=store, llm=chat_gw, judge=judge,
-            ctx=ContextManager(store, bot_name=cfg.bot.name,
+            ctx=ContextManager(store, compactor=LLMCompactor(judge_gw),bot_name=cfg.bot.name,
                                persona=cfg.bot.persona,
                                persona_profile=cfg.bot.persona_profile,
-                               persona_relationship=cfg.bot.persona_relationship),
+                               persona_relationship=cfg.bot.persona_relationship,
+                               context_timezone=cfg.llm.context_timezone),
             router=TriggerRouter(bot_name=cfg.bot.name),
             sender=HumanLikeSender(adapter), memory=memory,
             group_reply_at_sender=bool(cfg.bot.group_reply_at_sender),
+            typing_indicator=bool(cfg.bot.typing_indicator),
         )
+        if hasattr(adapter,'configure_burst'):
+            adapter.configure_burst(cfg.bot.message_merge_window,cfg.bot.message_merge_max_wait,
+                                    state_path=self.data_dir/'qq-bursts.json',human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
         self._wire_logging(orch, adapter, platform)
         return orch
 
@@ -571,11 +610,15 @@ class BotRuntime:
         async def process_wrapped(msg: WxMessage) -> None:
             marker = replied_count.set(0)
             decision_marker = last.set(("", ""))
+            superseded=False
             try:
                 await orig_process(msg)
+            except ConversationChanged:
+                superseded=True;raise
             finally:
                 layer, reason = last.get()
-                self.log.add_in(msg, layer, reason, replied_count.get() > 0, platform=plat)
+                if not superseded:
+                    for original in members(msg):self.log.add_in(original, layer, reason, replied_count.get() > 0, platform=plat)
                 replied_count.reset(marker)
                 last.reset(decision_marker)
 
@@ -586,6 +629,8 @@ class BotRuntime:
         async def send_wrapped(chat_id: str, text: str, at=None) -> str:
             try:
                 mid = await orig_send(chat_id, text, at=at)
+            except ConversationChanged:
+                raise
             except Exception as exc:
                 self.last_error = f"{plat} 回复接口提交失败：{type(exc).__name__}"
                 raise
@@ -730,6 +775,7 @@ class BotRuntime:
         只用环境变量会写错地址。
         """
         port = self.http_port or int(os.environ.get("WXBOT_PORT", "8000"))
+        port = getattr(self._onebot_ingress, "port", 0) or port
         return f"ws://host.docker.internal:{port}/ws/onebot"
 
     def set_http_port(self, port: int) -> None:
@@ -753,47 +799,88 @@ class BotRuntime:
                 token=self._ensure_napcat_webui_token(), port=NAPCAT_WEBUI_PORT)
         return self._napcat_webui
 
-    async def qq_status(self) -> dict:
-        """QQ 通道状态：容器 + 登录态。供前端轮询。"""
-        cfg = self.config_store.load()
-        napcat = self.docker.napcat_status()
-        st = {
-            "docker": self.docker.detect().to_dict(),
-            "napcat": napcat,
-            "task": dict(self.docker.task),
-            "onebotUrl": cfg.adapter.onebot_http_url,
-            "botQq": cfg.adapter.bot_qq,
-            "stage": "idle",
-            "loggedIn": False,
-            "loginMessage": "",
-        }
-        adapter = self.qq_adapter
-        st["wsUrl"] = self._napcat_ws_url()
-        st["reverseWsConnected"] = bool(
-            getattr(adapter, "reverse_ws_connected", False))
-        st["eventCount"] = int(getattr(adapter, "event_count", 0))
-        st["lastEventAt"] = int(getattr(adapter, "last_event_at", 0) or 0)
-        if napcat.get("running") and cfg.adapter.onebot_http_url:
-            try:
-                r = await self.test_onebot(cfg.adapter.onebot_http_url,
-                                           cfg.adapter.onebot_token)
-                st["loggedIn"] = bool(r.get("ok"))
-                st["loginMessage"] = r.get("message", "")
-                st["stage"] = "ready" if r.get("ok") else "waiting_login"
-            except Exception:
-                log.debug("查询 QQ 登录态失败", exc_info=True)
-        return st
+    def attach_onebot_ws(self,socket):
+        self.onebot_ws.add(socket)
+        if self.qq_adapter is not None and hasattr(self.qq_adapter,'attach_ws'):self.qq_adapter.attach_ws(socket)
+
+    def detach_onebot_ws(self,socket):
+        self.onebot_ws.discard(socket)
+        if self.qq_adapter is not None and hasattr(self.qq_adapter,'detach_ws'):
+            self.qq_adapter.detach_ws(socket)
+            if self.onebot_ws:self.qq_adapter.attach_ws(next(iter(self.onebot_ws)))
+
+    def note_onebot_event(self,transport):
+        self._qq_event_count+=1;self._qq_last_event_at=int(time.time()*1000)
+        if transport=='http':self._qq_http_event_at=self._qq_last_event_at
+
+    async def probe_qq(self):
+        cfg=self.config_store.load();adapter=OneBotAdapter(cfg.adapter.onebot_http_url, cfg.adapter.onebot_token)
+        async def call(action):
+            try:return await asyncio.wait_for(adapter._call(action),timeout=2.5)
+            except Exception:return {}
+        try:info,health,version=await asyncio.gather(call('get_login_info'),call('get_status'),call('get_version_info'))
+        finally:await adapter._client.aclose()
+        info=info if isinstance(info,dict) else {};health=health if isinstance(health,dict) else {};version=version if isinstance(version,dict) else {}
+        data=info.get('data') if isinstance(info.get('data'),dict) else {}
+        h=health.get('data') if isinstance(health.get('data'),dict) else {}
+        v=version.get('data') if isinstance(version.get('data'),dict) else {}
+        reachable=info.get('status') in ('ok','async') and info.get('retcode',0)==0
+        qq=str(data.get('user_id') or '')
+        logged=reachable and bool(qq) and h.get('online') is not False and h.get('good') is not False
+        return {'httpReachable':reachable,'loggedIn':logged,'online':h.get('online'),
+                'healthy':h.get('good'),'qq':qq,'nickname':str(data.get('nickname') or ''),
+                'gatewayVersion':str(v.get('app_version') or v.get('version') or ''),
+                'gatewayName':str(v.get('app_name') or '')}
+
+    async def qq_status(self):
+        cfg=self.config_store.load()
+        # Docker subprocesses do not block message callbacks or status requests.
+        try:
+            docker=await asyncio.wait_for(asyncio.to_thread(self.docker.detect),timeout=6)
+            napcat=await asyncio.wait_for(asyncio.to_thread(self.docker.napcat_status,docker),timeout=6)
+            d=docker.to_dict()
+        except (TimeoutError, OSError):
+            d={'installed':None,'running':None};napcat={'running':False,'message':'Docker检测暂未完成'}
+        live=await self.probe_qq() if cfg.adapter.onebot_http_url else {'loggedIn':False,'httpReachable':False}
+        adapter=self.qq_adapter
+        connected=bool(self.onebot_ws or getattr(adapter,'reverse_ws_connected',False))
+        transport='reverse_ws' if connected else ('http_post' if self._qq_http_event_at else 'waiting')
+        return {'docker':d,'napcat':napcat,'task':dict(self.docker.task),'onebotUrl':cfg.adapter.onebot_http_url,
+                'botQq':live.get('qq') or cfg.adapter.bot_qq,'stage':'ready' if live['loggedIn'] else 'waiting_login',
+                'loginMessage':'QQ已在线' if live['loggedIn'] else '等待登录或重新上线','wsUrl':self._napcat_ws_url(),
+                'reverseWsConnected':connected,'wsConnections':len(self.onebot_ws),'messageTransport':transport,
+                'messageReceiverStarted':adapter is not None and 'qq' in self.platforms_running,
+                'eventCount':max(self._qq_event_count,int(getattr(adapter,'event_count',0) or 0)),
+                'lastEventAt':max(self._qq_last_event_at,int(getattr(adapter,'last_event_at',0) or 0)),
+                'lastHttpEventAt':self._qq_http_event_at,**live}
+
+    async def ensure_onebot_ingress(self):
+        if sys.platform.startswith('win') and os.environ.get('WXBOT_DESKTOP')=='1':
+            if self._onebot_ingress is None:
+                from .core.onebot_ingress import OneBotIngress
+                self._onebot_ingress=OneBotIngress()
+            from .server import ws_onebot,onebot_event
+            await self._onebot_ingress.start(ws_onebot,onebot_event,self.config_store.load)
+
+    async def close_onebot_ingress(self):
+        if self._onebot_ingress is not None:await self._onebot_ingress.close()
 
     async def qq_setup(self) -> dict:
         """一键部署 QQ 网关（非阻塞，前端轮询 `/api/qq/status`）。"""
         token = self._ensure_napcat_webui_token()
+        cfg = self.config_store.load()
+        if not cfg.adapter.onebot_token:
+            cfg.adapter.onebot_token = secrets.token_urlsafe(32)
+            self.config_store.save(cfg);self.cfg=cfg
+        self.docker.image_mirror=cfg.adapter.napcat_image_mirror
+        await self.ensure_onebot_ingress()
         ws = self._napcat_ws_url()
         cfg = self.config_store.load()
         if not cfg.adapter.onebot_http_url:
             cfg.adapter.onebot_http_url = f"http://127.0.0.1:{NAPCAT_HTTP_PORT}"
             self.config_store.save(cfg)
             self.cfg = cfg
-        return await self.docker.ensure_napcat(token, ws)
+        return await self.docker.ensure_napcat(token, ws,access_token=cfg.adapter.onebot_token)
 
     async def qq_sync_ws_url(self) -> dict:
         """让 NapCat 的反向 WS 指向当前后端端口（幂等，可反复调用）。
@@ -805,9 +892,20 @@ class BotRuntime:
         if os.environ.get("WXBOT_SKIP_NAPCAT_SYNC") == "1":
             return {"ok": True, "changed": False, "skipped": True,
                     "message": "已跳过网关地址同步（测试模式）"}
+        cfg=self.config_store.load()
+        if cfg.adapter.napcat_webui_token and not cfg.adapter.onebot_token:
+            cfg.adapter.onebot_token=secrets.token_urlsafe(32)
+            self.config_store.save(cfg);self.apply_config(cfg)
+        self.docker.image_mirror=cfg.adapter.napcat_image_mirror
+        await self.ensure_onebot_ingress()
         url = self._napcat_ws_url()
+        cfg=self.config_store.load()
+        if cfg.adapter.napcat_webui_token:
+            template=self.docker.napcat_config_files(cfg.adapter.napcat_webui_token,url,cfg.adapter.onebot_token)[1]
+            result=await self._webui_client().sync_onebot(template)
+            if result.get('ok'):return result
         try:
-            r = await self.docker.sync_napcat_ws_url(url)
+            r = await self.docker.sync_napcat_ws_url(url,cfg.adapter.onebot_token)
         except Exception as e:
             log.warning("同步 QQ 网关地址失败", exc_info=True)
             return {"ok": False, "changed": False, "message": f"同步失败：{e}"}
@@ -815,12 +913,33 @@ class BotRuntime:
             log.info("QQ 网关地址已同步：%s", r.get("message"))
         return r
 
-    async def qq_login_qrcode(self) -> dict:
-        return await self._webui_client().qrcode()
+    async def qq_login_qrcode(self):
+        client=self._webui_client()
+        status=await client.check_login()
+        if status.get('loggedIn'):return {'ok':True,'loggedIn':True,'message':'QQ已登录，无需重复扫码'}
+        deadline=time.monotonic()+12
+        while True:
+            try:result=await asyncio.wait_for(client.qrcode(),timeout=2)
+            except TimeoutError:result={'ok':False,'pending':True,'message':'网关正在准备二维码'}
+            if result.get('ok') or not result.get('pending') or time.monotonic()>deadline:return result
+            await asyncio.sleep(.35)
+
+    async def qq_quick_accounts(self):
+        return await self._webui_client().quick_accounts()
+
+    async def qq_quick_login(self,qq,remember=False):
+        async with self._qq_login_lock:
+            previous,until=self._qq_quick_pending
+            if time.monotonic()<until:
+                return {'ok':previous==qq,'pending':True,'message':'快速登录处理中，请稍候'}
+            result=await self._webui_client().quick_login(qq,remember)
+            if result.get('ok') and result.get('pending'):self._qq_quick_pending=(qq,time.monotonic()+12)
+            return result
 
     async def qq_login_check(self) -> dict:
         r = await self._webui_client().check_login()
         if r.get("loggedIn"):
+            self._qq_quick_pending=("",0.0)
             info = await self.test_onebot()
             if info.get("ok") and info.get("qq"):
                 r["qq"] = info["qq"]
@@ -849,16 +968,17 @@ class BotRuntime:
         return self.memory
 
     def memory_list(self, scope: str = "", owner_id: str = "",
-                    category: str = "", keyword: str = "") -> dict:
+                    category: str = "", keyword: str = "", include_history: bool = False) -> dict:
         m = self._ensure_memory()
         return {
-            "items": m.list_items(scope, owner_id, category, keyword),
+            "items": m.list_items(scope, owner_id, category, keyword,include_history),
             "stats": m.stats(),
             "categories": CATEGORIES,
+            "identities": m.identities,
         }
 
     def memory_add(self, scope: str, owner_id: str, category: str,
-                   content: str, keywords: list[str] | None = None) -> dict:
+                   content: str, keywords: list[str] | None = None, platform: str = "") -> dict:
         m = self._ensure_memory()
         if not content.strip():
             return {"ok": False, "message": "内容不能为空"}
@@ -866,7 +986,7 @@ class BotRuntime:
             scope=scope if scope in ("user", "group") else SCOPE_USER,
             owner_id=owner_id,
             category=category if category in CATEGORIES else "fact",
-            content=content, keywords=keywords,
+            content=content, keywords=keywords, platform=platform,
         )
         return {"ok": True, "item": item}
 
@@ -908,7 +1028,7 @@ class BotRuntime:
             return self.data_dir / "ilink"
         d = Path(raw).expanduser()
         if d.is_absolute():
-            return d
+            return migrated_state_path(self.data_dir,d)
         return self.data_dir / (d.name or "ilink")
 
     async def ilink_qrcode(self) -> dict:
@@ -963,12 +1083,13 @@ class BotRuntime:
         if self._login.get("channel") != "ilink" or not self._login.get("qrcode"):
             return {"ok": False, "status": "idle", "message": "请先获取二维码"}
 
+        login_qrcode = self._login["qrcode"]
         base = "https://ilinkai.weixin.qq.com"
         url = f"{base}/ilink/bot/get_qrcode_status"
         try:
             # 服务端会 hold 住连接最长 35 秒，超时必须比它大
             async with make_client(base, timeout=50.0) as c:
-                r = await c.get(url, params={"qrcode": self._login["qrcode"]})
+                r = await c.get(url, params={"qrcode": login_qrcode})
                 if r.status_code >= 400:
                     return {"ok": False, "status": "failed",
                             "message": f"查询失败：HTTP {r.status_code}"}
@@ -978,9 +1099,13 @@ class BotRuntime:
                     "message": self._login.get("message") or "等待扫码…",
                     "detail": explain_error(e, url)}
 
+        if self._login.get("qrcode") != login_qrcode:
+            return {"ok": True, "status": "superseded", "message": "二维码已刷新，请使用最新二维码"}
         status = st.get("status") or ""
         if status == "confirmed":
             ok = self._save_ilink_credentials(st)
+            if not ok:
+                return {"ok": False, "status": "failed", "message": "登录凭证保存未完成，请检查本地数据目录后重新扫码"}
             self._login.update({"status": "confirmed", "message": "登录成功"})
             return {"ok": True, "status": "confirmed", "message": "登录成功",
                     "saved": ok}

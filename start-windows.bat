@@ -48,11 +48,12 @@ call .venv\Scripts\activate.bat
 REM ── 3. 安装依赖（仅首次）─────────────────────────────────────
 if not exist ".venv\.deps-installed" (
   echo   正在安装依赖，请稍候（约 1-2 分钟）...
-  python -m pip install --upgrade pip -q >nul 2>&1
-  python -m pip install -q -r requirements.txt
+  if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
+  python -m pip install --upgrade pip -q --index-url "!PIP_INDEX_URL!" >nul 2>&1
+  python -m pip install -q -r requirements.txt --index-url "!PIP_INDEX_URL!"
   if !errorlevel! neq 0 (
-    echo   默认源较慢，正在切换国内镜像重试...
-    python -m pip install -q -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    echo   国内镜像未完成，正在回退官方源重试...
+    python -m pip install -q -r requirements.txt --index-url https://pypi.org/simple
     if !errorlevel! neq 0 (
       echo   [X] 依赖安装失败，请检查网络后重试
       pause

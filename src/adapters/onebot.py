@@ -26,6 +26,10 @@ NapCat、Lagrange、LLOneBot 等都实现了它，因此对接标准协议即可
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+import re
+import html
 import json
 import logging
 import time
@@ -35,6 +39,8 @@ import httpx
 
 from ..core.http import explain_error, make_client
 from ..core.types import WxMessage
+from ..core.conversation import MessageBuffer
+from ..core.media import MediaError
 from .base import BaseAdapter, MessageHandler
 
 log = logging.getLogger(__name__)
@@ -83,6 +89,8 @@ class OneBotAdapter(BaseAdapter):
         self._client = make_client(self.http_url, timeout=20.0)
         self._handler: Optional[MessageHandler] = None
         self._running = False
+        self._reply_context=ContextVar("onebot_reply_context",default=None)
+        self._bursts=MessageBuffer(self._deliver)
 
         # 反向 WS 连接（网关连过来的）
         self._ws: Any = None
@@ -108,10 +116,45 @@ class OneBotAdapter(BaseAdapter):
                 f"请确认网关已启动，且 HTTP 地址与 Access Token 填写正确。"
             )
         self._running = True
+        self._bursts.start()
 
     async def stop(self) -> None:
+        await self._bursts.close()
         self._running = False
         await self._client.aclose()
+
+    def configure_burst(self,window,max_wait,state_path=None,human=True,pause_timeout=120):
+        self._bursts.configure(window,max_wait,state_path,human,pause_timeout)
+
+    async def _deliver(self,msg):
+        if self._handler is None:raise RuntimeError('No message handler')
+        await self._handler(msg)
+
+    @contextmanager
+    def bind_reply_context(self,msg):
+        token=self._reply_context.set(msg)
+        try:yield
+        finally:self._reply_context.reset(token)
+
+    def check_reply_current(self,msg):self._bursts.check(msg)
+
+    async def resolve_images(self,refs):
+        semaphore=asyncio.Semaphore(2)
+        async def resolve(ref):
+            if ref.get('url') or ref.get('inline'):return ref
+            try:
+                async with semaphore:
+                    response=await asyncio.wait_for(self._call('get_image',{'file':ref.get('file_id','')}),timeout=10)
+                url=(response.get('data') or {}).get('url')
+                if not url:raise MediaError('Gateway did not return an image URL')
+                return {'url':url}
+            except Exception as exc:raise MediaError('Gateway image lookup failed') from exc
+        tasks=[asyncio.create_task(resolve(ref)) for ref in refs]
+        try:return await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
 
     def on_message(self, handler: MessageHandler) -> None:
         self._handler = handler
@@ -157,6 +200,8 @@ class OneBotAdapter(BaseAdapter):
         if post_type == "message":
             msg = self._normalize(event)
             if msg and self._handler:
+                if self._bursts.window or self._bursts.pending:
+                    self._bursts.submit(msg);return
                 try:
                     await self._handler(msg)
                 except Exception:
@@ -166,6 +211,15 @@ class OneBotAdapter(BaseAdapter):
         # 群成员变动 → 失效群名片缓存
         if post_type == "notice":
             ntype = event.get("notice_type")
+            if ntype=='notify' and event.get('sub_type')=='input_status':
+                uid=str(event.get('user_id') or '')
+                gid=str(event.get('group_id') or '')
+                group=bool(gid and gid!='0')
+                if uid and uid!=self.bot_qq:
+                    kind='group' if group else 'private'
+                    self._bursts.note_typing(make_chat_id(kind,gid if group else uid),uid,
+                        on=str(event.get('event_type'))=='1',platform=self.platform,chat_type=kind)
+                return
             if ntype in ("group_increase", "group_decrease", "group_card", "group_admin"):
                 gid = str(event.get("group_id") or "")
                 if gid:
@@ -209,6 +263,8 @@ class OneBotAdapter(BaseAdapter):
                 sender_name = sender.get("nickname") or user_id
 
             content, is_at_me = self._extract_content(e.get("message"), self_id)
+            images=self._extract_images(e.get('message'))
+            if images and '[图片]' not in content:content=(content+'[图片]').strip()
 
             return WxMessage(
                 msg_id=str(e.get("message_id") or ""),
@@ -220,7 +276,7 @@ class OneBotAdapter(BaseAdapter):
                 bot_id=self_id,
                 content=content,
                 raw_content=str(e.get("raw_message") or ""),
-                msg_type="text",
+                msg_type="image" if images else "text", images=images, content_parts=self._extract_parts(e.get("message")),
                 timestamp=int(e.get("time") or time.time()) * 1000,
                 is_at_me=is_at_me,
                 group_id=group_id or None,
@@ -230,53 +286,68 @@ class OneBotAdapter(BaseAdapter):
             return None
 
     @staticmethod
+    def _segments(message):
+        if isinstance(message,list):
+            return [seg for seg in message if isinstance(seg,dict)]
+        text=str(message or '');segments=[];end=0
+        for match in re.finditer(r'\[CQ:([a-zA-Z_]+)(?:,([^\]]*))?\]',text):
+            if match.start()>end:
+                segments.append({'type':'text','data':{'text':html.unescape(text[end:match.start()])}})
+            data={}
+            for item in (match.group(2) or '').split(','):
+                key,sep,value=item.partition('=')
+                if sep:data[key]=html.unescape(value)
+            segments.append({'type':match.group(1),'data':data});end=match.end()
+        if end<len(text):segments.append({'type':'text','data':{'text':html.unescape(text[end:])}})
+        return segments
+
+    @staticmethod
+    def _extract_images(message):
+        images=[]
+        for seg in OneBotAdapter._segments(message):
+            if seg.get('type')!='image':continue
+            data=seg.get('data') or {};file=str(data.get('file') or '');url=str(data.get('url') or '')
+            if file.startswith('base64://'):images.append({'inline':file[9:]})
+            elif url or file.startswith(('https://','http://')):images.append({'url':url or file})
+            else:images.append({'file_id':file})
+        return images
+
+    @staticmethod
+    def _extract_parts(message):
+        parts=[];image_index=0
+        for seg in OneBotAdapter._segments(message):
+            kind=seg.get('type');data=seg.get('data') or {}
+            if kind=='text':parts.append({'type':'text','text':str(data.get('text') or '')})
+            elif kind=='image':parts.append({'type':'image','index':image_index});image_index+=1
+            elif kind in ('face','record','video','file'):
+                parts.append({'type':'text','text':{'face':'[表情]','record':'[语音]','video':'[视频]','file':'[文件]'}[kind]})
+        return parts
+
+    @staticmethod
     def _extract_content(message: Any, self_id: str) -> tuple[str, bool]:
-        """从消息中取出纯文本，并判断是否 @ 了机器人。
+        parts=OneBotAdapter._extract_parts(message)
+        text=''.join(part.get('text','') if part['type']=='text' else '[图片]' for part in parts)
+        at=any(seg.get('type')=='at' and str((seg.get('data') or {}).get('qq'))==self_id for seg in OneBotAdapter._segments(message))
+        return text.strip(),at
 
-        OneBot 的 message 字段可能是：
-          · 字符串（CQ 码格式）："你好[CQ:at,qq=123]"
-          · 数组（消息段）：[{"type":"text","data":{"text":"你好"}},
-                            {"type":"at","data":{"qq":"123"}}]
-        两种都要处理。
-        """
-        is_at_me = False
-
-        # ── 数组格式 ──
-        if isinstance(message, list):
-            parts: list[str] = []
-            for seg in message:
-                if not isinstance(seg, dict):
-                    continue
-                stype = seg.get("type")
-                data = seg.get("data") or {}
-                if stype == "text":
-                    parts.append(str(data.get("text") or ""))
-                elif stype == "at":
-                    qq = str(data.get("qq") or "")
-                    if qq == self_id:
-                        is_at_me = True
-                    # @ 本身不进入正文，避免污染给模型的内容
-                elif stype == "image":
-                    parts.append("[图片]")
-                elif stype == "face":
-                    parts.append("[表情]")
-                elif stype == "reply":
-                    pass          # 引用不进入正文
-            return "".join(parts).strip(), is_at_me
-
-        # ── 字符串 / CQ 码格式 ──
-        text = str(message or "")
-        if f"[CQ:at,qq={self_id}]" in text:
-            is_at_me = True
-        # 剥离所有 CQ 码，留下纯文本
-        import re
-        cleaned = re.sub(r"\[CQ:[^\]]+\]", "", text)
-        return cleaned.strip(), is_at_me
+    async def send_typing(self,chat_id,on=True):
+        # NapCat's documented extension sets a private typing hint (event_type=1).
+        # Sending a message/native expiry clears it; no undocumented stop enum.
+        kind,uid=parse_chat_id(chat_id)
+        if kind!='private' or not on or time.monotonic()<getattr(self,'_typing_retry_at',0):return False
+        try:
+            response=await self._call('set_input_status',{'user_id':str(uid),'event_type':1})
+            if response.get('status')=='ok' and response.get('retcode',0)==0:return True
+        except Exception:pass
+        self._typing_retry_at=time.monotonic()+300
+        return False
 
     # ── 出站：发送 ────────────────────────────────────────────
 
     async def send_text(self, chat_id: str, text: str, at: list[str] | None = None) -> str:
         """发送文本。群聊时可在开头 @ 指定成员。"""
+        msg=self._reply_context.get()
+        if msg is not None:self.check_reply_current(msg)
         chat_type, target = parse_chat_id(chat_id)
 
         # 组装消息段

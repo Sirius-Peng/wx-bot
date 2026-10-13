@@ -57,11 +57,12 @@ source "$VENV/bin/activate" || { echo -e "${RED}  ✗ 激活环境失败${NC}"; 
 STAMP="$VENV/.deps-installed"
 if [ ! -f "$STAMP" ]; then
   echo -e "  ${DIM}正在安装依赖，请稍候（约 1-2 分钟）…${NC}"
-  python -m pip install --upgrade pip -q 2>/dev/null
-  if ! python -m pip install -q -r requirements.txt; then
-    echo -e "${YELLOW}  默认源较慢，正在切换国内镜像重试…${NC}"
+  PIP_SOURCE="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+  python -m pip install --upgrade pip -q --index-url "$PIP_SOURCE" 2>/dev/null || true
+  if ! python -m pip install -q -r requirements.txt --index-url "$PIP_SOURCE"; then
+    echo -e "${YELLOW}  国内镜像未完成，正在回退官方源重试…${NC}"
     if ! python -m pip install -q -r requirements.txt \
-        -i https://pypi.tuna.tsinghua.edu.cn/simple; then
+        --index-url https://pypi.org/simple; then
       echo -e "${RED}  ✗ 依赖安装失败${NC}"
       echo "  请检查网络连接后重试"
       read -r -p "  按回车键退出…" _

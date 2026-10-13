@@ -62,30 +62,7 @@ async function quitApp() {
   app.quit();
 }
 
-/** 后端起不来时，给用户一个能看懂的错误页，而不是空白窗口 */
-function errorPage(message, detail) {
-  const html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
-<style>
-  body{margin:0;height:100vh;display:grid;place-items:center;background:#F4F6F8;
-       font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#1B1F26}
-  .box{max-width:520px;padding:36px 40px;background:#fff;border:1px solid #E6E9ED;
-       border-radius:16px;box-shadow:0 2px 8px rgba(16,24,40,.06)}
-  h1{font-size:17px;margin:0 0 10px;font-weight:600}
-  p{font-size:13.5px;color:#5A616B;line-height:1.7;margin:0 0 14px}
-  code{display:block;background:#F0F2F5;border-radius:8px;padding:12px 14px;
-       font-size:12px;color:#444;white-space:pre-wrap;word-break:break-all;
-       font-family:ui-monospace,Menlo,Consolas,monospace;margin-bottom:16px}
-  button{background:#07C160;color:#fff;border:0;border-radius:8px;padding:9px 18px;
-         font-size:13.5px;cursor:pointer}
-  button:hover{background:#06AD56}
-</style></head><body><div class="box">
-  <h1>后台服务启动失败</h1>
-  <p>${message}</p>
-  <code>${detail || ''}</code>
-  <button onclick="location.reload()">重试</button>
-</div></body></html>`;
-  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-}
+const { errorPage, installQuitGuard } = require('./lifecycle');
 
 /** 应用菜单（macOS 顶部菜单栏 / Windows 窗口菜单） */
 function buildAppMenu() {
@@ -223,11 +200,9 @@ app.on('second-instance', () => {
 });
 
 // 真正退出前清理
-app.on('before-quit', () => {
-  app.isQuitting = true;
-});
+installQuitGuard(app, quitApp);
 
 // 兜底：进程要退出时确保后端也被停掉，避免留下孤儿进程
 process.on('exit', () => {
-  try { backend.proc && backend.proc.kill(); } catch (_) { /* 忽略 */ }
+  try { backend.proc && backend._killTree(backend.proc); } catch (_) { /* 忽略 */ }
 });

@@ -27,6 +27,10 @@ NapCat 不一样：
 """
 from __future__ import annotations
 
+import asyncio
+import copy
+import json
+import re
 import hashlib
 import logging
 import time
@@ -38,6 +42,25 @@ from .qr import QRDataTooLong, data_url
 log = logging.getLogger(__name__)
 
 WEBUI_PORT = 6099
+
+
+def merge_managed_onebot(before, template):
+    """Keep third-party networks/plugins; change only this application's named entries."""
+    config = copy.deepcopy(before)
+    network = config.setdefault('network', {})
+    if not isinstance(network, dict):
+        raise ValueError('OneBot network 配置格式错误')
+    for kind, name in [('websocketClients', 'wxbot-reverse-ws'), ('httpServers', 'http-server')]:
+        desired = template['network'][kind][0]
+        items = network.setdefault(kind, [])
+        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+            raise ValueError('OneBot 网络列表格式错误')
+        owned = next((item for item in items if item.get('name') == name), None)
+        if owned is None:
+            items.append(copy.deepcopy(desired))
+        else:
+            owned.update(desired)
+    return config
 
 
 class NapCatWebUI:
@@ -83,7 +106,7 @@ class NapCatWebUI:
                 "message": "NapCat 拒绝了 WebUI Token",
                 "detail": f"HTTP {r.status_code} {body.get('message') or ''}".strip(),
                 "hint": "Token 是我们自动生成并写进容器的，出现这个提示通常说明"
-                        "容器里的配置被改过。可点「重新部署」重建容器。",
+                        "请检查网关 WebUI Token 与本地部署配置是否一致。",
             }
 
         cred = ((body.get("data") or {}).get("Credential") or "")
@@ -104,17 +127,26 @@ class NapCatWebUI:
                 err["hint"] = "NapCat 网关好像没在运行。请先点「一键部署 QQ 网关」。"
             return {"code": -1, "message": ok.get("message", ""), "_err": err}
 
-        try:
-            async with make_client(self.base, timeout=20.0) as c:
-                r = await c.post(
-                    f"{self.base}{path}", json=body or {},
-                    headers={"Authorization": f"Bearer {self._credential}"},
-                )
-                if r.status_code >= 400:
-                    return {"code": r.status_code, "message": f"HTTP {r.status_code}"}
-                return r.json()
-        except Exception as e:
-            return {"code": -1, "message": explain_error(e, self.base)}
+        # A stale Credential can expire before the local cache timeout (gateway restart).
+        # Retry authentication once, never loop or replay a successful operation.
+        for attempt in range(2):
+            try:
+                async with make_client(self.base, timeout=20.0) as c:
+                    r = await c.post(f"{self.base}{path}", json=body or {},
+                                     headers={"Authorization": f"Bearer {self._credential}"})
+                    result = r.json() if r.status_code < 400 else {"code": r.status_code, "message": f"HTTP {r.status_code}"}
+                    if not isinstance(result, dict):
+                        return {"code": -1, "message": "网关响应格式错误"}
+                unauthorized = r.status_code in (401, 403) or result.get('code') in (401,403) or 'unauthorized' in str(result.get('message','')).lower()
+                if unauthorized and attempt == 0:
+                    self._credential = ''
+                    renewed = await self.login()
+                    if renewed.get('ok'):
+                        continue
+                return result
+            except Exception as e:
+                return {"code": -1, "message": explain_error(e, self.base)}
+        return {"code": -1, "message": "WebUI 凭证刷新失败"}
 
     # ── 扫码登录 ──────────────────────────────────────────────
 
@@ -132,7 +164,7 @@ class NapCatWebUI:
             err = body.get("_err")
             if err:                       # 连不上 / 鉴权失败，把原因原样带出去
                 return {"ok": False, "message": err.get("message", "获取二维码失败"),
-                        "detail": err.get("detail", ""), "hint": err.get("hint", "")}
+                        "detail": err.get("detail", ""), "hint": err.get("hint", ""), "stage":err.get("stage","")}
             msg = body.get("message") or "获取二维码失败"
             hint = ""
             if "Logined" in msg or "已登录" in msg:
@@ -141,7 +173,7 @@ class NapCatWebUI:
 
         url = ((body.get("data") or {}).get("qrcode") or "").strip()
         if not url:
-            return {"ok": False, "message": "NapCat 没有返回二维码内容"}
+            return {"ok": False, "pending":True, "message": "网关正在准备二维码"}
 
         # 二维码内容是一段 URL，**离线**转成 SVG（不走任何第三方接口）
         try:
@@ -171,12 +203,16 @@ class NapCatWebUI:
                     "message": err.get("message") or body.get("message") or "查询失败"}
 
         data = body.get("data") or {}
-        logged_in = bool(data.get("isLogin"))
+        logged_in = data.get("isLogin") is True and data.get("isOffline") is not True
         phase = data.get("loginPhase") or ""
         phase_text = {
             "waiting_qrcode": "等待扫码",
             "waiting_confirm": "已扫码，请在手机上确认",
-            "confirmed": "登录成功",
+            "confirmed": "等待网关确认在线",
+            "qrcode_scanned": "已扫码，请在手机上确认",
+            "initializing": "账号正在初始化",
+            "reconnecting": "QQ 正在重新连接",
+            "quick_login": "快速登录处理中",
             "login_error": "登录出错",
         }.get(phase, phase)
 
@@ -188,3 +224,46 @@ class NapCatWebUI:
             "detail": data.get("loginError") or "",
             "message": "登录成功" if logged_in else (phase_text or "等待扫码…"),
         }
+
+    async def quick_accounts(self):
+        entries=[];supported=False
+        for route in ('GetQuickLoginListNew','GetQuickLoginList'):
+            body=await self._post('/api/QQLogin/'+route)
+            if body.get('code')==0:
+                supported=True;data=body.get('data') or []
+                if isinstance(data,list):entries.extend(data)
+        accounts={}
+        for entry in entries:
+            if isinstance(entry,dict):uin=str(entry.get('uin') or '');name=str(entry.get('nickName') or entry.get('nickname') or accounts.get(uin,{}).get('nickname') or '')
+            else:uin=str(entry);name=accounts.get(uin,{}).get('nickname','')
+            if re.fullmatch(r'[0-9]{5,15}',uin):accounts[uin]={'qq':uin,'nickname':name[:80]}
+        remembered=await self._post('/api/QQLogin/GetQuickLoginQQ')
+        value=remembered.get('data') or ''
+        if isinstance(value,dict):value=value.get('uin','')
+        return {'ok':supported,'accounts':list(accounts.values())[:50],'autoLoginQq':str(value),
+                'message':('请选择已保存的账号' if accounts else '尚无可快速登录的账号，请先扫码登录一次') if supported else '读取账号列表失败，请检查网关与 WebUI Token，或使用扫码登录'}
+
+    async def quick_login(self,qq,remember=False):
+        if not isinstance(qq,str) or not re.fullmatch(r'[0-9]{5,15}',qq):return {'ok':False,'message':'请选择有效的 QQ 号'}
+        status=await self.check_login()
+        if status.get('loggedIn'):return {'ok':True,'loggedIn':True,'message':'QQ 已登录，无需重复扫码'}
+        accounts=await self.quick_accounts()
+        if qq not in {a['qq'] for a in accounts['accounts']}:return {'ok':False,'message':'该账号不在 NapCat 保存的登录列表中，请先扫码'}
+        body=await self._post('/api/QQLogin/SetQuickLogin',{'uin':qq})
+        if body.get('code')!=0:return {'ok':False,'message':'快速登录未成功：'+str(body.get('message') or '请尝试扫码')}
+        saved=False
+        if remember:
+            body=await self._post('/api/QQLogin/SetQuickLoginQQ',{'uin':qq});saved=body.get('code')==0
+        return {'ok':True,'pending':True,'qq':qq,'autoLoginSaved':saved,
+                'message':'已提交快速登录，请稍候；若手机 QQ 提示确认，请完成确认'}
+
+    async def sync_onebot(self,template):
+        body=await self._post('/api/OB11Config/GetConfig')
+        if body.get('code')!=0 or not isinstance(body.get('data'),dict):return {'ok':False,'changed':False}
+        before=body['data']
+        try:config=merge_managed_onebot(before,template)
+        except ValueError:return {'ok':False,'changed':False,'message':'网关网络配置格式错误'}
+        if config==before:return {'ok':True,'changed':False,'message':'网关对接配置已是最新'}
+        body=await self._post('/api/OB11Config/SetConfig',{'config':json.dumps(config,ensure_ascii=False)})
+        return {'ok':body.get('code')==0,'changed':body.get('code')==0,'restarted':False,
+                'message':'已热更新网关对接配置，无需退出 QQ' if body.get('code')==0 else '网关热更新未成功'}

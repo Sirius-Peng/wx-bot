@@ -1,6 +1,6 @@
 {
   "name": "wxbot-desktop",
-  "version": "1.3.6",
+  "version": "2.1.3",
   "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
   "main": "src/main/index.js",
   "author": "Sirius-Peng",
@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dev": "WXBOT_DEV=1 electron .",
+    "dev": "node scripts/dev.cjs",
     "build:backend": "bash scripts/build-backend.sh",
     "build:backend:win": "scripts\\build-backend.bat",
     "icons": "python3 scripts/make-icons.py",
@@ -17,7 +17,8 @@
     "pack:mac:x64": "npm run build:backend && electron-builder --mac --x64 && npm run verify:arch x64",
     "pack:win": "npm run build:backend:win && electron-builder --win --x64 && npm run verify:win",
     "pack:all": "node scripts/pack-native.cjs",
-    "verify:win": "node scripts/verify-windows.cjs"
+    "verify:win": "node scripts/verify-windows.cjs",
+    "test:windows": "node ../tests/test_windows_desktop.cjs && node ../tests/test_windows_lifecycle.cjs && node ../tests/test_storage_paths.cjs"
   },
   "devDependencies": {
     "electron": "^36.9.5",

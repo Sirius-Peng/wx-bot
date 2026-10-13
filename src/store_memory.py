@@ -1,11 +1,9 @@
-"""内存版存储实现 —— 用于本地跑通链路与单元测试。
-
-生产环境请替换为 RedisStore（热数据）+ PgStore（温/冷数据），
-接口签名保持一致即可无缝切换。
-"""
+"""Private atomic conversation storage; an omitted path selects in-memory tests."""
 from __future__ import annotations
 
 import asyncio
+import json,os,tempfile
+from pathlib import Path
 import time
 from collections import defaultdict
 from typing import Optional
@@ -14,14 +12,39 @@ from .core.types import WxMessage
 
 
 class MemoryStore:
-    """线程/协程内可用的极简存储。仅供开发与测试。"""
+    """Persist complete turns until successful background compaction."""
 
-    def __init__(self, window_size: int = 40):
+    def __init__(self, window_size: int = 40, path=None):
         self.window_size = window_size
         self._seen: dict[str, float] = {}
         self._ctx: dict[str, list[dict]] = defaultdict(list)
         self._summary: dict[str, str] = {}
         self._archive: list[dict] = []
+        self.path=Path(path) if path else None
+        if self.path and self.path.exists():
+            raw=json.loads(self.path.read_text(encoding='utf-8'))
+            self._ctx.update({k:list(v) for k,v in raw.get('contexts',{}).items()})
+            self._summary.update(raw.get('summaries',{}))
+
+    def _save(self):
+        if not self.path:return
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        fd,tmp=tempfile.mkstemp(dir=self.path.parent,suffix='.tmp')
+        try:
+            with os.fdopen(fd,'w',encoding='utf-8') as f:
+                json.dump({'version':2,'contexts':dict(self._ctx),'summaries':dict(self._summary)},f,ensure_ascii=False)
+                f.flush();os.fsync(f.fileno())
+            os.chmod(tmp,0o600);os.replace(tmp,self.path)
+        finally:Path(tmp).unlink(missing_ok=True)
+
+    async def compact(self,key,prefix,summary):
+        current=self._ctx.get(key,[])
+        if current[:len(prefix)]!=prefix:return False
+        old_summary=self._summary.get(key,'');old_turns=list(current)
+        self._ctx[key]=current[len(prefix):];self._summary[key]=summary
+        try:self._save()
+        except BaseException:self._ctx[key]=old_turns;self._summary[key]=old_summary;raise
+        return True
 
     # ── 幂等 ──────────────────────────────────────────────────
 
@@ -47,15 +70,22 @@ class MemoryStore:
         return list(self._ctx.get(key, []))
 
     async def push(self, key: str, turn: dict) -> None:
-        self._ctx[key].append(turn)
-        if len(self._ctx[key]) > self.window_size:
-            self._ctx[key] = self._ctx[key][-self.window_size:]
+        if turn.get('turn_id') and any(t.get('turn_id')==turn['turn_id'] for t in self._ctx[key]):return
+        before=list(self._ctx[key]);self._ctx[key].append(turn)
+        try:self._save()
+        except BaseException:self._ctx[key]=before;raise
 
     async def get_summary(self, key: str) -> str:
         return self._summary.get(key, "")
 
     async def set_summary(self, key: str, text: str) -> None:
+        before = self._summary.get(key, "")
         self._summary[key] = text
+        try:
+            self._save()
+        except Exception:
+            self._summary[key] = before
+            raise
 
     async def token_count(self, key: str) -> int:
         from .core.context import approx_tokens
@@ -67,6 +97,7 @@ class MemoryStore:
         if len(turns) <= keep:
             return []
         old, self._ctx[key] = turns[:-keep], turns[-keep:]
+        self._save()
         return old
 
     # ── 归档 / 统计 ───────────────────────────────────────────

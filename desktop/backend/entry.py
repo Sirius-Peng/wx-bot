@@ -28,6 +28,10 @@ def _setup_frozen_paths() -> None:
 
 def main() -> None:
     _setup_frozen_paths()
+    # A bundled Windows exe can inherit a legacy console code page despite UTF-8 env.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
 
     # 冻结环境下不要自动开浏览器（由 Electron 管窗口）
     os.environ.setdefault("WXBOT_NO_BROWSER", "1")

@@ -27,7 +27,7 @@ async function api(path, opts = {}) {
   if (res.status === 401) {
     throw new Error('管理会话已过期，请刷新页面并重新登录');
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) { let error; try { error=await res.json(); } catch (_) {} throw new Error(typeof error?.detail==='string'?error.detail:`HTTP ${res.status}`); }
   return res.json();
 }
 
@@ -63,16 +63,19 @@ const ICON_EMPTY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 /* ══════════ 导航 ══════════ */
 
 const PAGE_META = {
+  guide: ['上手引导', '按步骤连接模型、QQ 与微信'],
   overview: ['概览', '查看机器人运行状态与今日数据'],
   connect:  ['接入设置', '配置通道并完成登录'],
   memory:   ['人格知识库', '机器人随对话积累的对用户的理解'],
   messages: ['消息记录', '查看收发消息与触发判定结果'],
+  statistics: ['对话统计', '以气泡图和排行查看高频词与常聊话题'],
   settings: ['模型与行为', '配置大模型与机器人性格'],
 };
 
 function switchPage(name) {
   if (!PAGE_META[name]) name = 'overview';
   STATE.page = name;
+  $('#btn-start').hidden = !!STATE.status?.running || name === 'guide';
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === name));
   $$('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
   const [title, sub] = PAGE_META[name];
@@ -81,7 +84,10 @@ function switchPage(name) {
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   if (name === 'memory') loadMemory();
   if (name === 'messages') loadMessages();
+  if (name === 'statistics') loadStatistics();
   if (name === 'settings' || name === 'connect') loadConfig();
+  if (name === 'guide') refreshOnboarding().catch(e=>guideMessage(e.message));
+  else GUIDE.wechatSession++;
 
   // 接入设置页需要持续刷新 QQ 网关状态
   if (name === 'connect') startConnectPolling();
@@ -96,6 +102,7 @@ let connectPollTimer = null;
 function startConnectPolling() {
   stopConnectPolling();
   refreshQQStatus();
+  loadQQAccounts();
   connectPollTimer = setInterval(refreshQQStatus, 3000);
 }
 
@@ -105,7 +112,7 @@ function stopConnectPolling() {
     connectPollTimer = null;
   }
   // 离开「接入设置」页要停掉扫码轮询，避免定时器泄漏
-  stopQQLoginPolling();
+  if ($('#qq-login-modal').hidden && !STATE.qqLoginPending) stopQQLoginPolling();
 }
 
 window.addEventListener('hashchange', () => {
@@ -121,6 +128,7 @@ async function refreshStatus() {
   try { s = await api('/api/status'); }
   catch { return; }
 
+  STATE.status = s;
   const running = s.running;
   const stats = s.stats || {};
 
@@ -131,7 +139,7 @@ async function refreshStatus() {
     running ? '运行中' : (s.last_error ? '启动失败' : '未运行');
 
   // 顶部按钮
-  $('#btn-start').hidden = running;
+  $('#btn-start').hidden = running || STATE.page === 'guide';
   $('#btn-stop').hidden = !running;
 
   // 英雄区
@@ -147,7 +155,8 @@ async function refreshStatus() {
     : (s.last_error || '完成接入设置后点击「启动机器人」即可开始工作');
   if (running && s.wechat_delivery) {
     const d = s.wechat_delivery;
-    const label = { api_accepted: '接口已接受', retry_pending: '等待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status;
+    const label = { api_accepted: '接口已接受', retry_pending: '发送网络异常，等待重试', generation_retry_pending: '模型网络异常，保留消息待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status;
+    if(d.typing?.last_status==='on')$('#hero-desc').textContent += '；微信正在输入';
     $('#hero-desc').textContent += `；微信排队 ${d.pending_inbound}，待重试 ${d.pending_replies}，${label}（提交 ${d.last_send_ms}ms）`;
   }
   if (running && s.last_error) $('#hero-desc').textContent += `；${s.last_error}`;
@@ -199,7 +208,7 @@ function feedItem(m) {
     <div class="feed-body">
       <div class="feed-head">
         <span class="feed-who">${esc(who)}</span>
-        ${scope}${tag}
+        ${scope}${tag}${!out && m.sender_id ? `<span class="tag" title="身份关联时使用此发送者 ID">${esc(m.platform || '')} · ${esc(m.sender_id)}</span>` : ''}
         <span class="feed-time">${esc(m.time || '')}</span>
       </div>
       <div class="feed-text ${out ? 'out' : ''}">${esc(m.content)}</div>
@@ -207,12 +216,57 @@ function feedItem(m) {
   </div>`;
 }
 
+async function loadStorage() {
+  try {
+    const s = await api('/api/data/status');
+    $('#storage-path').value = s.data_dir;
+    $('#storage-path').title = s.data_dir;
+    const migration = s.migration;
+    const text = migration.status === 'migrated' ? `旧数据已迁移：${migration.imported_files} 个文件；原目录和迁移备份均保留。` : '当前使用独立本地数据目录。';
+    $('#storage-status').textContent = text + (s.custom_path ? ' 你已指定自定义目录，请保留此目录。' : '') + (migration.other_backups ? ` 另有 ${migration.other_backups} 份旧数据已备份，未混入当前记忆。` : '');
+    $('#btn-open-storage').hidden = !window.wxbotDesktop;
+  } catch (e) { $('#storage-status').textContent = '数据位置读取失败：' + e.message; }
+}
+
+async function backupStorage() {
+  const button = $('#btn-storage-backup');button.disabled = true;
+  $('#storage-status').textContent = '正在创建并校验本地备份…';
+  try {
+    const result = await api('/api/data/backup', {method:'POST'});
+    $('#storage-status').textContent = result.message + '：' + result.path;
+    const link = $('#storage-download');link.href = result.download_url;link.download = result.name;link.hidden = false;
+    toast('本地备份已保存', 'ok');
+  } catch (e) { $('#storage-status').textContent = '备份失败，原数据保持不变：' + e.message; }
+  finally { button.disabled = false; }
+}
+
 /* ══════════ 接入设置 ══════════ */
 
+const DIRTY_SECTIONS = new Set();
+const SECTION_FIELDS = {
+  primary: ['llm', ['primary_base','primary_model','primary_key']],
+  fallback: ['llm', ['fallback_base','fallback_model','fallback_key']],
+  judge: ['llm', ['judge_base','judge_model','judge_key']],
+  vision: ['llm', ['vision_base','vision_model','vision_key']],
+  search: ['llm', ['search_enabled','search_key','search_model','context_timezone']],
+  persona: ['bot', ['name','persona','persona_profile','persona_relationship']],
+  reply: ['bot', ['group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
+  memory: ['bot', ['memory_enabled','memory_inject','memory_extract_interval']],
+  channels: ['adapter', ['wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror']]
+};
+function sectionStatus(section, text, dirty = false) {
+  const el = $(`[data-save-status="${section}"]`);
+  if (el) { el.textContent = text; el.classList.toggle('dirty', dirty); }
+}
+function markSectionDirty(section) { DIRTY_SECTIONS.add(section); sectionStatus(section, '有修改，尚未保存', true); }
+function captureDrafts() {
+  return [...DIRTY_SECTIONS].flatMap(section => [...document.querySelectorAll(`[data-settings-section="${section}"] input, [data-settings-section="${section}"] select, [data-settings-section="${section}"] textarea`)].filter(el=>el.id).map(el=>({id:el.id,value:el.value,checked:el.checked})));
+}
 const CHANNELS = { wechat: true, qq: false };
 
 async function loadConfig() {
   const c = await api('/api/config');
+  const drafts = captureDrafts();
   STATE.config = c;
   const a = c.adapter || {};
 
@@ -230,6 +284,7 @@ async function loadConfig() {
   $('#onebot-token').value = a.onebot_token || '';
   $('#bot-qq').value = a.bot_qq || '';
   $('#qq-nickname').value = a.bot_nickname || '';
+  $('#napcat-image-mirror').value = a.napcat_image_mirror ?? 'docker.m.daocloud.io';
 
   // 模型
   $('#primary-base').value = c.llm.primary_base || '';
@@ -242,6 +297,14 @@ async function loadConfig() {
   $('#judge-model').value = c.llm.judge_model || '';
   $('#judge-key').value = c.llm.judge_key || '';
 
+  $('#vision-base').value = c.llm.vision_base || '';
+  $('#vision-model').value = c.llm.vision_model || '';
+  $('#vision-key').value = c.llm.vision_key || '';
+  $('#search-enabled').checked = c.llm.search_enabled !== false;
+  $('#search-key').value = c.llm.search_key || '';
+  $('#search-model').value = c.llm.search_model || 'deepseek-flash';
+  $('#context-timezone').value = c.llm.context_timezone || 'Asia/Shanghai';
+
   // 机器人行为
   $('#bot-name').value = c.bot.name || '';
   $('#bot-persona').value = c.bot.persona || '';
@@ -251,6 +314,11 @@ async function loadConfig() {
   $('#memory-enabled').checked = c.bot.memory_enabled !== false;
   $('#memory-inject').checked = c.bot.memory_inject !== false;
   $('#memory-interval').value = c.bot.memory_extract_interval || 3;
+  $('#message-merge-window').value = c.bot.message_merge_window ?? 2;
+  $('#message-merge-max-wait').value = c.bot.message_merge_max_wait ?? 10;
+  $('#humanized-wait').checked = c.bot.humanized_wait !== false;
+  $('#typing-indicator').checked = c.bot.typing_indicator !== false;
+  $('#message-pause-timeout').value = c.bot.message_pause_timeout ?? 120;
 
   // 官方通道的登录态存在后端文件里，单独取一次
   if (CHANNELS.wechat) {
@@ -261,6 +329,10 @@ async function loadConfig() {
     STATE.ilinkStatus = null;
   }
 
+  for (const draft of drafts) { const el = $('#'+draft.id); if(el){el.value=draft.value;el.checked=draft.checked;} }
+  CHANNELS.wechat = $('#adapter-type input[value="wechat"]').checked;
+  CHANNELS.qq = $('#adapter-type input[value="qq"]').checked;
+  renderPlatformCards();
   applyChannels();
   updateWizardStatus(c);
 }
@@ -353,9 +425,10 @@ function collectConfig() {
   c.adapter.wechat_type = 'ilink';
   c.adapter.onebot_http_url = $('#onebot-http').value.trim();
   c.adapter.onebot_token = $('#onebot-token').value.trim();
+  c.adapter.napcat_image_mirror = $('#napcat-image-mirror').value.trim();
   c.adapter.bot_qq = $('#bot-qq').value.trim();
   c.adapter.bot_nickname = $('#qq-nickname').value.trim() ||
-    $('#bot-name').value.trim();
+    STATE.config.bot.name;
 
   // 模型
   c.llm.primary_base = $('#primary-base').value.trim();
@@ -368,12 +441,25 @@ function collectConfig() {
   c.llm.judge_model = $('#judge-model').value.trim();
   c.llm.judge_key = $('#judge-key').value.trim();
 
+  c.llm.vision_base = $('#vision-base').value.trim();
+  c.llm.vision_model = $('#vision-model').value.trim();
+  c.llm.vision_key = $('#vision-key').value.trim();
+  c.llm.search_enabled = $('#search-enabled').checked;
+  c.llm.search_key = $('#search-key').value.trim();
+  c.llm.search_model = $('#search-model').value.trim();
+  c.llm.context_timezone = $('#context-timezone').value.trim();
+
   // 机器人行为
   c.bot.name = $('#bot-name').value.trim() || '小助手';
   c.bot.persona = $('#bot-persona').value.trim();
   c.bot.persona_profile = $('#persona-profile').value;
   c.bot.persona_relationship = $('#persona-relationship').value;
   c.bot.group_reply_at_sender = $('#group-at-sender').checked;
+  c.bot.message_merge_window = Math.min(10, Math.max(0, Number($('#message-merge-window').value)));
+  c.bot.message_merge_max_wait = Math.max(c.bot.message_merge_window, Math.min(60, Math.max(1, Number($('#message-merge-max-wait').value) || 10)));
+  c.bot.humanized_wait = $('#humanized-wait').checked;
+  c.bot.typing_indicator = $('#typing-indicator').checked;
+  c.bot.message_pause_timeout = Math.min(600, Math.max(5, Number($('#message-pause-timeout').value) || 120));
   c.bot.memory_enabled = $('#memory-enabled').checked;
   c.bot.memory_inject = $('#memory-inject').checked;
   c.bot.memory_extract_interval =
@@ -381,22 +467,33 @@ function collectConfig() {
   return c;
 }
 
-async function saveConfig() {
+async function saveSection(section, quiet = false) {
+  const button = $(`[data-save-section="${section}"]`);
+  if (button) button.disabled = true;
   try {
-    const c = collectConfig();
-    const saved = await api('/api/config', { method: 'PUT', body: JSON.stringify(c) });
-    if (saved.requires_restart) {
-      const action = (c.adapter.wechat_enabled || c.adapter.qq_enabled) ? 'restart' : 'stop';
-      const restarted = await api(`/api/bot/${action}`, { method: 'POST' });
-      toast(restarted.ok ? '配置已应用' : restarted.message,
-            restarted.ok ? 'ok' : 'err');
-    } else {
-      toast(saved.message || '配置已保存并应用', 'ok');
-    }
+    const [root, fields] = SECTION_FIELDS[section];
+    const all = collectConfig();
+    const beforeValues = Object.fromEntries(fields.map(key => [key, all[root][key]]));
+    // Send deltas only: setup/login may update tokens/account while a form is open.
+    // Unchanged stale fields must not overwrite those fresh backend values.
+    const values = Object.fromEntries(fields.filter(key => JSON.stringify(all[root][key]) !== JSON.stringify(STATE.config[root][key])).map(key => [key, all[root][key]]));
+    const saved = await api(`/api/config/section/${section}`, {method:'PATCH',body:JSON.stringify(values)});
+    STATE.config = saved.config;
+    const latest = collectConfig();
+    const editedWhileSaving = fields.some(key => JSON.stringify(latest[root][key]) !== JSON.stringify(beforeValues[key]));
+    if (!editedWhileSaving) { DIRTY_SECTIONS.delete(section); sectionStatus(section, '已保存'); }
+    else { markSectionDirty(section); sectionStatus(section, '已保存上一版；新修改尚未保存', true); }
+    // Re-render only persisted sections; other cards retain their unsaved drafts.
     await loadConfig();
-  } catch (e) {
-    toast('保存失败：' + e.message, 'err');
-  }
+    if (saved.requires_restart && STATE.status?.running) {
+      const action = saved.config.adapter.qq_enabled || saved.config.adapter.wechat_enabled ? 'restart' : 'stop';
+      const result = await api(`/api/bot/${action}`, {method:'POST'});
+      if (!result.ok) throw new Error(result.message || '通道重启未完成');
+    }
+    if (!quiet) toast(saved.message || '本区设置已保存', 'ok');
+    return true;
+  } catch(e) { sectionStatus(section, '保存失败，修改已保留', true); DIRTY_SECTIONS.add(section); toast('保存失败：'+e.message,'err'); return false; }
+  finally { if(button) button.disabled = false; }
 }
 
 /* ══════════ 扫码登录 ══════════ */
@@ -408,7 +505,7 @@ async function getQR() {
   try {
     // ⚠️ 先落盘再取二维码：后端是按**保存的配置**判断该不该走官方通道的。
     // 用户可能刚勾了通道但还没点「保存」，不先保存就会报"通道未启用"。
-    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    if (!await saveSection('channels', true)) throw new Error('通道设置未保存');
     r = await api('/api/login/qrcode', { method: 'POST' });
   } catch (e) {
     box.innerHTML = `<div class="qr-empty"><span>获取失败：${esc(e.message)}</span></div>`;
@@ -542,94 +639,63 @@ async function copyText(text, btn) {
 /* ══════════ QQ / OneBot ══════════ */
 
 /** 一键部署 NapCat（非阻塞，靠轮询 /api/qq/status 看进度）*/
-async function setupQQ() {
-  const btn = $('#btn-setup-qq');
-  const st0 = STATE.qqStatus || {};
-  const dk = st0.docker || {};
-
-  // 需要装 Docker 时才弹确认框
-  if (!dk.installed) {
-    const ok = confirm(
-      '即将在你的电脑上安装 Docker。\n\n' +
-      '过程中需要你操作的地方：\n· 按提示完成安装（可能要输入密码）\n\n' +
-      '安装包约 600MB，是否继续？'
-    );
-    if (!ok) return;
-  }
-
-  btn.disabled = true;
-  $('#qq-detect-hint').textContent = '正在自动部署，请稍候…';
-  let failure = '';
-
+let qqStartPending = null;
+async function setupQQ(options = {}) {
+  if(qqStartPending)return qqStartPending;
+  qqStartPending=startQQGateway(options);
+  try{return await qqStartPending;}finally{qqStartPending=null;}
+}
+async function startQQGateway({saveForm=true}={}) {
+  const buttons=['btn-home-qq','btn-guide-qq','btn-setup-qq'].map(id=>$('#'+id));
+  const labels=buttons.map(btn=>btn.textContent);
+  buttons.forEach(btn=>{btn.disabled=true;btn.textContent='正在启动 QQ 网关…';});
+  reportQQProgress('正在检查 QQ 网关…');
   try {
-    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
-
-    // ① 先把 Docker 环境弄好
-    if (!(dk.installed && dk.running)) {
-      await api('/api/docker/prepare', { method: 'POST' });
-      await pollQQStatus();
-      const st = STATE.qqStatus || {};
-      if (!(st.docker && st.docker.running)) {
-        failure = 'Docker 还没就绪';
-        toast('需要你先把 Docker 装好', 'err');
-        return;
-      }
+    if(saveForm) {if(!await saveSection('channels',true))return false;}
+    else if(!STATE.config.adapter.qq_enabled) {
+      const r=await api('/api/config/section/channels',{method:'PATCH',body:JSON.stringify({qq_enabled:true})});
+      STATE.config=r.config;await loadConfig();
     }
-
-    // ② 部署 NapCat
-    const r = await api('/api/qq/setup', { method: 'POST' });
-    if (!r.ok) { failure = r.message; toast(r.message || '部署失败', 'err'); return; }
-
-    const st = await pollQQStatus();
-    const task = st.task || {};
-    if (task.stage === 'error') {
-      failure = task.message || task.error;
-      toast('部署失败：' + failure, 'err');
-      return;
+    let st=await refreshQQStatus();
+    if(!st)throw new Error('网关状态获取未完成，请重试');
+    if(st.httpReachable&&!st.napcat?.running) {
+      reportQQProgress(st.loggedIn?'外部 QQ 网关已在线，无需启动本机容器':'外部网关已响应，请在该网关中登录 QQ');
+      return !!st.loggedIn;
     }
-    if (task.needsUser) { toast('需要你手动完成一步操作', 'err'); return; }
-
-    // ③ 部署完成后自动勾选 QQ 通道，并直接出二维码
-    if (task.stage === 'waiting_login' || (st.napcat && st.napcat.running)) {
-      CHANNELS.qq = true;
-      $('#qq-qr-wrap').hidden = false;
-      $('#qq-detect-hint').textContent = '部署完成。请用手机 QQ 扫码登录。';
-      // 先保存（把 QQ 通道勾上、地址回填），再取二维码
-      await saveConfigQuiet();
-      await getQQQr();
-      toast('QQ 网关已部署，请扫码登录', 'ok');
-    } else {
-      failure = task.message || '还没部署完成';
-      toast('还没部署完成，请看下方提示', 'err');
+    const docker=st.docker||{};
+    if(!docker.installed && !confirm('需要安装 Docker Desktop 来运行 QQ 网关。\n\n请按安装窗口提示完成安装与首次启动，再回到本应用继续。是否开始准备？')){reportQQProgress('尚未开始安装，准备好后可点击本按钮继续');return false;}
+    if(!docker.running) {
+      const prepared=await api('/api/docker/prepare',{method:'POST'});
+      if(!prepared.ok)throw new Error(prepared.message||'Docker 准备未完成');
+      st=await pollQQStatus();
+      if(!st?.docker?.running){reportQQProgress(st?.task?.message||'请完成 Docker 安装并启动 Docker Desktop，再点击本按钮继续');return false;}
     }
-  } catch (e) {
-    failure = e.message;
-    toast('部署失败：' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-    if (failure) {
-      $('#qq-detect-hint').textContent = '没部署成功：' + failure;
-    } else if (!$('#qq-detect-hint').textContent.includes('完成')) {
-      $('#qq-detect-hint').textContent =
-        '自动拉取 NapCat 镜像、写好网络配置并启动，全程无需你操作';
-    }
-  }
+    const r=await api('/api/qq/setup',{method:'POST'});
+    if(!r.ok)throw new Error(r.message||'网关启动未完成');
+    st=await pollQQStatus();
+    if(!st || st.task?.stage==='error'||st.task?.stage==='timeout')throw new Error(st?.task?.message||'网关尚未就绪，请查看接入设置中的日志');
+    if(st.task?.needsUser){reportQQProgress(st.task.message||'请按提示完成安装后继续');return false;}
+    if(!st.napcat?.running&&st.task?.stage!=='waiting_login')throw new Error('网关还未运行，请稍后继续');
+    // Reload saved tokens from setup, never submit stale fields from hidden forms.
+    await loadConfig();await refreshOnboarding();
+    if(st.loggedIn){await finishQQLogin();toast('QQ 已在线，无需重复扫码','ok');}
+    else {reportQQProgress('网关已启动，正在准备登录…');await beginQQLogin();}
+    return true;
+  } catch(e){reportQQProgress('网关启动未完成：'+e.message);toast(e.message,'err');return false;}
+  finally{buttons.forEach((btn,i)=>{btn.disabled=false;btn.textContent=labels[i];});}
 }
 
 /** 静默保存配置（不提示、不刷新表单），用于自动化流程中途落盘 */
-async function saveConfigQuiet() {
-  try {
-    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
-    await loadConfig();
-    return true;
-  } catch (e) {
-    toast('保存配置失败：' + e.message, 'err');
-    return false;
-  }
-}
+async function saveConfigQuiet() { return await saveSection('channels', true); }
 
 /** 刷新 QQ 状态并渲染 */
+let qqStatusPending = null;
 async function refreshQQStatus() {
+  if (qqStatusPending) return qqStatusPending;
+  qqStatusPending = fetchQQStatus();
+  try { return await qqStatusPending; } finally { qqStatusPending = null; }
+}
+async function fetchQQStatus() {
   let st;
   try {
     st = await api('/api/qq/status');
@@ -640,46 +706,23 @@ async function refreshQQStatus() {
   renderQQChecklist(st);
   renderQQProgress(st.task);
   renderQQBadge(st);
+  renderHomeQQ(st);
   return st;
 }
 
 function renderQQChecklist(st) {
-  const d = st.docker || {};
-  const n = st.napcat || {};
-  const task = st.task || {};
-
-  setCheck('qq-docker',
-    d.installed ? (d.running ? 'ok' : 'err') : 'err',
-    d.installed ? (d.running ? `已就绪 · v${d.version || '?'}` : '已安装但未启动') : '未安装');
-
-  const busy = task.running && task.stage === 'napcat';
-  setCheck('qq-container',
-    n.running ? 'ok' : (busy ? 'busy' : (d.running ? 'err' : '')),
-    n.running ? '正在运行 · 127.0.0.1:6099' : (busy ? '部署中…' : (n.message || '等待中')));
-
-  setCheck('qq-login',
-    st.loggedIn ? 'ok' : (n.running ? 'err' : ''),
-    st.loggedIn ? ('已登录 ' + (st.botQq || '')) : (n.running ? '未登录，请扫码' : '等待网关就绪'));
-
-  // 消息推送通道：HTTP 通 ≠ 消息能到。反向 WS 没连上时 QQ 消息一条都收不到，
-  // 而用户在界面上看不出任何异常 —— 所以单独列一行，并给出「重新对接」按钮。
-  const wsOk = !!st.reverseWsConnected;
-  const wsBusy = task.running && task.stage === 'napcat';
-  let wsDesc;
-  if (wsOk) {
-    const n2 = st.eventCount || 0;
-    wsDesc = '已连接 · ' + (n2 ? `已收到 ${n2} 个事件` : '等待事件');
-  } else if (wsBusy) {
-    wsDesc = '正在重新对接…';
-  } else if (n.running) {
-    wsDesc = '网关没有连过来（消息收不到），点右侧修复';
-  } else {
-    wsDesc = '等待网关就绪';
-  }
-  setCheck('qq-reverse-ws', wsOk ? 'ok' : (wsBusy ? 'busy' : (n.running ? 'err' : '')),
-           wsDesc,
-           (!wsOk && n.running && !wsBusy)
-             ? { label: '重新对接', action: syncQQWsUrl } : null);
+  const d=st.docker||{}, n=st.napcat||{}, task=st.task||{};
+  const external=st.httpReachable&&!n.running;
+  const busy=!!task.running;
+  setCheck('qq-docker', external?'ok':(d.running?'ok':(d.installed?'err':'')), external?'使用已连接的外部网关，无需本机 Docker':(d.running?`已就绪 · v${d.version||'?'}`:(d.installed?'已安装但未启动':'尚未安装')));
+  setCheck('qq-container', (n.running||external)?'ok':(busy?'busy':''), external?`OneBot 已响应 · ${st.gatewayName||'外部网关'} ${st.gatewayVersion||''}`:(n.running?`正在运行${st.gatewayVersion?' · '+st.gatewayVersion:''}`:(busy?'启动中…':n.message||'等待网关启动')));
+  setCheck('qq-login', st.loggedIn?'ok':((n.running||external)?'err':''), st.loggedIn?`已在线 ${st.botQq||''}`:(st.online===false?'QQ 已离线，请重新上线':((n.running||external)?'可快速登录或扫码':'等待网关就绪')));
+  const ws=!!st.reverseWsConnected, http=st.messageTransport==='http_post';
+  const receiving=!!st.messageReceiverStarted;
+  let desc=ws?`反向 WS 已连接 · ${st.wsConnections||1} 个连接 · ${st.eventCount||0} 个事件`:(http?`HTTP 上报已到达 · 上次 ${new Date(st.lastHttpEventAt).toLocaleTimeString()}`:(busy?'等待网关启动':(st.loggedIn&&!receiving?'网关已在线，启动机器人后接收消息':'等待网关消息连接')));
+  if((ws||http)&&!receiving) desc+='；机器人未启动';
+  setCheck('qq-reverse-ws',(ws||http)?'ok':(busy?'busy':(st.loggedIn&&receiving?'err':'')),desc,(!(ws||http)&&receiving&&!busy)?{label:'重新对接',action:syncQQWsUrl}:null);
+  if(st.wsUrl) $('#qq-ws-url').textContent=st.wsUrl;
 }
 
 /** 让网关重新连到当前端口（端口变了就会收不到消息）*/
@@ -717,7 +760,7 @@ function renderQQProgress(task) {
   text.style.color = task.stage === 'error' ? 'var(--danger)' : '';
   if (task.stage === 'waiting_login') {
     // 只等扫码，不是"已登录"——文案不能说过头
-    text.textContent = '部署完成，请用手机 QQ 扫码登录';
+    text.textContent = '网关已启动，可快速登录或扫码';
     text.style.color = '';
   }
 }
@@ -729,11 +772,11 @@ function renderQQBadge(st) {
   const task = st.task || {};
   if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '部署中…'; }
   // 登录了但推送通道没连上 = 收不到消息，不能显示成"一切正常"
-  else if (st.loggedIn && st.reverseWsConnected) {
+  else if (st.loggedIn && (st.reverseWsConnected || st.messageTransport === 'http_post')) {
     badge.className = 'wz-status ok'; badge.textContent = '已登录';
   } else if (st.loggedIn) {
-    badge.className = 'wz-status warn'; badge.textContent = '待对接';
-  } else if (n.running) { badge.className = 'wz-status warn'; badge.textContent = '待扫码'; }
+    badge.className = 'wz-status warn'; badge.textContent = st.messageReceiverStarted ? '等待消息连接' : '已在线 · 待启动机器人';
+  } else if (n.running) { badge.className = 'wz-status warn'; badge.textContent = '待登录'; }
   else { badge.className = 'wz-status'; badge.textContent = '待配置'; }
 }
 
@@ -744,67 +787,95 @@ async function pollQQStatus(maxMs = 30 * 60 * 1000) {
   while (Date.now() - t0 < maxMs) {
     st = await refreshQQStatus();
     if (!st) break;
+    reportQQProgress(st.task?.message || (st.loggedIn?'QQ 已在线':'正在准备网关…'));
     if (!(st.task || {}).running) return st;
     await new Promise(r => setTimeout(r, 1500));
   }
   return st || await refreshQQStatus();
 }
 
-/** 获取 QQ 登录二维码 */
-async function getQQQr() {
-  const box = $('#qq-qr-box');
-  const wrap = $('#qq-qr-wrap');
-  const status = $('#qq-qr-status');
-  if (!box) return;
-  wrap.hidden = false;
-  box.innerHTML = '<div class="qr-empty"><span>正在获取二维码…</span></div>';
+async function loadQQAccounts() {
+  const select=$('#qq-quick-account'), hint=$('#qq-login-hint'), old=select.value;
   try {
-    const r = await api('/api/qq/login/qrcode', { method: 'POST' });
-    if (!r.ok) {
-      box.innerHTML = `<div class="qr-empty"><span>${esc(r.message || '获取失败')}</span>` +
-        (r.hint ? `<p style="margin-top:8px;font-size:12px;color:var(--text-2);line-height:1.6;">${esc(r.hint)}</p>` : '') +
-        '</div>';
-      status.textContent = r.message || '获取失败';
-      toast(r.message || '获取二维码失败', 'err');
-      return;
-    }
-    box.innerHTML = `<img src="${esc(r.image)}" alt="QQ 登录二维码">`;
-    status.textContent = r.message || '等待扫码…';
-    startQQLoginPolling();
-  } catch (e) {
-    box.innerHTML = `<div class="qr-empty"><span>获取失败：${esc(e.message)}</span></div>`;
-    toast('获取二维码失败：' + e.message, 'err');
-  }
+    const r=await api('/api/qq/login/accounts');
+    const accounts=r.accounts||[];
+    STATE.qqAutoLoginQq=r.autoLoginQq||'';
+    select.innerHTML='<option value="">'+(accounts.length?'选择已登录过的账号':'暂无保存的账号')+'</option>'+accounts.map(a=>`<option value="${esc(a.qq)}">${esc(a.nickname||'QQ')} · ${esc(a.qq)}</option>`).join('');
+    select.value=accounts.some(a=>a.qq===old)?old:(r.autoLoginQq||accounts[0]?.qq||'');
+    $('#btn-qq-quick').disabled=!r.ok||!accounts.length;
+    hint.textContent=r.message||'账号列表已刷新';
+    return accounts;
+  } catch(e) { hint.textContent='账号列表获取失败：'+e.message; return []; }
 }
-
-/** 扫码状态轮询：3 秒一次、上限 5 分钟；切页/异常都要停表 */
+async function quickLoginQQ(options = {}) {
+  const qq=typeof options.qq==='string'?options.qq:$('#qq-quick-account').value;
+  const remember=typeof options.remember==='boolean'?options.remember:$('#qq-quick-remember').checked;
+  const buttons=[$('#btn-qq-quick'),$('#btn-qq-choice-quick')];
+  if(!qq){toast('请先选择已保存的账号','err');return false;}
+  buttons.forEach(btn=>btn.disabled=true);
+  try {
+    const r=await api('/api/qq/login/quick',{method:'POST',body:JSON.stringify({qq,remember})});
+    $('#qq-login-hint').textContent=$('#qq-choice-status').textContent=r.message||'';
+    reportQQProgress(r.message||'正在确认 QQ 登录状态…');
+    if(!r.ok){toast(r.message||'请尝试扫码','err');return false;}
+    $('#qq-choice-modal').hidden=true;
+    if(r.loggedIn)await finishQQLogin();else startQQLoginPolling();
+    return true;
+  }catch(e){toast(e.message,'err');return false;}
+  finally{buttons.forEach(btn=>btn.disabled=false);}
+}
+/** Wait until QR is generated AND decoded; never open an empty modal. */
+let qqQrPending = null;
+let qqQrGeneration = 0;
+async function getQQQr() {
+  if(qqQrPending)return qqQrPending;
+  const generation=++qqQrGeneration;
+  qqQrPending=requestQQQr(generation);
+  try{return await qqQrPending;}finally{qqQrPending=null;}
+}
+async function requestQQQr(generation) {
+  const btn=$('#btn-qq-qr'), hint=$('#qq-login-hint');
+  btn.disabled=true;$('#btn-qq-get-qr').disabled=true;
+  $('#qq-login-modal').hidden=true;
+  hint.textContent='正在等待网关生成二维码…';reportQQProgress(hint.textContent);
+  try {
+    const r=await api('/api/qq/login/qrcode',{method:'POST'});
+    if(generation!==qqQrGeneration)return false;
+    if(r.loggedIn){await finishQQLogin();return true;}
+    if(!r.ok||!r.image){hint.textContent=r.message||'二维码尚未准备好，请稍后再试';reportQQProgress(hint.textContent);toast(hint.textContent,'err');return false;}
+    const img=new Image();img.alt='QQ 登录二维码';img.src=r.image;await img.decode();
+    if(generation!==qqQrGeneration)return false;
+    $('#qq-qr-box').replaceChildren(img);
+    $('#qq-qr-status').textContent=r.message||'等待扫码';
+    $('#qq-login-modal').hidden=false;$('#btn-close-qq-modal').focus();
+    hint.textContent='二维码已准备好，请在弹窗扫码';reportQQProgress(hint.textContent);
+    startQQLoginPolling();return true;
+  }catch(e){hint.textContent='获取二维码失败：'+e.message;reportQQProgress(hint.textContent);toast(hint.textContent,'err');return false;}
+  finally{btn.disabled=false;$('#btn-qq-get-qr').disabled=false;}
+}
+function closeQQDialogs() {qqQrGeneration++;$('#qq-login-modal').hidden=true;$('#qq-choice-modal').hidden=true;stopQQLoginPolling();}
 function startQQLoginPolling() {
   stopQQLoginPolling();
-  const t0 = Date.now();
-  STATE.qqLoginTimer = setInterval(async () => {
-    if (Date.now() - t0 > 5 * 60 * 1000) {
-      stopQQLoginPolling();
-      $('#qq-qr-status').textContent = '二维码已过期，请重新获取';
-      return;
-    }
-    if (STATE.page !== 'connect') { stopQQLoginPolling(); return; }
-    try {
-      const r = await api('/api/qq/login/check');
-      if (r.loggedIn) {
-        stopQQLoginPolling();
-        $('#qq-qr-status').textContent = '✅ 登录成功' + (r.qq ? `（${r.qq}）` : '');
-        toast('QQ 登录成功', 'ok');
-        await loadConfig();
-        await refreshQQStatus();
-      } else {
-        $('#qq-qr-status').textContent = r.message || '等待扫码…';
+  STATE.qqLoginPending=true;
+  const t0=Date.now();let querying=false;
+  STATE.qqLoginTimer=setInterval(async()=>{
+    if(querying)return;
+    if(Date.now()-t0>5*60*1000){stopQQLoginPolling();$('#qq-login-hint').textContent=$('#qq-qr-status').textContent='登录等待超时，请重试快速登录或扫码';reportQQProgress('QQ 登录等待超时，可在接入设置重试');return;}
+    querying=true;
+    try{
+      const r=await api('/api/qq/login/check');
+      $('#qq-login-hint').textContent=$('#qq-qr-status').textContent=r.message||'等待登录确认';
+      reportQQProgress(r.message||'等待手机 QQ 确认');
+      if(r.loggedIn){
+        await finishQQLogin();toast('QQ 登录成功','ok');
       }
-    } catch (_) { /* 单次失败不打断轮询 */ }
-  }, 3000);
+    }catch(_){/* transient query failures don't declare success */}
+    finally{querying=false;}
+  },1500);
 }
-
 function stopQQLoginPolling() {
-  if (STATE.qqLoginTimer) { clearInterval(STATE.qqLoginTimer); STATE.qqLoginTimer = null; }
+  STATE.qqLoginPending=false;
+  if(STATE.qqLoginTimer){clearInterval(STATE.qqLoginTimer);STATE.qqLoginTimer=null;}
 }
 
 /** 探测已有 OneBot 网关 */
@@ -846,7 +917,7 @@ async function testQQ() {
 
   try {
     const tok = $('#onebot-token').value.trim();
-    await api('/api/config', { method: 'PUT', body: JSON.stringify(collectConfig()) });
+    if (!await saveSection('channels', true)) throw new Error('通道设置未保存');
     const r = await api('/api/qq/test', {
       method: 'POST',
       body: JSON.stringify({
@@ -900,6 +971,7 @@ async function loadMemory() {
   const kw = ($('#mem-search') || {}).value || '';
   const q = new URLSearchParams();
   if (kw) q.set('keyword', kw);
+  if ($('#mem-history').checked) q.set('include_history', 'true');
   let data;
   try {
     data = await api('/api/memory?' + q.toString());
@@ -908,8 +980,14 @@ async function loadMemory() {
     return;
   }
   memoryItems = data.items || [];
-  renderMemoryStats(data.stats || {});
+  renderMemoryStats({...data.stats, categories:data.categories});
   renderMemoryList(memoryItems);
+  $('#identity-list').innerHTML = (data.identities || []).map(it => `<div>${it.accounts.map(a => `${a.platform === 'ilink' ? '微信' : 'QQ'} ${esc(a.owner_id)}`).join(' ↔ ')} <button class="btn btn-ghost btn-sm" data-unlink="${esc(it.id)}">解除关联</button></div>`).join('') || '尚未关联；手动通用记忆始终对两个通道生效。';
+  $$('#identity-list [data-unlink]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('解除后按原账号分别使用记忆，来源记录会保留。确定解除？')) return;
+    await api(`/api/memory/identities/${encodeURIComponent(b.dataset.unlink)}`, {method:'DELETE'});
+    await loadMemory();
+  }));
 
   const badge = $('#nav-memory-count');
   if (badge) {
@@ -921,6 +999,7 @@ async function loadMemory() {
 
 function renderMemoryStats(s) {
   $('#mem-total').textContent = s.total || 0;
+  $('#mem-total').title = `另有 ${s.historical || 0} 条历史或过期信息`;
   $('#mem-owners').textContent = `${s.owners || 0} 个对象`;
   $('#mem-conf').textContent = s.avgConfidence ? Math.round(s.avgConfidence * 100) + '%' : '—';
   $('#mem-enabled').textContent = s.enabled ? '已开启' : '已关闭';
@@ -958,6 +1037,9 @@ function renderMemoryList(items) {
             <span class="bar"><i style="width:${Math.round((it.confidence || 0) * 100)}%"></i></span>
             ${Math.round((it.confidence || 0) * 100)}%
           </span>
+          <span>${esc(it.stateLabel || '当前')}</span>
+          <span>来源 ${esc(it.platform === 'ilink' ? '微信' : it.platform === 'onebot' ? 'QQ' : '手动/旧版')} · ${esc(it.owner_id || '通用')}</span>
+          ${it.evidence ? `<span title="${esc(it.evidence)}">有原话依据</span>` : ''}
           <span>使用 ${it.hits || 0} 次</span>
           <span>更新于 ${esc(it.updatedAt || '')}</span>
         </div>
@@ -981,6 +1063,7 @@ let memCategory = 'fact';
 function openMemoryModal() {
   $('#mm-content').value = '';
   $('#mm-owner').value = '';
+  $('#mm-platform').value = '';
   memCategory = 'fact';
   $$('#mm-category button').forEach(b =>
     b.classList.toggle('active', b.dataset.value === 'fact'));
@@ -1000,10 +1083,10 @@ async function saveMemory() {
     await api('/api/memory', {
       method: 'POST',
       body: JSON.stringify({
-        scope: 'user', owner_id: owner, category: memCategory, content,
+        scope: 'user', owner_id: owner, category: memCategory, content, platform: $('#mm-platform').value,
       }),
     });
-    toast('已添加，机器人下次回答就会参考', 'ok');
+    toast('已保存，将在相关话题中参考', 'ok');
     $('#memory-modal').hidden = true;
     loadMemory();
   } catch (e) {
@@ -1014,6 +1097,18 @@ async function saveMemory() {
 /* ══════════ 事件绑定 ══════════ */
 
 function bind() {
+  bindStatistics();
+  $('#btn-storage-backup').addEventListener('click',backupStorage);
+  $('#btn-copy-storage').addEventListener('click',()=>copyText($('#storage-path').value,$('#btn-copy-storage')));
+  $('#btn-open-storage').addEventListener('click',()=>window.wxbotDesktop?.shell.openDataDir());
+  $('#mem-history').addEventListener('change', loadMemory);
+  $('#btn-identity-link').addEventListener('click', async () => {
+    try {
+      await api('/api/memory/identities', {method:'POST', body:JSON.stringify({wechat_id:$('#identity-wechat').value.trim(), qq_id:$('#identity-qq').value.trim()})});
+      toast('已关联，两个平台将共享此人的长期记忆', 'ok');
+      await loadMemory();
+    } catch(e) { toast(e.message, 'err'); }
+  });
   $$('.nav-item').forEach(b => b.addEventListener('click', () => switchPage(b.dataset.page)));
   $$('[data-goto]').forEach(b => b.addEventListener('click', () => switchPage(b.dataset.goto)));
 
@@ -1023,6 +1118,7 @@ function bind() {
     await refreshStatus();
     await loadRecent();
     if (STATE.page === 'messages') await loadMessages();
+    if (STATE.page === 'statistics') await loadStatistics();
     if (STATE.page === 'memory') await loadMemory();
     toast('已刷新');
   });
@@ -1052,19 +1148,12 @@ function bind() {
   $('#btn-detect-qq').addEventListener('click', detectQQ);
   $('#btn-test-qq').addEventListener('click', testQQ);
   $('#btn-qq-get-qr').addEventListener('click', getQQQr);
-  $('#btn-qq-qr').addEventListener('click', async () => {
-    const wrap = $('#qq-qr-wrap');
-    wrap.hidden = false;
-    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await getQQQr();
-  });
+  $('#btn-qq-qr').addEventListener('click', getQQQr);
+  $('#btn-qq-accounts').addEventListener('click', loadQQAccounts);
+  $('#btn-qq-quick').addEventListener('click', quickLoginQQ);
+  $('#btn-close-qq-modal').addEventListener('click',closeQQDialogs);
+  $('#qq-login-modal').addEventListener('click', e=>{if(e.target.id==='qq-login-modal')closeQQDialogs();});
   $('#btn-qq-logs').addEventListener('click', toggleQQLogs);
-  // 「重新对接」按钮由 setCheck() 按需绑定（见 renderQQChecklist）
-  $('#btn-save-qq').addEventListener('click', async () => {
-    await saveConfig();
-    await loadConfig();
-    toast('已保存', 'ok');
-  });
   $('#btn-copy-ws').addEventListener('click', () => {
     const el = $('#qq-ws-url');
     copyText(el.textContent.trim(), $('#btn-copy-ws'));
@@ -1125,7 +1214,10 @@ function bind() {
   });
 
   // 设置
-  $('#btn-save-settings').addEventListener('click', saveConfig);
+  $$('[data-save-section]').forEach(btn=>btn.addEventListener('click',()=>saveSection(btn.dataset.saveSection)));
+  $$('[data-settings-section]').forEach(card=>{
+    for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
+  });
   $('#btn-phrolova-preset').addEventListener('click', async () => {
     try {
       const data = await api('/api/persona/profiles');
@@ -1134,13 +1226,14 @@ function bind() {
       $('#bot-persona').value = preset.default_persona;
       $('#persona-profile').value = preset.id;
       $('#persona-relationship').value = 'neutral';
-      toast('弗洛洛预设已填入，请保存设置应用', 'ok');
+      markSectionDirty('persona');
+      toast('弗洛洛预设已填入，请点本卡片的保存人格设置', 'ok');
     } catch (error) { toast('预设读取失败：' + error.message, 'err'); }
   });
 
   // 键盘
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') $('#memory-modal').hidden = true;
+    if (e.key === 'Escape') { $('#memory-modal').hidden = true; closeQQDialogs(); }
   });
 }
 
@@ -1261,6 +1354,7 @@ async function loginAdmin() {
 
 async function init() {
   bind();
+  bindOnboarding();
   await initDesktop();          // 桌面版才生效，浏览器里直接跳过
   const authCheck = await fetch('/api/config');
   if (authCheck.status === 401) {
@@ -1269,14 +1363,19 @@ async function init() {
     throw new Error(`HTTP ${authCheck.status}`);
   }
   await loadConfig();
+  await loadStorage();
+  const onboarding = await refreshOnboarding();
   // 支持通过 #memory / #messages 等直达页面
   const hash = location.hash.replace('#', '');
-  if (hash && PAGE_META[hash]) switchPage(hash);
+  if (onboarding.shouldOpen) switchPage('guide');
+  else if (hash && PAGE_META[hash]) switchPage(hash);
   await refreshStatus();
+  if(STATE.config.adapter.qq_enabled)refreshQQStatus();
   await loadRecent();
   STATE.pollTimer = setInterval(() => {
     refreshStatus();
-    if (STATE.page === 'overview') loadRecent();
+    if (STATE.page === 'overview') {loadRecent();if(STATE.config?.adapter.qq_enabled)refreshQQStatus();}
+    if (STATE.page === 'guide') {refreshOnboarding().catch(()=>{});if(GUIDE.state?.qqEnabled&&GUIDE.step>=3)refreshQQStatus();}
   }, 3000);
 }
 

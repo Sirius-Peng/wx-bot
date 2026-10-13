@@ -19,6 +19,9 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+import ssl
+import threading
+import certifi
 from urllib.parse import urlparse
 
 import httpx
@@ -71,6 +74,35 @@ def should_bypass_proxy(url: str) -> bool:
     return is_local_host(host)
 
 
+# Cache only immutable TLS configuration, never sockets/clients or event-loop state.
+# Re-reading the CA bundle on each local gateway call costs hundreds of ms on Windows.
+_TLS_CONTEXTS = {}
+_TLS_LOCK = threading.Lock()
+
+def _ca_revision(path):
+    try:
+        info = os.stat(path)
+        return (info.st_size, info.st_mtime_ns)
+    except OSError:
+        return None
+
+
+def verified_context(trust_env=True):
+    cafile = os.environ.get('SSL_CERT_FILE') if trust_env else None
+    capath = os.environ.get('SSL_CERT_DIR') if trust_env and not cafile else None
+    if not cafile and not capath:
+        cafile = certifi.where()
+    key = (cafile, capath, _ca_revision(cafile or capath), os.environ.get('SSLKEYLOGFILE'))
+    with _TLS_LOCK:
+        if key not in _TLS_CONTEXTS:
+            context = ssl.create_default_context(cafile=cafile, capath=capath)
+            # Never downgrade certificate/hostname validation for a speed improvement.
+            if len(_TLS_CONTEXTS) >= 8:
+                _TLS_CONTEXTS.clear()
+            _TLS_CONTEXTS[key] = context
+        return _TLS_CONTEXTS[key]
+
+
 def make_client(url: str = "", timeout: float = 20.0) -> httpx.AsyncClient:
     """创建 HTTP 客户端。
 
@@ -80,6 +112,7 @@ def make_client(url: str = "", timeout: float = 20.0) -> httpx.AsyncClient:
     bypass = should_bypass_proxy(url) if url else False
     return httpx.AsyncClient(
         timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+        verify=verified_context(trust_env=not bypass),
         trust_env=not bypass,      # 关键：内网地址彻底忽略代理环境变量
         follow_redirects=True,
     )

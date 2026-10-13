@@ -107,6 +107,8 @@ def normalize_reply_text(text: str) -> str:
     return "\n".join(parts)
 
 
+from .conversation import ConversationChanged
+
 class DeliveryError(RuntimeError):
     """The model reply exists but transport acceptance failed; retain it for retry."""
 
@@ -139,6 +141,8 @@ class HumanLikeSender:
         await asyncio.sleep(self.human_delay(reply))
         try:
             msg_id = await self.adapter.send_text(chat_id, reply, at=at)
+        except ConversationChanged:
+            raise
         except Exception as exc:
             raise DeliveryError("完整回复尚未被接口接受") from exc
         return [msg_id]
