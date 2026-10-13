@@ -10,6 +10,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { app } = require('electron');
+const { spawnSync } = require('child_process');
 
 /** 是否运行在打包后的应用里 */
 const isPackaged = () => app.isPackaged;
@@ -53,7 +54,8 @@ function resolveBackend() {
 
   // 开发态：用仓库根目录的 Python 跑
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const py = process.env.WXBOT_PYTHON || findSystemPython();
+  const py = findSystemPython();
+  if (!py) return { kind: 'missing', command: null, args: [], expected: 'Python 3.10+' };
   return {
     kind: 'python',
     command: py,
@@ -64,24 +66,23 @@ function resolveBackend() {
 
 /** 依次尝试常见的 Python 解释器路径 */
 function findSystemPython() {
-  const candidates = [
-    process.env.WXBOT_PYTHON,
-    path.resolve(__dirname, '..', '..', '..', '.venv', 'bin', 'python3'),
-    path.resolve(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe'),
-    '/opt/homebrew/bin/python3',
-    '/usr/local/bin/python3',
-    '/usr/bin/python3',
-    'python3',
-    'python',
-  ].filter(Boolean);
-
-  for (const c of candidates) {
+  const root = path.resolve(__dirname, '..', '..', '..');
+  const candidates = [process.env.WXBOT_PYTHON,
+    ...(process.platform === 'win32'
+      ? [path.join(root, '.venv', 'Scripts', 'python.exe'), 'python', 'py', 'python3']
+      : [path.join(root, '.venv', 'bin', 'python3'), '/opt/homebrew/bin/python3',
+         '/usr/local/bin/python3', '/usr/bin/python3', 'python3', 'python'])].filter(Boolean);
+  for (const candidate of candidates) {
     try {
-      if (c.includes(path.sep) && !fs.existsSync(c)) continue;
-      return c;
-    } catch (_) { /* 忽略，继续找下一个 */ }
+      if (candidate.includes(path.sep) && !fs.existsSync(candidate)) continue;
+      const result = spawnSync(candidate, ['-c',
+        'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'], {
+        timeout: 5000, windowsHide: true, stdio: 'ignore',
+      });
+      if (!result.error && result.status === 0) return candidate;
+    } catch (_) { }
   }
-  return 'python3';
+  return null;
 }
 
 /** 前端静态资源目录（复用仓库里已有的 src/web） */

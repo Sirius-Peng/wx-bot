@@ -20,13 +20,14 @@ services:
       dockerfile: Dockerfile
     container_name: wxbot-app
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - TZ=Asia/Shanghai
       - WXBOT_HOST=0.0.0.0
       - WXBOT_PORT=8000
       - WXBOT_DATA_DIR=/app/data
       - WXBOT_NO_BROWSER=1
+      - WXBOT_ADMIN_TOKEN=${WXBOT_ADMIN_TOKEN:-}
     volumes:
       - ./data:/app/data
       # ── 要用「一键部署 QQ 网关」时再打开下面这行 ──────────────

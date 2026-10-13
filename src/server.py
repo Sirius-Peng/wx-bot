@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -26,6 +28,8 @@ from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .core.admin_auth import AdminAuth
+from .core.personality import public_profiles
 from .config_store import AppConfig, ConfigStore
 from .runtime import BotRuntime
 
@@ -66,6 +70,7 @@ PORT = int(os.environ.get("WXBOT_PORT", "8000"))
 
 config_store = ConfigStore(DATA_DIR / "config.json")
 runtime = BotRuntime(config_store, DATA_DIR)
+admin_auth = AdminAuth(DATA_DIR, HOST)
 
 
 @asynccontextmanager
@@ -77,6 +82,8 @@ async def lifespan(app: FastAPI):
     # 若上次是运行状态，尝试自动恢复
     # ⚠️ 自动启动失败不能拖垮服务 —— 用户可能还没配完，需要在界面里手动启动
     cfg = config_store.load()
+    if cfg.llm.primary_key and cfg.bot.memory_enabled:
+        runtime.start_learning()
     if cfg.llm.primary_key and (cfg.adapter.wechat_enabled or cfg.adapter.qq_enabled):
         try:
             res = await runtime.start()
@@ -90,13 +97,42 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="微信 AI 助手", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def protect_management(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        if not admin_auth.same_origin(request):
+            return JSONResponse({"ok": False, "message": "请求来源不匹配"}, status_code=403)
+        if request.url.path != "/api/auth/login" and not admin_auth.authenticated(request):
+            return JSONResponse({"ok": False, "message": "请先登录管理界面"}, status_code=401)
+    return await call_next(request)
+
+
+@app.post("/api/auth/login")
+async def api_admin_login(request: Request) -> Response:
+    try:
+        body = await request.json()
+        token = body.get("token", "")
+    except (ValueError, AttributeError):
+        token = ""
+    if not isinstance(token, str) or not admin_auth.matches(token):
+        return JSONResponse({"ok": False, "message": "管理 Token 不正确"}, status_code=401)
+    response = JSONResponse({"ok": True})
+    admin_auth.set_cookie(request, response)
+    return response
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  页面
 # ═══════════════════════════════════════════════════════════════════
 
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+async def index(request: Request) -> FileResponse:
+    response = FileResponse(WEB_DIR / "index.html")
+    if admin_auth.can_bootstrap(request):
+        admin_auth.set_cookie(request, response)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return response
 
 
 if WEB_DIR.exists():
@@ -326,6 +362,11 @@ async def api_memory_stats() -> dict:
     return runtime.memory_stats()
 
 
+@app.post("/api/memory/learning/retry")
+async def api_memory_retry() -> dict:
+    return runtime.memory_retry_learning()
+
+
 @app.post("/api/memory")
 async def api_memory_add(request: Request) -> dict:
     b = await request.json()
@@ -366,6 +407,11 @@ async def api_docker_prepare() -> dict:
 #  配置
 # ═══════════════════════════════════════════════════════════════════
 
+@app.get("/api/persona/profiles")
+async def api_persona_profiles() -> dict:
+    return {"profiles": public_profiles()}
+
+
 @app.get("/api/config")
 async def api_get_config() -> dict:
     return config_store.masked(config_store.load())
@@ -382,8 +428,10 @@ async def api_put_config(request: Request) -> dict:
     old = config_store.load()
     cfg = _merge_config(old, incoming)
     config_store.save(cfg)
-    runtime.cfg = cfg
-    return {"ok": True, "message": "配置已保存"}
+    requires_restart = runtime.apply_config(cfg)
+    return {"ok": True, "requires_restart": requires_restart,
+            "message": ("配置已保存，通道设置将在重启机器人后生效"
+                        if requires_restart else "配置已保存并应用")}
 
 
 def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
@@ -417,6 +465,21 @@ async def api_messages(limit: int = 100, chat_id: str = "",
 async def api_clear_messages() -> dict:
     runtime.log.clear()
     return {"ok": True}
+
+
+@app.post("/api/app/shutdown")
+async def api_app_shutdown(request: Request) -> Response:
+    try:
+        local = bool(request.client and ipaddress.ip_address(request.client.host).is_loopback)
+    except ValueError:
+        local = False
+    if not local:
+        return JSONResponse({"ok": False, "message": "仅本机可关闭桌面后台"}, status_code=403)
+    server = getattr(app.state, "desktop_server", None)
+    if server is None:
+        return JSONResponse({"ok": False, "message": "当前后台未由桌面入口托管"}, status_code=503)
+    asyncio.get_running_loop().call_later(0.05, setattr, server, "should_exit", True)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/healthz")
@@ -453,7 +516,10 @@ def main() -> None:
             webbrowser.open(url)
         except Exception:
             pass
-    uvicorn.run(app, host=HOST, port=port, log_level="info", access_log=False)
+    server = uvicorn.Server(uvicorn.Config(
+        app, host=HOST, port=port, log_level="info", access_log=False))
+    app.state.desktop_server = server
+    server.run()
 
 
 if __name__ == "__main__":

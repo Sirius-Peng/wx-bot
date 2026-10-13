@@ -1,7 +1,6 @@
-"""拟人化发送器 —— 限流 + 随机延迟 + 语义分段。
+"""完整回复发送器 —— 限流 + 延迟 + 普通聊天格式整理。
 
-微信风控特征非常明确：固定间隔、高频、大段文本。
-这个模块的职责就是把机器人的行为"伪装"成真人打字节奏。
+模型可以流式生成，但聊天端只发送完整的一条回复，不将 token 流拆成气泡。
 """
 from __future__ import annotations
 
@@ -14,10 +13,11 @@ from collections import defaultdict
 # ── 风控红线 ──────────────────────────────────────────────
 GLOBAL_RPM = 20        # 单账号全局上限：20 条/分钟
 CHAT_RPM = 2           # 单会话上限：2 条/分钟（最关键的红线）
-MAX_SEG_LEN = 800      # 单条消息最大长度，超出按语义切分
+MAX_SEG_LEN = 800      # 仅供旧分段工具使用；默认回复不按此长度拆分
 
-# 句子边界（中英文标点）
-BOUNDARY = re.compile(r"[。！？；\n]|[.!?;]\s")
+# 保留确有用途的代码、列表、引用、标题和表格格式。
+STRUCTURED_LINE = re.compile(r"^(?:\s*(?:[-*+•]\s+|\d+[.)]\s+|\d+、|[一二三四五六七八九十]+、|#{1,6}\s+|>\s*|\|)| {4}|\t)")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class TokenBucket:
@@ -44,69 +44,115 @@ class TokenBucket:
 
 def split_by_semantics(text: str, max_len: int = MAX_SEG_LEN) -> list[str]:
     """按标点语义切分长文本，避免把句子拦腰截断。"""
+    if max_len < 1:
+        raise ValueError("max_len must be positive")
     text = text.strip()
     if len(text) <= max_len:
         return [text] if text else []
 
     segs, cur = [], ""
     for piece in re.split(r"(?<=[。！？；\n])", text):
-        if len(cur) + len(piece) > max_len and cur:
-            segs.append(cur.strip())
-            cur = piece
-        else:
-            cur += piece
-    if cur.strip():
-        segs.append(cur.strip())
-    return segs
+        if cur and len(cur) + len(piece) > max_len:
+            segs.append(cur)
+            cur = ""
+        while len(piece) > max_len:
+            segs.append(piece[:max_len])
+            piece = piece[max_len:]
+        cur += piece
+    if cur:
+        segs.append(cur)
+    return [s for s in segs if s.strip()]
+
+
+def normalize_reply_text(text: str) -> str:
+    """合并普通段落的软换行；代码和结构化内容保留必要换行。
+
+    不修改代码块正文，不按长度截断文本，不把英文单词拼在一起。
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    parts: list[str] = []
+    prose: list[str] = []
+    fence_char = ""
+    fence_length = 0
+
+    def flush_prose() -> None:
+        if prose:
+            paragraph = " ".join(prose)
+            # 中文句子间的换行合并后无需额外空格；英文仍保留单词分隔。
+            paragraph = re.sub(r"(?<=[\u4e00-\u9fff，。！？；：、]) (?=[\u4e00-\u9fff])",
+                               "", paragraph)
+            parts.append(paragraph)
+            prose.clear()
+
+    for line in text.strip("\n").split("\n"):
+        if fence_char:
+            parts.append(line)  # 代码正文的缩进、空行和尾部空格都不改。
+            if re.fullmatch(r" {0,3}" + re.escape(fence_char) +
+                            "{" + str(fence_length) + r",}\s*", line):
+                fence_char = ""
+            continue
+        fence = FENCE.match(line)
+        if fence:
+            flush_prose()
+            marker = fence.group(1)
+            fence_char, fence_length = marker[0], len(marker)
+            parts.append(line.rstrip())
+        elif line.strip() and STRUCTURED_LINE.match(line):
+            flush_prose()
+            parts.append(line.rstrip())
+        elif line.strip():
+            prose.append(line.strip())
+        # 普通文本的空行不产生新消息或多余段落。
+    flush_prose()
+    return "\n".join(parts)
+
+
+class DeliveryError(RuntimeError):
+    """The model reply exists but transport acceptance failed; retain it for retry."""
 
 
 class HumanLikeSender:
     """带限流与拟人化延迟的发送器。"""
 
-    def __init__(self, adapter, global_rpm: int = GLOBAL_RPM, chat_rpm: int = CHAT_RPM):
+    def __init__(self, adapter, global_rpm: int | None = None, chat_rpm: int | None = None):
         self.adapter = adapter
-        self.global_bucket = TokenBucket(global_rpm)
-        self.chat_buckets: dict[str, TokenBucket] = defaultdict(lambda: TokenBucket(chat_rpm))
+        # 官方机器人通道用独立的有界限流；不继承旧个人号的30秒等待。
+        ilink = getattr(adapter, "platform", "") == "ilink"
+        global_rpm = global_rpm if global_rpm is not None else (60 if ilink else GLOBAL_RPM)
+        chat_rpm = chat_rpm if chat_rpm is not None else (30 if ilink else CHAT_RPM)
+        self.global_bucket = TokenBucket(global_rpm, capacity=2 if ilink else None)
+        self.chat_buckets: dict[str, TokenBucket] = defaultdict(
+            lambda: TokenBucket(chat_rpm, capacity=2 if ilink else None))
 
     @staticmethod
     def human_delay(text: str) -> float:
-        """模拟真人打字：基础 1.5s + 每字 0.03s + 0~2.5s 随机抖动。"""
-        return 1.5 + 0.03 * len(text) + random.uniform(0, 2.5)
+        """兼容旧延迟钩子；默认即时提交，不人为模拟打字。"""
+        return 0.0
 
     async def send(self, chat_id: str, text: str, at: list[str] | None = None) -> list[str]:
-        """发送文本，自动分段 + 限流 + 拟人延迟。返回各段 msg_id。"""
-        if not text.strip():
+        """限流后一次发送完整文本；不按句子、换行或 800 字阈值拆消息。"""
+        reply = normalize_reply_text(text)
+        if not reply.strip():
             return []
-
-        msg_ids: list[str] = []
-        segs = split_by_semantics(text)
-        for i, seg in enumerate(segs):
-            await self.global_bucket.acquire()
-            await self.chat_buckets[chat_id].acquire()
-            await asyncio.sleep(self.human_delay(seg))
-            # 只有第一段带 @，避免每段都 @ 打扰用户
-            mention = at if i == 0 else None
-            msg_id = await self.adapter.send_text(chat_id, seg, at=mention)
-            msg_ids.append(msg_id)
-        return msg_ids
+        await self.global_bucket.acquire()
+        await self.chat_buckets[chat_id].acquire()
+        await asyncio.sleep(self.human_delay(reply))
+        try:
+            msg_id = await self.adapter.send_text(chat_id, reply, at=at)
+        except Exception as exc:
+            raise DeliveryError("完整回复尚未被接口接受") from exc
+        return [msg_id]
 
     async def stream_send(self, chat_id: str, stream, first_threshold: int = 20,
                           next_threshold: int = 80, at: list[str] | None = None) -> str:
-        """流式分段发送：首段阈值低（快速给反馈），后续按句子边界切。
+        """接收完整模型流，再一次发送；归档文本与用户收到的内容一致。
 
-        微信没有原生流式消息，这是最接近流式体验的落地方式。
-
-        `at` 只在**第一段**生效 —— 群聊里 @ 提问者一次就够，
-        每段都 @ 会刷屏打扰群成员。
+        first_threshold / next_threshold 仅保留旧调用兼容，不再触发提前发送。
+        生成中途失败时尚未发出任何内容，交由编排层发送一条失败提示。
         """
-        buffer, full, first = "", "", True
-        async for chunk in stream:
-            buffer += chunk
-            full += chunk
-            threshold = first_threshold if first else next_threshold
-            if len(buffer) >= threshold and BOUNDARY.search(buffer):
-                await self.send(chat_id, buffer.strip(), at=at if first else None)
-                buffer, first = "", False
-        if buffer.strip():
-            await self.send(chat_id, buffer.strip(), at=at if first else None)
-        return full
+        chunks = [chunk async for chunk in stream]
+        reply = normalize_reply_text("".join(chunks))
+        if not reply.strip():
+            raise ValueError("模型返回空回复")
+        await self.send(chat_id, reply, at=at)
+        return reply

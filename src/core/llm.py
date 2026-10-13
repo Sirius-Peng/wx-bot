@@ -49,14 +49,22 @@ class LLMGateway:
         self.primary = primary
         self.fallback = fallback
         self.usage_sink = usage_sink       # 可注入 DB 写入回调
-        self._clients: dict[str, "AsyncOpenAI"] = {}
+        self._clients: dict[tuple, "AsyncOpenAI"] = {}
 
     def _client(self, cfg: ProviderCfg):
-        if cfg.name not in self._clients:
-            self._clients[cfg.name] = AsyncOpenAI(
-                api_key=cfg.api_key, base_url=cfg.base_url, timeout=cfg.timeout
+        # 配置热更新后不能继续复用旧地址/旧 Key 的客户端。
+        key = (cfg.name, cfg.base_url, cfg.api_key, cfg.timeout)
+        if key not in self._clients:
+            self._clients[key] = AsyncOpenAI(
+                api_key=cfg.api_key, base_url=cfg.base_url, timeout=cfg.timeout,
+                max_retries=0
             )
-        return self._clients[cfg.name]
+        return self._clients[key]
+
+    async def aclose(self) -> None:
+        clients, self._clients = self._clients, {}
+        await asyncio.gather(*(c.close() for c in clients.values()),
+                             return_exceptions=True)
 
     async def chat(self, messages: list[dict], chat_id: str = "",
                    cfg: Optional[ProviderCfg] = None) -> str:
@@ -72,17 +80,33 @@ class LLMGateway:
 
     async def stream(self, messages: list[dict], chat_id: str = "",
                      cfg: Optional[ProviderCfg] = None) -> AsyncIterator[str]:
-        """流式调用。微信无原生流式，由 ReplyPlanner 分段发送。"""
+        """流式调用。微信收集完整流后一次发送，不拆气泡。"""
         cfg = cfg or self.primary
-        client = self._client(cfg)
-        stream = await client.chat.completions.create(
-            model=cfg.model, messages=messages, stream=True,
-            max_tokens=cfg.max_tokens, temperature=cfg.temperature,
-        )
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content if chunk.choices else None
-            if delta:
-                yield delta
+        emitted = False
+        stream = None
+        try:
+            client = self._client(cfg)
+            stream = await client.chat.completions.create(
+                model=cfg.model, messages=messages, stream=True,
+                max_tokens=cfg.max_tokens, temperature=cfg.temperature,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    emitted = True
+                    yield delta
+        except Exception as e:
+            # 已经开始输出时不拼接另一模型的回答，避免重复/矛盾回复。
+            fallback = self.fallback
+            if not emitted and fallback and cfg is not fallback:
+                await self._report_error(cfg, e)
+                async for delta in self.stream(messages, chat_id, cfg=fallback):
+                    yield delta
+            else:
+                raise
+        finally:
+            if stream is not None and hasattr(stream, "close"):
+                await stream.close()
 
     async def complete(self, prompt: str, max_tokens: int = 256) -> str:
         """单轮补全，用于摘要/判定等内部任务（走便宜模型）。"""

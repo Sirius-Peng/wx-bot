@@ -107,17 +107,17 @@ npm run build:backend:win    # Windows
 npm run pack:mac      # 产出 .dmg（arm64）
 npm run pack:mac:x64  # 产出 .dmg（Intel Mac 用）
 npm run pack:win      # 产出 NSIS 安装包 + 免安装 exe
-npm run pack:all      # mac(arm64) + win
+npm run pack:all      # 当前系统的原生平台包
 ```
 
 产物在 `desktop/dist/`：
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS | `WxBot-1.0.0-macOS-arm64.dmg` | Apple Silicon，拖进 Applications 即可 |
-| macOS | `WxBot-1.0.0-macOS-x64.dmg` | Intel Mac（需用 `pack:mac:x64`） |
-| Windows | `微信AI助手-Setup-1.0.0.exe` | 安装向导，可自选目录 |
-| Windows | `微信AI助手-1.0.0-portable.exe` | 免安装单文件 |
+| macOS | `WxBot-1.3.6-macOS-arm64.dmg` | Apple Silicon，拖进 Applications 即可 |
+| macOS | `WxBot-1.3.6-macOS-x64.dmg` | Intel Mac（需用 `pack:mac:x64`） |
+| Windows | `WxBot-1.3.6-Windows-x64-Setup.exe` | 安装向导，可自选目录 |
+| Windows | `WxBot-1.3.6-Windows-x64-Portable.exe` | 免安装单文件 |
 
 > **跨平台限制**：macOS 上只能打 mac 包，Windows 上只能打 win 包。要同时出两个平台的包，需要在对应系统上分别执行（或用 CI）。
 
@@ -255,8 +255,8 @@ app.on('window-all-closed', () => {
 ② 桌面应用打包
    $ npm run pack:mac
    • packaging  platform=darwin arch=arm64 electron=36.9.5
-   • building   target=DMG arch=arm64 file=dist/WxBot-1.0.0-macOS-arm64.dmg
-   ✓ dist/WxBot-1.0.0-macOS-arm64.dmg（124M）
+   • building   target=DMG arch=arm64 file=dist/WxBot-1.3.6-macOS-arm64.dmg
+   ✓ dist/WxBot-1.3.6-macOS-arm64.dmg（124M）
    ✓ dist/mac-arm64/微信AI助手.app
 
 ③ 打包产物核查
@@ -277,3 +277,14 @@ app.on('window-all-closed', () => {
    ✓ Python 后端 sidecar —— arm64
    架构校验通过 —— 可以分发
 ```
+
+
+## Windows原生发布（v1.3.6）
+
+```powershell
+cd desktop
+npm ci
+npm run pack:win
+```
+
+输出`WxBot-1.3.6-Windows-x64-Setup.exe`及`WxBot-1.3.6-Windows-x64-Portable.exe`。必须在Windows上构建Python侧后端，macOS sidecar不能放入Windows安装包。PowerShell构建脚本支持有空格的Python/工程路径，并在任一步失败时退出。退出/重启使用认证本机关闭接口；Windows兜底只清理该后端的PID进程树。
