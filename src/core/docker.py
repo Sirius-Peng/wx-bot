@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -621,9 +622,111 @@ class DockerManager:
             finally:
                 await asyncio.to_thread(_run, [st.cli_path, "rm", "-f", helper], 60)
 
+            # 已登录过的账号会有一份 onebot11_<qq>.json 且优先生效，
+            # 只写 onebot11.json 是不够的 —— 顺手把旧文件里的地址一起改掉
+            await self.sync_napcat_ws_url(ws_url)
+
             return {"ok": True, "message": "配置已预置"}
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    #: 只允许这种形态的反向 WS 地址进入 shell（防注入）
+    _WS_URL_RE = re.compile(r"^wss?://[A-Za-z0-9._:\-]+(?::\d+)?/[A-Za-z0-9._/\-]*$")
+
+    async def sync_napcat_ws_url(self, ws_url: str) -> dict:
+        """把 NapCat 配置里的反向 WS 地址改成当前后端地址。
+
+        ⚠️ 这是真实踩过的坑：桌面版**每次启动都会挑一个空闲端口**
+        （见 desktop/src/main/backend.js 的 findFreePort），而反向 WS 地址是
+        **部署那一刻**写进 NapCat 配置的。只要下次启动换了端口，
+        网关就会一直去连一个早已没人监听的端口 ——
+        表现为「QQ 一条消息都收不到」，而界面上却显示"已连接"（HTTP 探测是通的）。
+
+        还有一个更隐蔽的点：NapCat 登录后会生成**每个账号一份**的配置
+        `onebot11_<qq>.json`，它**优先于** `onebot11.json`。
+        只改通用的那份是没用的，必须把所有 onebot11*.json 一起改。
+        """
+        if not self._WS_URL_RE.match(ws_url or ""):
+            return {"ok": False, "changed": False,
+                    "message": f"反向 WS 地址不合法：{ws_url!r}"}
+
+        st = self.detect()
+        if not st.installed or not st.running:
+            return {"ok": False, "changed": False, "message": "Docker 未运行"}
+
+        helper = "wxbot-cfg-helper"
+        await asyncio.to_thread(_run, [st.cli_path, "rm", "-f", helper], 60)
+        code, _, err = await asyncio.to_thread(_run, [
+            st.cli_path, "run", "-d", "--name", helper,
+            "-v", f"{NAPCAT_CONFIG_VOLUME}:/dst",
+            "alpine:latest", "sleep", "120",
+        ], 120)
+        if code != 0:
+            return {"ok": False, "changed": False,
+                    "message": f"创建临时容器失败：{err[:200]}"}
+
+        try:
+            # ① 先看现在写的是什么（一个文件都没有 = 还没部署过，无需同步）
+            code, out, _ = await asyncio.to_thread(_run, [
+                st.cli_path, "exec", helper, "sh", "-c",
+                "grep -h -o 'ws://[^\"]*' /dst/onebot11*.json 2>/dev/null | sort -u",
+            ], 60)
+            old_urls = [x.strip() for x in out.splitlines() if x.strip()]
+            if not old_urls:
+                return {"ok": True, "changed": False,
+                        "message": "还没有 NapCat 配置，无需同步"}
+            if old_urls == [ws_url]:
+                return {"ok": True, "changed": False, "url": ws_url,
+                        "message": "反向 WS 地址已是最新"}
+
+            # ② 改所有 onebot11*.json（含每个账号一份的配置）
+            code, _, err = await asyncio.to_thread(_run, [
+                st.cli_path, "exec", helper, "sh", "-c",
+                f"sed -i 's|\"url\": \"ws://[^\"]*\"|\"url\": \"{ws_url}\"|g' "
+                "/dst/onebot11*.json",
+            ], 60)
+            if code != 0:
+                return {"ok": False, "changed": False,
+                        "message": f"写入配置失败：{err[:200]}"}
+
+            # ③ 校验：凡是原本有 ws 地址的文件，现在都必须指向新地址
+            code, out, err = await asyncio.to_thread(_run, [
+                st.cli_path, "exec", helper, "sh", "-c",
+                f"grep -l '\"{ws_url}\"' /dst/onebot11*.json 2>/dev/null | wc -l; "
+                "grep -h -o 'ws://[^\"]*' /dst/onebot11*.json 2>/dev/null | sort -u",
+            ], 60)
+            lines = [x.strip() for x in out.splitlines() if x.strip()]
+            if not lines or not lines[0].isdigit() or int(lines[0]) < 1:
+                return {"ok": False, "changed": False,
+                        "message": f"配置写入后校验失败（{out.strip()[:150]}）"}
+            remaining = lines[1:]
+            if any(u != ws_url for u in remaining):
+                return {"ok": False, "changed": False,
+                        "message": f"仍有旧地址未被替换：{remaining}"}
+        finally:
+            await asyncio.to_thread(_run, [st.cli_path, "rm", "-f", helper], 60)
+
+        # ④ NapCat 只在启动时读配置 → 必须重启容器才生效
+        restarted = False
+        code, out, _ = await asyncio.to_thread(_run, [
+            st.cli_path, "ps", "--filter", f"name=^{NAPCAT_CONTAINER}$",
+            "--format", "{{.Names}}"], 30)
+        if code == 0 and out.strip() == NAPCAT_CONTAINER:
+            self._set_task(running=True, stage="napcat", progress=50,
+                           message="正在让 QQ 网关重新连接…", error="", needsUser=False)
+            await asyncio.to_thread(_run, [st.cli_path, "restart", NAPCAT_CONTAINER], 180)
+            restarted = True
+            self._set_task(running=False, stage="waiting_login", progress=100,
+                           message="QQ 网关已重新连接")
+
+        log.info("NapCat 反向 WS 地址已同步为 %s（旧：%s，重启容器=%s）",
+                 ws_url, old_urls, restarted)
+        msg = "已让 QQ 网关连到当前端口"
+        if restarted:
+            # ⚠️ 重启容器可能掉 QQ 登录态（实测过），必须提前说清楚
+            msg += "并重启了网关；若 QQ 提示未登录，请重新扫码一次"
+        return {"ok": True, "changed": True, "restarted": restarted, "url": ws_url,
+                "oldUrls": old_urls, "message": msg}
 
     async def ensure_napcat(self, webui_token: str, ws_url: str,
                             extra_hosts: bool = True) -> dict:

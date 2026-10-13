@@ -86,6 +86,9 @@ class OneBotAdapter(BaseAdapter):
 
         # 反向 WS 连接（网关连过来的）
         self._ws: Any = None
+        # 最近一次收到事件的时间（毫秒）—— 用来判断"网关到底有没有在推消息"
+        self.last_event_at: int = 0
+        self.event_count: int = 0
         # 群名片缓存：群号 -> {qq: 群名片}
         self._card_cache: dict[str, dict[str, str]] = {}
 
@@ -132,11 +135,23 @@ class OneBotAdapter(BaseAdapter):
             self._ws = None
             log.info("OneBot 反向 WebSocket 已断开")
 
+    @property
+    def reverse_ws_connected(self) -> bool:
+        """反向 WS 是否在线。
+
+        ⚠️ 这个值和"HTTP 接口能通"是两回事：
+        HTTP 通只说明网关活着，**不代表它把消息推过来了**。
+        反向 WS 没连上时，QQ 消息一条都收不到，界面必须把这点暴露出来。
+        """
+        return self._ws is not None
+
     async def handle_event(self, event: dict) -> None:
         """处理一条 OneBot 事件（来自 WS 或 HTTP POST）。
 
         只关心消息事件；通知/请求/元事件仅记录日志。
         """
+        self.last_event_at = int(time.time() * 1000)
+        self.event_count += 1
         post_type = event.get("post_type")
 
         if post_type == "message":

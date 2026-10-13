@@ -42,10 +42,18 @@ BASE = f"http://127.0.0.1:{PORT}"
 PERSONA = "你是一只测试用的猫娘助手，每次回答都必须以「喵」结尾。"
 INBOUND_TEXT = "你好呀"
 CTX_TOKEN = "ctx-token-abc123"
+BOT_ID = "bot_abc@im.bot"                    # 机器人自己（@im.bot 命名空间）
+OWNER_ID = "user_abc@im.wechat"              # 扫码绑定它的那个人（@im.wechat）
 
 # 假服务端记录下来的请求
 REC: dict = {"chat": [], "sent": [], "getupdates": 0, "notify": []}
 _updates_served = False
+
+
+def st2_bot_id(runtime) -> str:
+    """取当前 iLink 适配器认定的"机器人自己的 id"。"""
+    a = getattr(runtime, "wechat_adapter", None)
+    return getattr(a, "bot_id", "") or ""
 
 
 def build_fake_server() -> FastAPI:
@@ -81,7 +89,7 @@ def build_fake_server() -> FastAPI:
             "msgs": [{
                 "message_id": "msg-1",
                 "message_type": 1,             # 用户发来的
-                "from_user_id": "user_abc",
+                "from_user_id": OWNER_ID,
                 "create_time_ms": int(time.time() * 1000),
                 "context_token": CTX_TOKEN,
                 "item_list": [{"type": 1, "text_item": {"text": INBOUND_TEXT}}],
@@ -181,9 +189,13 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
     state = data_dir / "ilink"
     state.mkdir(parents=True, exist_ok=True)
     (state / "account.json").write_text(json.dumps({
-        "bot_token": "fake-token",
+        # token 前缀就是机器人的 id（@im.bot 命名空间）
+        "bot_token": f"{BOT_ID}:fake-secret",
         "base_url": BASE,               # 指向假服务端
-        "bot_user_id": "bot_xyz",
+        "bot_id": BOT_ID,
+        "owner_user_id": OWNER_ID,
+        # 旧字段：早期版本把**扫码人**的 id 存在这里，回读时必须能识别出来
+        "bot_user_id": OWNER_ID,
     }), encoding="utf-8")
 
     store = ConfigStore(cfg_file)
@@ -214,6 +226,12 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
     check("iLink 长轮询在运行", st.get("ilink_polling") is True,
           f"ilink_polling={st.get('ilink_polling')}")
 
+    # ⚠️ 真实故障回归：扫码人的 id（@im.wechat）曾被当成机器人自己的 id，
+    #    导致他自己发的每条消息都被判成"机器人自身消息"直接丢弃。
+    check("从 token 推出了机器人自己的 id",
+          st.get("bot") is not None and st2_bot_id(runtime) == BOT_ID,
+          f"bot_id={st2_bot_id(runtime)}")
+
     check("收到并处理了入站消息", bool(REC["chat"]),
           f"getupdates 调用 {REC['getupdates']} 次，模型调用 {len(REC['chat'])} 次")
 
@@ -240,13 +258,24 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
               sent.get("context_token") == CTX_TOKEN,
               f"context_token={sent.get('context_token')!r}")
         check("回复发给了正确的会话",
-              sent.get("to_user_id") == "user_abc",
+              sent.get("to_user_id") == OWNER_ID,
               f"to_user_id={sent.get('to_user_id')!r}")
         check("回复内容非空",
               bool((sent.get("item_list") or [{}])[0].get("text_item", {}).get("text")),
               json.dumps(sent, ensure_ascii=False)[:160])
     else:
         check("回复已发出", False, "没有收到 sendmessage 调用")
+
+    # ⚠️ 真实故障回归：扫码绑定那个人的 id（@im.wechat）曾被当成机器人自己的 id，
+    #    于是他自己发的消息全被判成"机器人自身消息"、直接丢弃（界面上就是这么显示的）。
+    #    这里直接查消息日志里的判定结果 —— 与用户在界面上看到的是同一份数据。
+    inbound = [e for e in runtime.log.query(limit=20)
+               if e.get("direction") == "in"]
+    check("扫码人的消息按私聊正常放行（非「机器人自身消息」）",
+          bool(inbound) and inbound[0].get("trigger_layer") == "private"
+          and "自身消息" not in (inbound[0].get("trigger_reason") or ""),
+          (f"判定={inbound[0].get('trigger_layer')}/"
+           f"{inbound[0].get('trigger_reason')}") if inbound else "没有入站记录")
 
     stats = runtime.log.stats()
     check("消息日志记录了收发双方",

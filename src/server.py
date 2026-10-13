@@ -159,6 +159,10 @@ async def ws_onebot(websocket: WebSocket) -> None:
             return
 
     log.info("OneBot 反向 WebSocket 已连接")
+    # 让适配器记住这条连接：界面上要显示"网关有没有把消息推过来"
+    adapter0 = runtime.qq_adapter
+    if adapter0 is not None and hasattr(adapter0, "attach_ws"):
+        adapter0.attach_ws(websocket)
     warned = False
     try:
         while True:
@@ -255,6 +259,12 @@ async def api_qq_status() -> dict:
 async def api_qq_setup() -> dict:
     """一键部署 QQ 网关（NapCat Docker）。"""
     return await runtime.qq_setup()
+
+
+@app.post("/api/qq/sync-ws")
+async def api_qq_sync_ws() -> dict:
+    """让 QQ 网关重新连到当前端口（端口变了/收不到消息时点一下）。"""
+    return await runtime.qq_sync_ws_url()
 
 
 @app.post("/api/qq/stop")
@@ -431,6 +441,8 @@ def main() -> None:
     import uvicorn
 
     port = _pick_port(PORT)
+    # 端口可能顺延，必须告诉 runtime —— QQ 网关的反向 WS 地址要用它
+    runtime.set_http_port(port)
     url = f"http://{HOST}:{port}"
     if os.environ.get("WXBOT_NO_BROWSER") == "1":
         # 由 Electron 等外壳托管，不主动开浏览器

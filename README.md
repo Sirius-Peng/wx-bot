@@ -31,7 +31,7 @@
 
 | 平台 | 文件 |
 |---|---|
-| macOS（Apple Silicon） | `WxBot-1.3.0-macOS-arm64.dmg` |
+| macOS（Apple Silicon） | `WxBot-1.3.1-macOS-arm64.dmg` |
 | Windows | 需自行构建：`cd desktop && npm run build:backend && npm run pack:win` |
 
 > **首次打开提示"无法验证开发者"**：应用未配置代码签名证书。
@@ -161,6 +161,7 @@ QQ 群里机器人**只有被 @ 时才会回复**，其余消息一概不理。
 | 封号风险 | **无** | 视网关实现而定 |
 | 部署 | 扫码即用 | 程序一键部署 NapCat |
 | 消息接收方式 | **拉**：程序长轮询 `getUpdates` | **推**：网关反向 WS / HTTP 上报 |
+| 收不到消息时怎么查 | 「概览」看是否在运行；日志看 `ilink_polling` | 「接入设置」看**消息推送通道**那一行 |
 
 ---
 

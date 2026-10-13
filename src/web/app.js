@@ -85,16 +85,21 @@ function switchPage(name) {
   else stopConnectPolling();
 }
 
+// ⚠️ 必须先声明：删掉「Docker 面板」那段时把 let 声明一起删了，
+//    结果首次进入「接入设置」页就读到未声明变量 → ReferenceError，
+//    整页状态轮询起不来（界面一直显示"等待中"，控制台报错）。
+let connectPollTimer = null;
+
 function startConnectPolling() {
   stopConnectPolling();
   refreshQQStatus();
-  dockerPollTimer = setInterval(refreshQQStatus, 3000);
+  connectPollTimer = setInterval(refreshQQStatus, 3000);
 }
 
 function stopConnectPolling() {
-  if (dockerPollTimer) {
-    clearInterval(dockerPollTimer);
-    dockerPollTimer = null;
+  if (connectPollTimer) {
+    clearInterval(connectPollTimer);
+    connectPollTimer = null;
   }
   // 离开「接入设置」页要停掉扫码轮询，避免定时器泄漏
   stopQQLoginPolling();
@@ -633,6 +638,46 @@ function renderQQChecklist(st) {
   setCheck('qq-login',
     st.loggedIn ? 'ok' : (n.running ? 'err' : ''),
     st.loggedIn ? ('已登录 ' + (st.botQq || '')) : (n.running ? '未登录，请扫码' : '等待网关就绪'));
+
+  // 消息推送通道：HTTP 通 ≠ 消息能到。反向 WS 没连上时 QQ 消息一条都收不到，
+  // 而用户在界面上看不出任何异常 —— 所以单独列一行，并给出「重新对接」按钮。
+  const wsOk = !!st.reverseWsConnected;
+  const wsBusy = task.running && task.stage === 'napcat';
+  let wsDesc;
+  if (wsOk) {
+    const n2 = st.eventCount || 0;
+    wsDesc = '已连接 · ' + (n2 ? `已收到 ${n2} 个事件` : '等待事件');
+  } else if (wsBusy) {
+    wsDesc = '正在重新对接…';
+  } else if (n.running) {
+    wsDesc = '网关没有连过来（消息收不到），点右侧修复';
+  } else {
+    wsDesc = '等待网关就绪';
+  }
+  setCheck('qq-reverse-ws', wsOk ? 'ok' : (wsBusy ? 'busy' : (n.running ? 'err' : '')),
+           wsDesc,
+           (!wsOk && n.running && !wsBusy)
+             ? { label: '重新对接', action: syncQQWsUrl } : null);
+}
+
+/** 让网关重新连到当前端口（端口变了就会收不到消息）*/
+async function syncQQWsUrl() {
+  const box = $('#qq-test-status');
+  box.className = 'test-status';
+  box.innerHTML = '<div class="ts-line">正在重新对接…</div>';
+  try {
+    const r = await api('/api/qq/sync-ws', { method: 'POST' });
+    box.className = 'test-status ' + (r.ok ? 'ok' : 'err');
+    box.innerHTML = `<div class="ts-line"><span class="ts-icon">${r.ok ? '✓' : '✗'}</span>` +
+      `<span>${esc(r.message || '')}</span></div>` +
+      (r.ok ? '<div class="ts-hint">网关重连需要几秒，稍后这一项会变成「已连接」。' +
+        (r.restarted ? '若 QQ 提示未登录，请在上面重新扫码一次。' : '') + '</div>' : '');
+    toast(r.message || (r.ok ? '已重新对接' : '对接失败'), r.ok ? 'ok' : 'err');
+    await refreshQQStatus();
+  } catch (e) {
+    box.className = 'test-status err';
+    box.innerHTML = `<div class="ts-line"><span class="ts-icon">✗</span><span>失败：${esc(e.message)}</span></div>`;
+  }
 }
 
 function renderQQProgress(task) {
@@ -660,9 +705,13 @@ function renderQQBadge(st) {
   if (!badge) return;
   const n = st.napcat || {};
   const task = st.task || {};
-  if (st.loggedIn) { badge.className = 'wz-status ok'; badge.textContent = '已登录'; }
-  else if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '部署中…'; }
-  else if (n.running) { badge.className = 'wz-status warn'; badge.textContent = '待扫码'; }
+  if (task.running) { badge.className = 'wz-status warn'; badge.textContent = '部署中…'; }
+  // 登录了但推送通道没连上 = 收不到消息，不能显示成"一切正常"
+  else if (st.loggedIn && st.reverseWsConnected) {
+    badge.className = 'wz-status ok'; badge.textContent = '已登录';
+  } else if (st.loggedIn) {
+    badge.className = 'wz-status warn'; badge.textContent = '待对接';
+  } else if (n.running) { badge.className = 'wz-status warn'; badge.textContent = '待扫码'; }
   else { badge.className = 'wz-status'; badge.textContent = '待配置'; }
 }
 
@@ -984,6 +1033,7 @@ function bind() {
     await getQQQr();
   });
   $('#btn-qq-logs').addEventListener('click', toggleQQLogs);
+  // 「重新对接」按钮由 setCheck() 按需绑定（见 renderQQChecklist）
   $('#btn-save-qq').addEventListener('click', async () => {
     await saveConfig();
     await loadConfig();

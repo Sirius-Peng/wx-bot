@@ -34,7 +34,7 @@ from typing import Optional
 import httpx
 
 from .adapters.base import BaseAdapter
-from .adapters.ilink import ILinkAdapter
+from .adapters.ilink import ILinkAdapter, derive_bot_id
 from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore
 from .core.context import ContextManager
@@ -243,6 +243,10 @@ class BotRuntime:
 
         # iLink 是"拉"模型，必须由我们自己跑长轮询
         self._ilink_task: Optional[asyncio.Task] = None
+        # QQ 反向 WS 地址同步（端口每次启动都可能变）
+        self._qq_sync_task: Optional[asyncio.Task] = None
+        # 实际监听端口：由 server.main() 在端口顺延后回填（见 set_http_port）
+        self.http_port: int = 0
 
         self._login: dict = {"status": "idle", "qrcode": "", "image": "",
                              "uuid": "", "app_id": "", "message": "",
@@ -290,6 +294,10 @@ class BotRuntime:
                 results.append({"ok": True, "platform": "qq",
                                 "message": "QQ 通道已启动"})
                 log.info("QQ 通道已启动")
+                # ★ 必须把 NapCat 的反向 WS 地址同步成**当前**端口：
+                #   桌面版每次启动端口都可能变，地址却是部署时写死的 →
+                #   不同步就是"HTTP 探测正常，但一条 QQ 消息都收不到"
+                self._qq_sync_task = asyncio.create_task(self.qq_sync_ws_url())
             except Exception as e:
                 log.exception("QQ 通道启动失败")
                 results.append({"ok": False, "platform": "qq",
@@ -619,9 +627,15 @@ class BotRuntime:
         """NapCat 反向连过来的地址。
 
         容器内访问宿主机必须用 `host.docker.internal`（127.0.0.1 是容器自己）。
+        ⚠️ 端口必须用**实际监听的那个**：`_pick_port()` 在端口被占用时会顺延，
+        只用环境变量会写错地址。
         """
-        port = int(os.environ.get("WXBOT_PORT", "8000"))
+        port = self.http_port or int(os.environ.get("WXBOT_PORT", "8000"))
         return f"ws://host.docker.internal:{port}/ws/onebot"
+
+    def set_http_port(self, port: int) -> None:
+        """由 server.main() 告知实际监听端口（供 QQ 网关注册地址使用）。"""
+        self.http_port = int(port or 0)
 
     def _ensure_napcat_webui_token(self) -> str:
         cfg = self.config_store.load()
@@ -654,6 +668,12 @@ class BotRuntime:
             "loggedIn": False,
             "loginMessage": "",
         }
+        adapter = self.qq_adapter
+        st["wsUrl"] = self._napcat_ws_url()
+        st["reverseWsConnected"] = bool(
+            getattr(adapter, "reverse_ws_connected", False))
+        st["eventCount"] = int(getattr(adapter, "event_count", 0))
+        st["lastEventAt"] = int(getattr(adapter, "last_event_at", 0) or 0)
         if napcat.get("running") and cfg.adapter.onebot_http_url:
             try:
                 r = await self.test_onebot(cfg.adapter.onebot_http_url,
@@ -675,6 +695,26 @@ class BotRuntime:
             self.config_store.save(cfg)
             self.cfg = cfg
         return await self.docker.ensure_napcat(token, ws)
+
+    async def qq_sync_ws_url(self) -> dict:
+        """让 NapCat 的反向 WS 指向当前后端端口（幂等，可反复调用）。
+
+        ⚠️ 它会**改真实容器里的配置**（必要时重启容器）。自动化测试请设
+        `WXBOT_SKIP_NAPCAT_SYNC=1`，否则跑一次测试就会把用户网关的地址
+        改到测试端口上。
+        """
+        if os.environ.get("WXBOT_SKIP_NAPCAT_SYNC") == "1":
+            return {"ok": True, "changed": False, "skipped": True,
+                    "message": "已跳过网关地址同步（测试模式）"}
+        url = self._napcat_ws_url()
+        try:
+            r = await self.docker.sync_napcat_ws_url(url)
+        except Exception as e:
+            log.warning("同步 QQ 网关地址失败", exc_info=True)
+            return {"ok": False, "changed": False, "message": f"同步失败：{e}"}
+        if r.get("changed"):
+            log.info("QQ 网关地址已同步：%s", r.get("message"))
+        return r
 
     async def qq_login_qrcode(self) -> dict:
         return await self._webui_client().qrcode()
@@ -847,11 +887,18 @@ class BotRuntime:
         return {"ok": True, "status": "waiting", "message": "等待扫码…"}
 
     def _save_ilink_credentials(self, st: dict) -> bool:
-        """把官方返回的凭证写入 state_dir（ILinkAdapter 启动时会读它）。"""
+        """把官方返回的凭证写入 state_dir（ILinkAdapter 启动时会读它）。
+
+        ⚠️ 官方返回两个 id，含义完全不同，混用会导致"用户发消息被判成自发消息"：
+          ilink_bot_id  —— 机器人自己的 id（@im.bot），用于识别自己发的消息
+          ilink_user_id —— 扫码那个人的 id（@im.wechat），仅作展示
+        """
         token = st.get("bot_token")
         if not token:
             log.warning("官方接口未返回 bot_token，凭证未保存")
             return False
+        bot_id = st.get("ilink_bot_id") or derive_bot_id(token)
+        owner = st.get("ilink_user_id") or st.get("bot_user_id") or ""
         try:
             d = self._ilink_state_dir()
             d.mkdir(parents=True, exist_ok=True)
@@ -859,7 +906,10 @@ class BotRuntime:
             f.write_text(json.dumps({
                 "bot_token": token,
                 "base_url": st.get("baseurl") or "https://ilinkai.weixin.qq.com",
-                "bot_user_id": st.get("bot_user_id") or st.get("ilink_user_id") or "",
+                "bot_id": bot_id,
+                "owner_user_id": owner,
+                # 旧字段保留兼容：早期版本把 owner 存在这里
+                "bot_user_id": owner,
             }, ensure_ascii=False, indent=2), encoding="utf-8")
             os.chmod(f, 0o600)
             log.info("官方 iLink 凭证已保存到 %s", f)
@@ -877,8 +927,11 @@ class BotRuntime:
             d = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             return {"loggedIn": False}
-        return {"loggedIn": bool(d.get("bot_token")),
-                "botUserId": d.get("bot_user_id") or ""}
+        token = d.get("bot_token") or ""
+        bot_id = d.get("bot_id") or derive_bot_id(token)
+        return {"loggedIn": bool(token),
+                "botId": bot_id,
+                "ownerUserId": d.get("owner_user_id") or d.get("bot_user_id") or ""}
 
     # ── 扫码登录入口 ──────────────────────────────────────────
 

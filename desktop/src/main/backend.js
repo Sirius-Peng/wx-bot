@@ -16,18 +16,32 @@ const { EventEmitter } = require('events');
 
 const P = require('./paths');
 
-/** 找一个空闲端口（避免与用户其他程序冲突） */
-function findFreePort() {
-  return new Promise((resolve, reject) => {
+/** 尽量占住指定端口；被占用则返回 null */
+function tryPort(port) {
+  return new Promise((resolve) => {
     const srv = net.createServer();
     srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address();
+    srv.on('error', () => resolve(null));
+    srv.listen(port, '127.0.0.1', () => {
       srv.close(() => resolve(port));
     });
   });
 }
+
+/** 让系统随便给一个空闲端口 */
+function findFreePort() {
+  return tryPort(0);
+}
+
+/** 后端默认端口。
+ *
+ *  ⚠️ 为什么不能每次都随机：QQ 网关（NapCat）里的**反向 WebSocket 地址**
+ *  是写在它自己配置里的，指向"后端所在端口"。端口每次变，网关就会去连一个
+ *  没人监听的端口 —— QQ 消息一条都收不到（HTTP 探测却是通的，界面显示正常）。
+ *  而让 NapCat 重新读配置需要重启容器，重启容器会**掉登录态、要重新扫码**。
+ *  所以这里优先固定端口，只有确实被占用时才退化成随机端口。
+ */
+const PREFERRED_PORT = Number(process.env.WXBOT_PREFERRED_PORT || 17800);
 
 /** 探测后端是否已就绪 */
 function probe(port, timeoutMs = 1500) {
@@ -98,7 +112,8 @@ class Backend extends EventEmitter {
 
     this.state = 'starting';
     this._stopping = false;
-    this.port = await findFreePort();
+    // 先试固定端口（保持 QQ 网关配置长期有效），占用则退化为随机端口
+    this.port = (await tryPort(PREFERRED_PORT)) || (await findFreePort());
 
     const env = {
       ...process.env,
@@ -232,4 +247,4 @@ class Backend extends EventEmitter {
   }
 }
 
-module.exports = { Backend, findFreePort, probe };
+module.exports = { Backend, findFreePort, tryPort, probe, PREFERRED_PORT };
