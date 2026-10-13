@@ -98,6 +98,33 @@ async def push_event_via_ws(ws_url: str, event: dict) -> bool:
         return False
 
 
+async def check_reverse_ws_visibility(app_port: int) -> bool:
+    """验证「网关有没有把消息推过来」这件事在界面上看得见。
+
+    真实故障：桌面版每次启动都会换端口，而 NapCat 的反向 WS 地址是部署时
+    写死的 → HTTP 探测一切正常、界面显示"已登录"，但 QQ 消息一条都收不到。
+    所以 /api/qq/status 必须暴露 reverseWsConnected 与 wsUrl。
+    """
+    try:
+        import websockets
+    except ImportError:
+        print("[6b] ⚠ 未安装 websockets，跳过推送通道检查")
+        return True
+
+    base = f"http://127.0.0.1:{app_port}"
+    url = f"ws://127.0.0.1:{app_port}/ws/onebot"
+    async with websockets.connect(
+            url, additional_headers={"Authorization": f"Bearer {TOKEN}"}) as ws:
+        await asyncio.sleep(1.0)
+        async with httpx.AsyncClient(timeout=8) as c:
+            st = (await c.get(f"{base}/api/qq/status")).json()
+        connected_ok = st.get("reverseWsConnected") is True
+        has_url = bool(st.get("wsUrl"))
+        print(f"[6b] {'✓' if connected_ok and has_url else '✗'} 推送通道状态可观测："
+              f"reverseWsConnected={st.get('reverseWsConnected')} wsUrl={st.get('wsUrl')}")
+        return bool(connected_ok and has_url)
+
+
 async def main() -> None:
     print("=" * 70)
     print("QQ（OneBot 11）链路端到端验证")
@@ -106,6 +133,13 @@ async def main() -> None:
     data_dir = Path(tempfile.mkdtemp())
     gw_port = 3010
     app_port = 8941
+
+    # ⚠️ 隔离：本测试会启动 QQ 通道，而 runtime 启动时会把 NapCat 的反向 WS
+    # 地址同步成**自己的端口**。如果不隔离，跑一次测试就会把用户真实网关的
+    # 配置改到一个测试端口上（跑完就没人监听了）——这是真实踩过的坑。
+    import src.core.docker as _docker
+    _docker.NAPCAT_CONFIG_VOLUME = "wxbot-test-config"
+    _docker.NAPCAT_CONTAINER = "wxbot-test-napcat"
 
     # ── 1. 起假网关 ──
     srv = start_mock_gateway(gw_port)
@@ -167,6 +201,15 @@ async def main() -> None:
         r = (await c.post(f"{base}/api/bot/start")).json()
         mark = "✓" if r.get("ok") else "✗"
         print(f"[6] {mark} 启动机器人：{r.get('message')}")
+
+    # ── 6b. 推送通道状态可观测 ──
+    ws_visible = await check_reverse_ws_visibility(app_port)
+
+    # ── 6c. 手动「重新对接」接口必须存在且不报错 ──
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = (await c.post(f"{base}/api/qq/sync-ws")).json()
+    sync_ok = isinstance(r, dict) and "changed" in r
+    print(f"[6c] {'✓' if sync_ok else '✗'} 重新对接接口可用：{str(r.get('message'))[:70]}")
 
     # ── 7. 通过反向 WS 推送群消息 ──
     print("[7] 通过反向 WebSocket 推送群消息…")
