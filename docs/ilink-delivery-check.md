@@ -1,6 +1,8 @@
 # 微信输入状态与发送故障核查（2026-10-13）
 
-## 附件里的事实
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
+## 历史日志核查（2026-10-13）
 - 19:24:35之前有微信 sendmessage 成功请求；19:24:39开始新一轮处理。
 - 第425行，19:25:18：模型 SDK 在 TLS 建连链路报 httpx2.ConnectError，最终为 openai.APIConnectionError。
 - 第467行，19:25:45：sendmessage 建连超时，转为 DeliveryError；收件/完整草稿保留重试。
@@ -24,7 +26,7 @@
 ## 本地验证
 临时收件与假票据、模拟HTTP/SDK错误；覆盖慢于1秒的票据、1/2状态、取消后关闭、辅助请求不拖慢回复、同ID发送重试、草稿保留、模型断线后原问题恢复、首token前重试和部分流不拼接。未使用真实微信凭证、用户聊天、付费Key；用户附加日志原文件只读，哈希单独核对。
 
-这些代码需进入重新构建的Windows软件后才能影响已安装版本。本次不是现有exe已被替换的证明。
+这些修复已进入v2.1.3发布包；旧安装版本需更新后才包含修复。此前附件核查是历史证据，不证明用户已安装的新版本或真实客户端当前状态。冻结投递恢复夹具已在Windows验证，真实账号/网络行为仍与模拟测试区分。
 
 ## 一手参考
 - [腾讯协议说明](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md)：getconfig票据、sendtyping的1/2含义、HTTP与业务状态分别检查。

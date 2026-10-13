@@ -7,7 +7,7 @@
 浏览器自动打开 http://127.0.0.1:8000
 
 两条通道：
-  · 微信：腾讯官方 iLink Bot API（合规、零封号，仅私聊）
+  · 微信：腾讯 iLink Bot API（本项目仅私聊；可用性依平台与账号状态）
           —— 消息靠后端长轮询拉取，不需要任何回调接口
   · QQ ：OneBot 11（NapCat 等），支持反向 WebSocket 与 HTTP POST 两种上报
 """

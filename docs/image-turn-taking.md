@@ -1,5 +1,7 @@
 # 识图与自然轮流说话
 
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
 ## 实际行为
 
 - 微信图片遵循官方 CDN/AES-128-ECB/PKCS7 处理；QQ 支持图片消息段、CQ 图片、base64 图片和网关 get_image。真实图片通过多模态 `image_url` 输入交给视觉模型。

@@ -1,5 +1,7 @@
 # 联网搜索与会话时间
 
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
 ## 使用
 
 在「模型与行为 → 联网搜索与现实时间」保存本区配置。默认开启按需搜索，搜索模型 `deepseek-flash`，时区 `Asia/Shanghai`。主模型为 `https://api.deepseek.com` 时复用主模型 Key；其他供应商需要单独填写 DeepSeek 搜索 Key，不把其他厂商的 Key 发送给 DeepSeek。独立 Key 与现有模型 Key 一样脱敏展示、原子落盘。默认 Key 管理入口：https://platform.deepseek.com/api_keys 。
@@ -37,4 +39,4 @@
 搜索失败如实说明本次未核实，不把已有知识当成最新结果；最终保持原有角色口吻，发送单条完整消息。
 ```
 
-测试均使用合成 SDK 响应、httpx MockTransport、临时配置，不使用真实 Key 或真实用户消息，不构成真实搜索服务或已安装 exe 的端到端验收。
+搜索专项验证使用合成SDK响应、httpx MockTransport和临时配置；没有真实Key或用户消息，不构成真实搜索服务端到端验收。功能已包含在v2.1.3包中；Windows冻结投递/记忆夹具关闭搜索，不把该包的启动验收当作付费搜索验收。

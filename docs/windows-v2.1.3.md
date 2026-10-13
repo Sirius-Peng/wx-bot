@@ -1,8 +1,10 @@
 # Windows v2.1.3 发布与专项测试
 
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
 ## Windows 专项改进
 
-- 原生回归定位并修复两项 Windows 文件锁问题：统计读取句柄允许文件删除/替换，清空记录不再遇到 WinError 32；首次迁移并发启动先获得字节锁再初始化锁文件。
+- 原生回归定位并修复两项 Windows 文件锁问题：统计采用有限快照、共享删除读句柄，并在分词前关闭OS句柄，清空记录不再遇到 WinError 32；首次迁移并发启动先获得字节锁再初始化锁文件。
 - HTTP 客户端复用严格校验的 SSLContext，按证书路径和版本失效缓存，保留系统代理/自定义CA语义；不跨事件循环共享客户端或套接字。
 - Python sidecar 改为原生 x64 **onedir**，安装包仍为 NSIS Setup / 单文件 Portable。安装版不再在每次后端重启时解压 Python、Jieba 和时区资源；便携包自身仍需解包。
 - 新旧后端布局兼容：优先 `resources/backend/wxbot-server/wxbot-server.exe`，保留旧 `resources/backend/wxbot-server.exe` 回退。
@@ -30,6 +32,10 @@ npm run pack:win
 产物：`WxBot-2.1.3-Windows-x64-Setup.exe` / `WxBot-2.1.3-Windows-x64-Portable.exe`。
 安装后无需 Python/Node。默认数据位于 `%LOCALAPPDATA%\WxBot\user-data`，不放安装目录；卸载不删除此目录。
 
-离线回归不使用真实聊天或付费模型。原生测试使用独立安装目录和中文/空格运行数据目录；保留默认数据哈希，测试原生 x64 后端、认证、统计词典、时区、首启引导、备份/记忆、端口占用回退、重启、退出和卸载/重装。结果以发布时的验证报告为准，账号登录/模型密钥需要用户自行配置。
+离线回归不使用真实聊天或付费模型。原生测试使用独立安装目录和中文/空格运行数据目录；检查测试marker数据保留，测试原生 x64 后端、认证、统计词典、时区、首启引导、备份/记忆、端口占用回退、重启、退出和卸载/重装。结果以发布时的验证报告为准，账号登录/模型密钥需要用户自行配置。
 
 依据：[PyInstaller运行模式](https://pyinstaller.org/en/stable/operating-mode.html)说明 onefile 每次启动解包；[Electron before-quit](https://www.electronjs.org/docs/latest/api/app#event-before-quit)允许在退出前等待清理。
+
+## 已发布结果
+
+Windows11 x64原生Python492/492、Setup安装/卸载/重装、Portable启动、完整包资源校验、离线冻结投递/记忆和QQ链路已通过。同机后端启动中位4259.89ms→3384.45ms，HTTP工厂重复创建332.08ms→0.09ms。精确环境、边界和附件摘要见[验证矩阵](validation.md)及[发布清单](release-v2.1.3.json)。

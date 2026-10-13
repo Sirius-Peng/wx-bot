@@ -1,0 +1,64 @@
+{
+  "version": "2.1.3",
+  "tag": "v2.1.3",
+  "released_date": "2026-10-14",
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": "aba974b5c31f7fa9958830d226848eca5a7c225a",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3",
+  "artifacts": [
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "a23fc824cb819ff2878b1eebc793c8ff68facc80b2fff9a1e2ddf564788685eb",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/SHA256SUMS.txt"
+    },
+    {
+      "name": "WxBot-2.1.3-macOS-arm64.dmg",
+      "bytes": 158384080,
+      "sha256": "e33f2f35fe7a8928e78c53c4d318f2af58d82bf36a04a84a1a7ff9cbd87ef698",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-macOS-arm64.dmg"
+    },
+    {
+      "name": "WxBot-2.1.3-Windows-x64-Portable.exe",
+      "bytes": 130622096,
+      "sha256": "1678379bbfa904ad984b8784c34d1cd50d843fad6e6c30e2ac92472690d53b59",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-2.1.3-Windows-x64-Setup.exe",
+      "bytes": 130857053,
+      "sha256": "74bc00902acf6dc99d66ecb100a4e0819b5697ee0b57ec8051dd90ed80331d15",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Setup.exe"
+    }
+  ],
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "validation": {
+    "python_macos": 492,
+    "python_windows": 492,
+    "windows_lifecycle_node": 15,
+    "storage_paths_node": 12,
+    "onboarding_node": 11,
+    "statistics_node": 18,
+    "actual_setup_install_uninstall_reinstall": true,
+    "actual_portable_start": true,
+    "frozen_offline_delivery_memory": true,
+    "real_account_login_tested": false
+  },
+  "benchmark": {
+    "same_machine_fixture_runs": 3,
+    "startup_before_median_ms": 4259.89,
+    "startup_after_median_ms": 3384.45,
+    "http_factory_before_warm_mean_ms": 332.08,
+    "http_factory_after_warm_mean_ms": 0.09,
+    "not_llm_generation_latency": true
+  },
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-14"
+}

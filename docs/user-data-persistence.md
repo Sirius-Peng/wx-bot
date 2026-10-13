@@ -1,5 +1,7 @@
 # 用户数据独立持久化
 
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
 ## 默认目录（桌面版与源码启动一致）
 
 | 系统 | 位置 |
@@ -67,4 +69,4 @@ docker compose up -d
 - https://www.electron.build/docs/nsis/
 - https://docs.docker.com/reference/compose-file/interpolation/
 
-测试覆盖固定路径、非覆盖迁移、中断恢复、旧文件保留、模拟升级/卸载/重装、备份校验与恢复、密钥权限和认证。使用临时本地夹具，不等于已重建安装包或执行真实系统卸载。
+源码测试覆盖固定路径、非覆盖迁移、中断恢复、旧文件保留、模拟升级/卸载/重装、备份校验与恢复、权限和认证。v2.1.3另外完成Windows Setup真实安装/卸载/重装及测试数据保留；临时夹具不代表用户真实数据已备份或恢复。

@@ -57,7 +57,8 @@ function logDir() {
 /**
  * 定位 Python 后端可执行文件。
  *
- * 打包态：resources/backend/wxbot-server[.exe]（由 PyInstaller 产出的单文件）
+ * 打包态：macOS: resources/backend/wxbot-server（onefile）
+ *         Windows: resources/backend/wxbot-server/wxbot-server.exe + _internal（onedir）
  * 开发态：退回系统 Python，直接跑仓库里的 src.server
  */
 function resolveBackend() {

@@ -1,9 +1,9 @@
-"""PyInstaller 打包入口 —— 把整个 Python 引擎打成单文件可执行程序。
+"""PyInstaller 打包入口 —— macOS onefile / Windows onedir 的 Python 引擎入口。
 
 这个文件是 Electron 外壳与 Python 引擎之间的"打包边界"：
 Electron 只需要知道"启动这个二进制、监听某个端口"，不关心内部实现。
 
-打包命令见 desktop/scripts/build-backend.sh
+原生打包入口见 desktop/scripts/build-backend.sh 和 build-backend.ps1
 """
 from __future__ import annotations
 

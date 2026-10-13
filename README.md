@@ -1,411 +1,182 @@
-# 微信 AI 助手
+# 微信 AI 助手 · WxBot
 
-接入大模型的聊天机器人：**微信私聊** + **QQ 私聊 / 群聊 @ 回复**。
-自带 Web 管理界面与 Electron 桌面版，**双击即可运行**。
+[![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
----
+**当前发布：v2.1.3 · 文档更新：2026-10-14。**
 
-## 核心结论（先说重点）
+微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等候、长期记忆、联网搜索和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-1. **微信只走腾讯官方 iLink Bot API** —— 手机微信扫码即用，合规、零封号、官方维护。
-2. **官方接口不支持微信群聊**（能力声明 `chatTypes: ["direct"]`），因此本项目
-   **不再支持微信群聊**：非官方协议端（GeWe / WeChatPadPro 等）要么已停服，
-   要么随时会坏，留着只会让用户对着一个坏通道排查。
-3. **需要群聊就用 QQ** —— 走标准 OneBot 11（NapCat），私聊 + 群聊都支持，
-   群聊里**只有 @ 机器人才回复**。
-4. 若必须做微信群聊，建议改用**企业微信官方智能机器人**（官方支持群聊，零封号）。
+[下载 v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
----
+## 下载与平台
 
-## 三种使用方式
-
-| 方式 | 适合谁 | 怎么开始 |
+| 平台 | 下载 | 发布大小 |
 |---|---|---|
-| **桌面应用** | 不想碰命令行 | [下载安装包](https://github.com/Sirius-Peng/wx-bot/releases/latest)，双击运行 |
-| **一键脚本** | 会双击文件就行 | 双击 `start-mac.command` / `start-windows.bat` |
-| **Docker / 命令行** | 有运维经验 | `docker compose up -d` 或 `python -m src.server` |
+| Windows x64 安装版 | [WxBot-2.1.3-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Setup.exe) | 约 124.8 MiB |
+| Windows x64 便携版 | [WxBot-2.1.3-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Portable.exe) | 约 124.6 MiB |
+| macOS Apple Silicon | [WxBot-2.1.3-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-macOS-arm64.dmg) | 约 151.0 MiB |
+| SHA256 校验值 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/SHA256SUMS.txt) | 对应上面三个文件 |
 
-### 📦 下载安装包
+安装包自带运行时，使用时无需 Python / Node.js。v2.1.3 未发布 macOS Intel、Windows ARM64/32 位或 Linux 桌面安装包；Linux 可使用源码或 Docker。Intel 构建命令与原生架构要求见[桌面说明](desktop/README.md)。发布包目前未配置代码签名；平台首次打开流程见同页。
 
-前往 [**Releases**](https://github.com/Sirius-Peng/wx-bot/releases/latest) 页面下载：
+## 零基础开始
 
-| 平台 | 文件 |
+1. **安装并打开**应用，首次配置进入「上手引导」，选择微信、QQ 或两者。引导进度保存在本地，暂时跳过后可继续。
+2. **配置模型**：默认地址 `https://api.deepseek.com`，API 模型名 `deepseek-flash`。在 [DeepSeek 开放平台](https://platform.deepseek.com/)登录，到 [API keys](https://platform.deepseek.com/api_keys) 创建 Key，检查余额后粘贴到引导中并点击「保存并测试模型」。测试会产生少量 API 用量；聊天网页版登录不等于已经配置 API。费用以[官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)为准，不作固定预算或免费承诺。
+3. **连接平台**：微信 iLink 使用手机微信扫码，无需独立网关或手填平台 Token。QQ 点首页「一键启动 QQ 网关」，按提示准备 Docker/NapCat；已保存账号可快速登录，首次或失效时扫码。二维码实际准备好且图片解码后才弹窗。
+4. **完成并启动**机器人，发送「你好」或图片验证。已有登录会话尽量复用，是否需要重新确认由平台决定。
+
+首次安装 Docker/启动服务可能需要系统确认；应用显示当前进度。网关的一键启动不会替用户完成手机确认。详细 URL、Token、镜像、快速登录账号及日志仍在「接入设置」；模型、识图、搜索、人格、行为与记忆各有自己的保存按钮。
+
+## 当前功能
+
+| 功能 | v2.1.3 实际行为 |
 |---|---|
-| macOS（Apple Silicon） | `WxBot-2.1.3-macOS-arm64.dmg` |
-| Windows（x64 安装包） | `WxBot-2.1.3-Windows-x64-Setup.exe` |
-| Windows（x64 免安装） | `WxBot-2.1.3-Windows-x64-Portable.exe` |
+| 微信 | 本项目采用腾讯 iLink 私聊通道，长轮询收件；不提供微信群聊或 GeWe 通道 |
+| QQ | NapCat / OneBot 11，私聊回复、群聊仅 @ 机器人时回复；反向 WebSocket 或 HTTP 上报 |
+| 完整回复 | 等模型完成后发送一条完整消息；普通聊天合并多余换行，代码、列表等保留格式 |
+| 连续输入 | 同一发言者有序合并文字和图片；新消息重置静默窗口，明确等待/结束信号影响作答时机 |
+| 输入提示 | 真正开始处理后使用平台支持的原生正在输入状态；辅助失败不阻塞正文，不发送占位气泡 |
+| 图片识别 | 下载/解密并归一化真实图片后传给视觉模型；独立视觉配置为空时复用主模型，主模型须支持图像输入 |
+| 人格 | 默认弗洛洛，支持关系模式、场景少样本和自定义人格；提示词拟合，不是模型权重微调 |
+| 长期记忆 | 事实、偏好、关系、事件与风格的后台积累；版本/有效期/来源、手动管理、持久化与失败重试 |
+| 跨端连续性 | 微信/QQ 共用长期库；同一个人的账号需在「人格知识库」明确关联，不凭昵称猜测身份 |
+| 上下文 | 平台/会话隔离的近期问答与后台摘要；相关长期事实召回，不自动把群聊搬进私聊 |
+| 联网与时间 | 默认按需 DeepSeek 辅助搜索，最终附实际来源；每轮注入当前时间，默认 `Asia/Shanghai` |
+| 对话统计 | 高频词/话题气泡图、排行和筛选；本地 Jieba 精确分词及关键词规则，不调用 LLM |
+| 数据与备份 | 独立本地目录、非覆盖迁移、校验过的 ZIP 备份；普通更新/卸载不主动删除用户数据 |
 
-> **首次打开提示"无法验证开发者"**：应用未配置代码签名证书。
-> 右键点应用 → 打开 → 再点"打开"即可（只需一次）。
-> 若提示已损坏，执行 `xattr -cr "/Applications/微信AI助手.app"`
+普通持续输入的基础窗口为 **2 秒**、最长等待 **10 秒**；拟人化规则会随句子完整度、图片和当前批次节奏调整，非固定逐条延迟。明确说「等我说完」默认最多等待 **120 秒**，「说完了」可尽快接答；窗口设 0 可关闭合并。已提交的回复不撤回，尚未提交的旧生成可被续话取消。
 
-### 桌面应用版
+微信草稿、入站队列和 QQ 等待队列可持久恢复。微信发送检查 HTTP 与业务状态，并复用正文、`client_id` 和 `context_token` 重试；接口接受不等于客户端已读，进程在外部成功和本地确认之间中断仍可能重复。详情见[投递与输入状态](docs/ilink-delivery-check.md)。
 
-原生窗口 + 系统托盘，**关掉窗口后机器人在后台继续静默运行**，可打包成单一安装包。
+## 管理界面
 
-```bash
-cd desktop
-npm install
-npm run icons            # 首次：生成图标
-npm start                # 开发调试
+| 页面 | 内容 |
+|---|---|
+| 概览 | 运行/投递状态、最近消息、首页单按钮启动 QQ 网关 |
+| 接入设置 | 通道、微信登录、QQ 扫码/快速登录、网关与推送状态、日志 |
+| 人格知识库 | 记忆搜索、增删、历史/过期状态、积累队列/重试、微信↔QQ身份关联 |
+| 消息记录 | 用户/机器人记录、触发结果、发送者 ID |
+| 对话统计 | 日期、平台、消息方向、私聊/群聊、前 N 项和最低频次；词频/话题气泡与排行 |
+| 模型与行为 | 主/备用/判定/视觉模型、联网搜索与时区、人格、回复行为、记忆、本地备份、桌面管理 |
+| 上手引导 | 平台选择、Key 教程、主模型测试、账号登录、核验并启动；可重新打开 |
 
-npm run build:backend    # 打包 Python 引擎为单文件
-npm run pack:mac         # 产出 .dmg
-npm run pack:win         # 产出 NSIS 安装包 + 免安装 exe
+## 模型与数据流
+
+- 主模型处理聊天。独立判定/抽取模型 Key 留空时复用主模型；设置独立 Key 后使用独立模型，不保证该服务免费。
+- 独立视觉配置留空时使用主模型。官方 `deepseek-flash` 的图像内容块依据见[视觉文档](https://api-docs.deepseek.com/guides/vision/)；其他兼容接口的视觉/工具能力需自行配置和验证。
+- 搜索 Key 留空时，仅官方 DeepSeek 主接口可复用主 Key；使用其他供应商主模型时需要单独配置 DeepSeek 搜索 Key。每轮最多两次辅助搜索；后台抽取、摘要与引导连通测试不搜索。
+- 聊天文本、图像和相关记忆会按功能发给所配置的模型服务；“本地保存”不表示模型推理全部离线。搜索只提交必要公开 query，不把整段聊天、记忆或图片用作搜索查询。
+- 默认参考时间来自本机时钟，不推断用户所在时区。统计读取本地持久消息日志，话题为多标签关键词类别，不是 LLM 语义分类；一次最多扫描最近 32 MiB，达到限额时会提示。
+
+## 本地数据、迁移与备份
+
+| 平台 | 默认活动数据目录 |
+|---|---|
+| Windows | `%LOCALAPPDATA%\WxBot\user-data` |
+| macOS | `~/Library/Application Support/WxBot/user-data` |
+| Linux | `$XDG_DATA_HOME/wxbot/user-data`；未配置时 `~/.local/share/wxbot/user-data` |
+
+目录包含配置、人格设置、记忆、上下文、消息记录、引导进度、微信凭证与待处理状态；桌面后端日志在其 `logs/backend.log`。QQ 登录资料另外由 NapCat 持久卷管理。显式 `WXBOT_DATA_DIR` 优先；`WXBOT_USER_DATA_DIR` 对应 `<指定目录>/data`。
+
+首次使用默认新目录时自动复制可识别旧数据，保留来源和迁移备份；已有目标文件不覆盖。卸载/更新不主动删除默认独立目录；若自定义到安装目录内则不适用同样的保留前提。手动删除、磁盘故障或误覆盖仍需备份恢复。POSIX 敏感文件按私有权限创建，Windows 依用户目录 ACL。在「模型与行为 → 本地数据与备份」查看实际目录并创建本地 ZIP；备份包含密钥和聊天资料，不自动上传。
+
+恢复前先退出应用并保留当前文件备份；详细步骤、外部微信目录及 Docker 持久卷见[数据持久化](docs/user-data-persistence.md)。
+
+## 源码运行
+
+源码使用 **Python 3.10+**；桌面开发/构建另需 Node.js。安装版用户无需这些工具。
+
+```sh
+python -m venv .venv
+# macOS/Linux
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m src.server
 ```
 
-详见 [`desktop/README.md`](desktop/README.md)。
-
----
-
-## 快速开始（三步）
-
-### 1️⃣ 启动
-
-| 你的系统 | 操作 |
-|---|---|
-| **Windows** | 双击 `start-windows.bat` |
-| **macOS** | 双击 `start-mac.command` |
-| **Linux** | 终端执行 `./start.sh` |
-
-> 首次运行会自动安装依赖（约 1–2 分钟），之后每次启动只需几秒。
-> 浏览器会自动打开管理界面 `http://127.0.0.1:8000`。
-
-### 2️⃣ 配置
-
-在「**接入设置**」里勾选要用的通道（微信 / QQ，可同时开）：
-
-| 通道 | 操作 |
-|---|---|
-| **微信** | 点「**获取登录二维码**」→ 手机微信扫码。**不需要网关、不需要任何 Token** |
-| **QQ** | 点「**一键部署 QQ 网关**」→ 程序装好 NapCat、写好网络配置 → 页面直接出二维码 |
-
-在「**模型与行为**」里：
-- 填写大模型 API Key（推荐 DeepSeek）
-- 设置机器人的**名称**与**人设**（会写进每一轮对话的系统提示词）
-- 按需开关**人格知识库**（自动积累 / 回答时参考 / 抽取频率）
-
-### 3️⃣ 启动
-
-点右上角「**启动机器人**」，完成。
-
----
-
-## 没有编程基础？先看这两条
-
-**① 微信不需要装任何东西**
-
-| 通道 | 依赖 | 怎么开始 |
-|---|---|---|
-| 微信 | **无** —— 腾讯官方 iLink 接口 | 点「获取登录二维码」，扫码即用 |
-| QQ | NapCat（OneBot 11），程序自动部署 | 点「一键部署 QQ 网关」 |
-
-只有 QQ 的一键部署需要 Docker。程序会自动：检测/安装 Docker → 启动服务 →
-拉镜像 → 建容器 → 灌配置 → 回填地址 → 出登录二维码。
-
-全程只有两处需要你动手（系统限制，无法自动化）：
-- 安装 Docker 时**输入开机密码**
-- 首次启动 Docker 时**同意许可协议**
-
-界面会明确告诉你当前卡在哪一步、下一步做什么。
-
-**② 需要一个「大模型 API Key」**
-到 [DeepSeek 开放平台](https://platform.deepseek.com/) 注册并充值（10 元够用很久），
-复制 API Key 填进「模型与行为」页面。
-
-**③ 群聊不会刷屏**
-QQ 群里机器人**只有被 @ 时才会回复**，其余消息一概不理。
-
----
-
-## 界面
-
-| 页面 | 作用 |
-|---|---|
-| **概览** | 运行状态、今日数据、最近动态 |
-| **接入设置** | 通道勾选 + 微信扫码 / QQ 网关一键部署 |
-| **人格知识库** | 机器人从对话中积累的对用户的理解，可手动增删 |
-| **消息记录** | 每条消息的触发判定结果一目了然 |
-| **模型与行为** | 大模型配置 + 机器人名称/人设 + 知识库开关 |
-
----
-
-## 回复规则
-
-规则只有两条，刻意保持简单：
-
-```
-消息到达
-  │
-  ├─ 私聊 ─────────────────────────→ 一律回复
-  │
-  ├─ QQ 群聊，@ 了机器人 ──────────→ 回复（默认同时 @ 回提问者）
-  │
-  └─ QQ 群聊，没 @ ────────────────→ 不回复
+```powershell
+# Windows
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m src.server
 ```
 
-> **为什么不做「智能判断该不该插话」**：
-> ① 用户 @ 了机器人却因为概率/评分没被回复，会直接认为机器人坏了；
-> ② 判定要额外调一次模型，既慢又费 token；
-> ③ 行为不可预测，用户无法解释"为什么这条回了那条没回"。
-> 所以只保留最符合直觉的规则：**@ 了必回，没 @ 就不插话**。
+也可双击 `start-mac.command`、`start-windows.bat`，Linux 执行 `./start.sh`。脚本安装依赖的时长随环境/下载变化，不保证固定几秒。默认网页地址 `http://127.0.0.1:8000`，源码端口被占用时会顺延；以启动日志为准。桌面应用优先使用 `17800`，占用时使用空闲端口，由应用维护网关回调地址。
 
----
+### Docker
 
-## 两条通道的区别
-
-| | 微信（官方 iLink） | QQ（OneBot 11） |
-|---|---|---|
-| 私聊 | ✅ | ✅ |
-| 群聊 | ❌ 官方接口不支持 | ✅（仅 @ 时回复） |
-| 合规性 | ✅ 腾讯官方 | ✅ OneBot 标准协议 |
-| 封号风险 | **无** | 视网关实现而定 |
-| 部署 | 扫码即用 | 程序一键部署 NapCat |
-| 消息接收方式 | **拉**：程序长轮询 `getUpdates` | **推**：网关反向 WS / HTTP 上报 |
-| 收不到消息时怎么查 | 「概览」看是否在运行；日志看 `ilink_polling` | 「接入设置」看**消息推送通道**那一行 |
-
----
-
-## 人格知识库
-
-机器人会在对话中自动积累关于用户的信息（身份、偏好、关系、事件、风格），
-下次回答时自动参考；相似信息**更新而非堆叠**，所以不会出现两条互相矛盾的记忆。
-
-- 开关与抽取频率在「模型与行为」页
-- 内容可在「人格知识库」页查看、搜索、手动添加、逐条删除
-- 手动添加时对象留空 = **所有人通用**；填对方 ID 则只对那个人生效
-- 抽取用的是「判定模型」，建议用免费的 GLM-4.7-Flash，这部分成本可降到 0
-
----
-
-## 其他启动方式
-
-### Docker 一键部署
-
-```bash
+```sh
 docker compose up -d
-# 打开 http://127.0.0.1:8000
 ```
 
-主程序零外部依赖（配置存 JSON、消息存本地文件），**不需要数据库**。
-微信通道不需要任何网关容器；要用 QQ 的一键部署，需按 `docker-compose.yml`
-里的注释挂载 Docker socket。
+默认只发布宿主机 `127.0.0.1:8000`。活动资料绑定宿主机 `${HOME}/.local/share/wxbot/user-data`，可用 `WXBOT_HOST_DATA_DIR` 改为绝对路径；旧 `./data` 只读挂载供迁移。Windows 可先设置：
 
-### 命令行
-
-```bash
-pip install -r requirements.txt
-python -m src.server
+```powershell
+$env:WXBOT_HOST_DATA_DIR = "$env:LOCALAPPDATA\WxBot\user-data"
+docker compose up -d
 ```
+
+微信无需单独网关容器。QQ 的自动容器部署需 Docker，并按 Compose 注释提供 Docker socket；也可使用已配置的外部 OneBot 网关。本程序无需额外数据库，但 LLM、微信及 QQ 网关仍是外部服务。
 
 ### 环境变量
 
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `WXBOT_PORT` | `8000` | 服务端口（被占用时自动顺延） |
-| `WXBOT_HOST` | `127.0.0.1` | 监听地址 |
-| `WXBOT_DATA_DIR` | 固定用户目录（见下文） | 数据目录；显式设置时保留自定义位置 |
-| `WXBOT_NO_BROWSER` | — | 设为 `1` 则不自动打开浏览器 |
+| 变量 | 默认/用途 |
+|---|---|
+| `WXBOT_HOST` / `WXBOT_PORT` | 源码 `127.0.0.1` / `8000`；桌面和 Compose 自行设置 |
+| `WXBOT_PREFERRED_PORT` | 桌面首选 `17800`，不可用时回退空闲端口 |
+| `WXBOT_DATA_DIR` | 活动数据绝对/自定义目录，优先于平台默认路径 |
+| `WXBOT_USER_DATA_DIR` | 显式 profile 隔离；活动数据为其 `data` 子目录 |
+| `WXBOT_HOST_DATA_DIR` | Compose 宿主机数据绑定位置，不是 Python 通用配置 |
+| `WXBOT_ADMIN_TOKEN` | 管理认证 Token；未指定时数据目录生成 `admin-token` |
+| `WXBOT_NO_BROWSER=1` | 源码不自动打开浏览器；桌面由外壳托管 |
+| `WXBOT_MIGRATE_LEGACY` / `WXBOT_LEGACY_DATA_DIRS` | 控制旧数据复制迁移；后者为 JSON 路径数组 |
+| `WXBOT_SKIP_NAPCAT_SYNC=1` | 离线测试跳过网关配置同步，不是正常使用默认值 |
 
----
+本机打开主页可建立 HttpOnly 管理会话；远程/容器使用管理登录页或 Bearer Token。OneBot `/ws/onebot`、`/onebot/event` 使用独立 OneBot Token。Windows 桌面 Docker 回调使用单独的 callback-only 动态端口，管理页面仍只监听本机；仅配置 OneBot HTTP 地址不代表消息推送已连接。
 
-## 自测（改完代码先跑这三条）
+## 构建与验证
 
-```bash
-.venv/bin/python tools/smoke_ilink.py     # 微信链路端到端（假 iLink + 假模型，不联网）
-.venv/bin/python -m src.verify_qq         # QQ 链路端到端（假 OneBot 网关）
-.venv/bin/python tools/qr_check.py        # 二维码编码器正确性（离线）
+桌面原生构建、资源布局、托盘和退出说明见 [desktop/README.md](desktop/README.md)。Windows 后端使用 x64 **onedir**，macOS 使用 **onefile**；不能拿 macOS sidecar 拼进 Windows 包。
+
+```sh
+python -m unittest discover -s tests -p 'test_*.py' -v
+node tests/test_desktop_port.cjs
+node tests/test_windows_desktop.cjs
+node tests/test_windows_lifecycle.cjs
+node tests/test_storage_paths.cjs
+node tests/test_onboarding_frontend.cjs
+node tests/test_statistics_frontend.cjs
+python tools/smoke_ilink.py
+python -m src.verify_qq
+python tools/qr_check.py
+python tools/check_docs.py
 ```
 
-`smoke_ilink.py` 会真的把「收消息 → 触发判定 → 拼人设 → 调模型 →
-带 context_token 回复 → 写日志」整条链路跑一遍，并逐项断言 ——
-这几个环节出问题都**不会报错，只会静默不工作**，所以必须靠测试兜住。
+以上 `python` 应使用已安装项目依赖的虚拟环境。`check_docs.py` 为文档一致性检查，不调用模型或平台；详细验证范围见[测试矩阵](docs/validation.md)。
 
----
+**v2.1.3 发布验收**：macOS 源码 / Windows 11 x64 原生源码各 **492/492**；Windows 生命周期15项、存储路径12项、引导前端11项、统计前端18项；Setup 安装/卸载/重装、Portable 启动、冻结后端离线投递/记忆恢复及资源一致性通过。发布包未使用真实账号扫码或付费模型评测替代这些检查。
 
-## 数据与隐私
-
-- 记忆、人格、配置、上下文和微信状态放在固定的本机用户目录，不放在应用安装目录。
-- macOS：`~/Library/Application Support/WxBot/user-data`；Windows：`%LOCALAPPDATA%\WxBot\user-data`；Linux：`$XDG_DATA_HOME/wxbot/user-data`（未设置时 `~/.local/share/wxbot/user-data`）。
-- 配置 `config.json` 和 `ilink/account.json` 存在该目录内；敏感文件按 0600 创建。
-- 首次使用新目录时自动复制旧版数据，保留原目录和校验过的迁移备份；已有新数据不被覆盖。更新/普通卸载不清理该目录。
-- 「模型与行为 → 本地数据与备份」查看实际位置、创建/下载本地 ZIP 备份。备份含密钥及聊天资料，请保存在自己的设备。
-- 自定义 `WXBOT_DATA_DIR` 继续生效；Docker 使用宿主机独立用户目录。迁移、恢复及 NapCat 持久卷说明见 [用户数据持久化](docs/user-data-persistence.md)。
-
----
+同机离线夹具各3次，后端启动中位数 **4259.89ms → 3384.45ms**；本机 HTTP 客户端重复创建平均 **332.08ms → 0.09ms**。结果是该测试环境下的开销，不是所有机器的固定速度，也不是 LLM 生成时间。精确文件大小、摘要、提交及测试快照见[发布清单](docs/release-v2.1.3.json)。
 
 ## 项目结构
 
-```
-src/                        Python 引擎
-  server.py                 Web 服务（管理界面 + API + OneBot 上报入口）
-  runtime.py                机器人运行时（启停 / 状态 / 消息日志 / 扫码登录 / iLink 长轮询）
-  config_store.py           配置持久化（原子写入 + 密钥掩码 + 旧配置迁移）
-  orchestrator.py           编排层，串联完整链路
-  store_memory.py           会话存储
-  verify_qq.py              QQ 链路端到端验证脚本
-  web/                      管理界面（零构建步骤：HTML + CSS + 原生 JS）
-  core/
-    types.py                统一消息结构（换协议不改业务的关键）
-    trigger.py              回复判定（私聊必回 / 群聊仅 @）
-    context.py              上下文装配 + 人设拼装
-    memory.py               人格知识库（抽取 / 融合 / 召回 / 注入）
-    llm.py                  大模型网关（路由 / 降级 / 成本统计）
-    sender.py               完整回复发送（限流 / 延迟 / 换行整理）
-    qr.py                   纯 Python 二维码编码（离线出图）
-    docker.py               Docker 环境检测与 NapCat 一键部署
-  adapters/
-    base.py                 适配器契约
-    ilink.py                腾讯官方 iLink Bot API（仅私聊，长轮询收消息）
-    onebot.py               OneBot 11（QQ，私聊 + 群聊）
-
-tools/
-  smoke_ilink.py            微信链路端到端冒烟测试
-  qr_check.py               二维码编码器自检
-
-desktop/                    Electron 桌面版
-  src/main/                 主进程（窗口 / 托盘 / 后端进程 / IPC / 路径）
-  src/preload/              安全桥接
-  backend/entry.py          PyInstaller 打包入口
-  scripts/                  后端打包 + 图标生成
-  electron-builder.yml      打包配置
-
-start-mac.command           一键启动脚本
-start-windows.bat
-start.sh
-docker-compose.yml / Dockerfile
-requirements.txt
+```text
+src/server.py, runtime.py       Web/API、运行时、账号与投递诊断
+src/adapters/                  iLink 与 OneBot 11
+src/core/conversation.py       有序图文与连续输入批次
+src/core/turn_taking.py         本地轮流说话/等待规则
+src/core/media.py               图片下载、解密与视觉输入
+src/core/context.py, memory.py  人格/上下文/长期事实与身份关联
+src/core/memory_learning.py     后台持久记忆抽取
+src/core/web_search.py          DeepSeek 辅助搜索
+src/core/reality.py             每轮现实时间
+src/core/analytics.py           本地词频/话题统计
+src/core/storage.py, fileio.py  独立目录、迁移/备份、Windows快照
+src/web/                       原生 HTML/CSS/JS 管理界面
+desktop/                       Electron 外壳与原生打包脚本
+personas/phrolova/              人格卡、合成训练格式与评估资料
+tests/, tools/                 离线回归、平台/打包和文档核验
+docs/, CHANGELOG.md             使用、设计、验证与版本历史
 ```
 
-**架构要点**：所有协议适配器都归一化到同一个 `WxMessage` 结构，因此换协议不改业务逻辑；
-桌面版把 Python 引擎作为 sidecar 二进制，前端 UI 与浏览器版完全复用。
-
----
-
-## ⚠️ 使用须知
-
-- 微信通道走**腾讯官方接口**，合规、零封号，但腾讯保留随时调整或终止服务的权利。
-- QQ 群聊能力由第三方网关（NapCat 等）提供，请遵守对应平台的使用条款。
-- 请勿用于营销群发、骚扰等违规用途。
-- 请遵守《生成式人工智能服务管理暂行办法》，使用已备案的国内大模型服务。
-
-
-## 管理接口认证与配置生效
-
-- 源码/桌面版默认只监听本机；从本机地址打开主页会建立 HttpOnly 管理会话。
-- Docker 默认仅发布 `127.0.0.1:8000`。Docker 或显式公网监听使用管理登录页：
-  设置环境变量 `WXBOT_ADMIN_TOKEN`，或从数据目录的 `admin-token` 文件读取自动生成的 Token。
-  Token 文件权限为 0600；不要将其放进 URL 或版本库。
-- 命令行请求管理 API 时，发送 `Authorization: Bearer <管理 Token>`。
-  QQ 的 `/ws/onebot` 和 `/onebot/event` 继续使用 OneBot Token，与管理 Token 分离。
-- 机器人名称、人设、模型、知识库及 @ 回复设置在保存后热更新。
-  接入通道配置变更返回 `requires_restart`；设置页会重启机器人以应用更改。
-- iLink 游标文件现在原子保存 `get_updates_buf` 和 `pending` 消息。
-  重启后先恢复待处理消息，再拉取新消息；提供至少一次处理语义。
-  进程恰好在外部消息发送成功与本地确认之间中断时，仍可能出现重复回复。
-
-### 修复回归测试（离线）
-
-```bash
-.venv/bin/python -m unittest discover -s tests -v
-node tests/test_desktop_port.cjs
-.venv/bin/python tools/smoke_ilink.py
-.venv/bin/python -m src.verify_qq
-.venv/bin/python tools/qr_check.py
-```
-
-
-### v1.3.2 回复显示修复
-
-- 模型回复生成完成后一次发送，不再按 20/80 字、句子、换行或 800 字阈值拆成多条消息。
-- 普通聊天的软换行和空行合并；代码块、列表、引用、标题和表格保留必要格式。
-- 知识库与消息上下文保存整理后的实际回复，避免继续模仿多余换行。
-- 生成中途失败时不发送残缺内容，只发送一条失败提示。
-
-
-### v1.3.3 弗洛洛人格预设
-
-新配置默认启用弗洛洛；旧的明确自定义人设保留，可在「模型与行为」选择预设并保存。
-预设包含角色内核、普通/信任/漂泊者关系模式与按当前话题选取的少样本，不对每个用户套用剧情背叛。
-`personas/phrolova/` 保存人格卡、100条标注为合成改写的语料、训练格式 JSONL 与独立评测集。
-抽样占比：日常10%、心声30%、剧情40%、锚点15%、战斗5%；不是100条官方原话。
-当前实现是提示词/场景少样本拟合，不包含新的模型权重。角色背景不被用户记忆覆盖，既有单条完整回复行为保持。
-独立判定模型 Key 留空时，知识库抽取复用主模型，与界面说明一致。
-
-
-### v1.3.4 微信投递与响应速度
-
-- 对齐官方文本发送结构：from_user_id、client_id、context_token、base_info 和应用请求头；ret/errcode 都检查，空确认不误报成功。ret=0不等于客户端已显示/已读。
-- 完整回复先持久化到outbox.json，再提交接口；失败重试与重启复用相同正文/client_id，成功确认前保留入站消息。不以兜底文本掩盖投递失败。
-- 长轮询与处理分离，最多4个不同会话并行，每会话有序；200条收件软上限后暂停继续拉取。坏会话退避不阻塞其他会话。
-- 默认取消人为打字延迟；官方微信专用令牌桶全局60/分钟、单会话30/分钟、突发容量2，QQ旧限流保持。
-- 记忆抽取后台有界执行，不再等待后续回复；关闭时取消后台任务。LLM SDK隐式重复请求关闭，已有备用模型降级保留。
-- /api/status.wechat_delivery显示接口接受/失败、耗时、待重试回复和排队数；不宣称有微信客户端送达回执。
-
-
-### v1.3.5 自动积累闭环
-
-- 首次对话/明确要求记住的内容立即排队；其他消息批量抽取，不足一批空闲2秒后处理。
-- memory-learning.json持久化待抽取的用户原文；共享2个后台槽位，忙时不丢弃，停止/重启恢复；不包含人格示例或助手台词。
-- 独立共享抽取网关：独立Key为空复用主模型，30秒请求超时；不再被单个聊天编排器关闭。
-- 非法JSON、空模型返回、HTTP错误与写盘错误保留待重试批次；真正的[]是无长期信息，不伪装成失败。
-- 自动积累开关与回答注入开关独立；关闭自动积累仍可引用手动记忆。
-- 知识库页实时显示开启状态、模型、待处理/完成批次和错误类型，并提供重试按钮。
-- memory.json使用私有权限、fsync与原子替换；保存失败不假装学会，清空记忆同时取消匹配的待积累任务。
-
-
-### v2.1.3 Windows x64
-
-Windows本机执行 `cd desktop && npm ci && npm run pack:win`，构建原生wxbot-server.exe，再生成NSIS安装包与便携包。构建需要x64 Python3.10+和Node，安装后运行不依赖它们。构建脚本不再暂停/忽略错误，支持空格路径，打包前后验证PE架构与资源。macOS使用pack:mac，不能把Mac侧后端直接跨打包进Windows；pack:all按本机平台选择原生构建；跨平台发布需各平台分别运行。
-
-Windows使用用户数据目录与UTF-8日志，托盘后台运行、重启与退出会先调用本机认证关闭接口，超时才清理对应PID进程树。数据/知识库/微信登录状态不会随卸载删除。安装产物带Windows与x64，避免平台混淆。
-
-
-### 图片与连续消息
-
-- 微信图片按官方CDN协议下载并AES-128-ECB/PKCS7解密；QQ图片保留URL/CQ图片段。归一化真实图片后以OpenAI兼容的`image_url`输入发送给视觉模型，不把“[图片]”当作识图结果。
-- 「模型与行为」新增独立识图接口、模型与Key；留空使用主模型，该模型需要支持视觉输入。图片失败会明确反馈，不编造图片内容。图片像素不写入聊天日志或长期记忆。
-- 微信与QQ同一发送者默认在最后一条消息后等待2秒，合并图文/多条文字后只回复一次；群内不同发送者分开。持续输入最长等待10秒/每批50条，均保留后续消息；等待时不中断其它会话。
-- 生成期间收到续话，会丢弃尚未提交的旧回答，重新合并；已提交的回复不撤回。微信批次成员与完整草稿持久化，投递重试/重启不把新消息混入旧草稿。QQ等待队列也持久化。
-- 两个等待参数保存后热更新；设等待间隔为0保留逐条处理。一次最多6张、单图下载20MiB上限，超限或解密错误会明确反馈。
-- 协议依据：[腾讯官方图片处理实现](https://github.com/Tencent/openclaw-weixin/blob/main/src/media/media-download.ts)。
-
-### 上下文与跨端记忆
-
-- 微信与 QQ 共用同一长期记忆库；「人格知识库」新增身份关联，将同一个人的微信发送者 ID 与 QQ 号关联后跨端共享事实和偏好。消息记录显示发送者 ID；不同用户/群仍隔离，解除关联不删除来源。
-- 事实按有效期和版本管理，更正职业/城市不会把过去抹掉；当前回答使用最新有效信息，历史查询可参考旧版本。界面可显示历史、过期状态与来源。
-- 完整上下文私有落盘，重启后延续；较早对话后台压缩，摘要失败保留原文。注入相关记忆并附时间，避免旧情绪/事件永久生效，保持人格与用户事实分离。
-- 自然等待结合短句、未完成句、图片补充说明以及明确的等待/说完信号；参数可热更新。
-- 设计、参考项目与使用说明见 [docs/memory-design.md](docs/memory-design.md)。
-
-### 图文有序与自然轮流说话
-
-图片与相邻说明保持原顺序和编号；小 PNG 截图保留无损清晰度，透明底合成白色。明确说“等我说完”后，后续几段话不解除等待，直到结束信号或120秒超时；QQ真实输入状态可以短暂延长已有批次的静默窗口。只有决定回复后才显示平台支持的原生输入提示，可单独关闭；不发“正在处理”的占位消息。用户续话会取消尚未提交的图片处理或生成，重新合并再答。
-
-使用与验证见 [docs/image-turn-taking.md](docs/image-turn-taking.md)。
-
-### QQ 登录与设置修复
-
-QQ 网关复用登录卷，提供快速登录与可选自动登录；二维码就绪后弹窗。设置卡片分别保存且保留其他草稿。Windows 独立回调入口、连接注册及空日志归一化修复消息链路与显示问题。下载优先大陆镜像。实现与测试见 [NapCat 修复说明](docs/napcat-fixes.md)。
-
-### 首次启动与新手引导
-
-新安装自动进入平台选择 → 默认 DeepSeek V4.1 Flash 的 Key 教程与连接测试 → QQ/微信登录 → 完成并启动。支持保存进度、暂时跳过和重新进入。首页增加唯一 QQ 网关启动按钮，详细设置仍保留；二维码实际生成并解码后才弹窗，已有登录会话复用。详见 [新手配置说明](docs/onboarding.md)。
-
-### 微信输入状态与短暂网络故障
-
-微信输入票据按用户缓存，生成时开启、完成或取消时关闭，辅助请求不阻塞正文。收件长轮询独立连接池，发送及模型连接各有一次有界网络重试；断线保留问题/正文，恢复后继续，不保存错误占位提示作答案。详见 [日志核查与修复](docs/ilink-delivery-check.md)。
-
-### 联网搜索与当前时间
-
-「模型与行为」新增独立的「联网搜索与现实时间」保存区域：默认按需使用 DeepSeek 原生搜索，官方 DeepSeek 主模型可复用 Key；其他主模型可配置独立 DeepSeek 搜索 Key。每轮最多两次，带真实参考来源，搜索失败不打断正常回复。普通闲聊由模型直接回答，后台记忆/判定任务不搜索。
-
-每轮注入带时区的当前时间、星期和相对日期，默认 `Asia/Shanghai`，可改为有效 IANA 时区。QQ 与微信共用此配置，支持运行中应用。具体接口依据、费用/预算、隐私边界和离线验证见 [联网搜索与会话时间](docs/web-search-time.md)。
-
-### 对话统计
-
-侧栏「对话统计」新增高频词/高频话题气泡图与频率排行，可筛选日期、微信/QQ、用户/机器人消息、私聊/群聊和最低频率。点击气泡查看次数与涉及消息数；默认仅用户消息。本地精确分词与关键词话题规则，不额外调用LLM，使用持久消息日志而非只看最近2000条。完整口径、扫描范围和验证见 [对话统计说明](docs/conversation-statistics.md)。
-
-### v2.1.3 Windows 专项优化
-
-原生 x64 onedir 后端降低安装版重复启动解包开销；修复并发启动/重启、停止后的迟到启动和启动超时残留。错误页真正重试后端，原生退出统一清理。完整 onedir 资源、中文分词词典和 Windows 时区数据纳入包一致性校验。详见 [Windows v2.1.3](docs/windows-v2.1.3.md)。
+此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包固定对应 `v2.1.3` 标签；主分支可继续更新文档，不因此产生新的安装包版本。
