@@ -14,7 +14,7 @@ async function main(){
   const promise=b.start();assert.strictEqual(b.start(),promise);const r=await promise;assert(r.ok,r.error);assert.notStrictEqual(r.port,port);
   const startupMs=Date.now()-start;
   let api=await fetch(b.url+'/api/config');assert.strictEqual(api.status,401);
-  const auth={Authorization:`Bearer ${b.controlToken}`};const check=async(route)=>{const r=await fetch(b.url+route,{headers:auth});assert.strictEqual(r.status,200,route);return r.json();};
+  const auth={Authorization:`Bearer ${b.controlToken}`};const check=async(route)=>{const r=await fetch(b.url+route,{headers:{Authorization:`Bearer ${b.controlToken}`}});assert.strictEqual(r.status,200,route);return r.json();};
   await check('/api/onboarding');const state=await check('/api/data/status');assert(JSON.stringify(state).includes(data.replaceAll('\\','\\\\'))||JSON.stringify(state).includes(data));
   const add=await fetch(b.url+'/api/memory',{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify({scope:'user',owner_id:'fixture',category:'fact',content:'测试记忆 中文',keywords:['测试']})});assert((await add.json()).ok);
   const restart=b.restart();assert.strictEqual(b.restart(),restart);assert((await restart).ok);

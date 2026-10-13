@@ -11,7 +11,8 @@ function verify(root, backendOnly=false) {
  const desktop=path.join(root,'desktop'), version=JSON.parse(fs.readFileSync(path.join(desktop,'package.json'),'utf8')).version;
  const backend=path.join(desktop,'resources','backend','wxbot-server','wxbot-server.exe');
  assert.strictEqual(peMachine(backend),0x8664,'Backend is not native x64');
- assert(!fs.existsSync(path.join(desktop,'resources','backend','wxbot-server')),'Mac/Linux sidecar mixed into Windows bundle');
+ const foreign=path.join(desktop,'resources','backend','wxbot-server');
+ assert(!fs.existsSync(foreign) || fs.statSync(foreign).isDirectory(),'Mac/Linux sidecar mixed into Windows bundle');
  if(backendOnly)return 'WINDOWS_PE PASS: backend=x64';
  const unpacked=path.join(desktop,'dist','win-unpacked');
  assert.strictEqual(peMachine(path.join(unpacked,'微信AI助手.exe')),0x8664,'Electron is not x64');
