@@ -90,7 +90,7 @@ async def run(data_dir):
         runtime.set_http_port(app_port)
         from .core.docker import DockerState
         runtime.docker.detect = lambda: DockerState()
-        runtime.docker.napcat_status = lambda: {"running": False}
+        runtime.docker.napcat_status = lambda *_args: {"running": False}
         server = uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=app_port,
                                                log_level="warning",access_log=False))
         task = asyncio.create_task(server.serve())
@@ -105,7 +105,7 @@ async def run(data_dir):
                                'onebot_http_url':f'http://127.0.0.1:{gateway.server_port}',
                                'onebot_token':TOKEN},
                     'llm':{'primary_key':'offline-key','judge_key':'offline-key'},
-                    'bot':{'name':'测试助手','memory_enabled':True,'memory_extract_interval':1}})
+                    'bot':{'name':'测试助手','message_merge_window':0,'humanized_wait':False,'memory_enabled':True,'memory_extract_interval':1}})
                 assert r.status_code==200
                 good=(await c.post('/api/qq/test',json={})).json()
                 assert good['ok']
@@ -145,7 +145,7 @@ async def run(data_dir):
                     await ws.send(json.dumps(private))
                     await wait_until(lambda:runtime.qq_adapter.event_count>before)
                     assert len(RECEIVED)==2
-                    # 抽取是同步链路末尾，等待归档完成再核对知识库。
+                    # 抽取在后台执行，等待归档完成再核对知识库。
                     await wait_until(lambda:runtime.memory.stats()['total']>=2)
                     assert (await c.get('/api/memory/stats')).json()['total']>=2
                 assert (await c.post('/api/bot/stop')).json()['ok']
