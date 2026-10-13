@@ -1,5 +1,7 @@
 # 上下文与跨端长期记忆
 
+> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；文档同步于2026-10-14。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+
 ## 使用方式
 
 微信和 QQ **共用一个 `PersonaMemory` 实例和 `memory.json`**，不是两个各自增长的知识库。在「人格知识库 → 微信 ↔ QQ 身份关联」填写同一个人的微信发送者 ID 与 QQ 号并关联。发送者 ID 可从消息记录看到；不是机器人的登录账号。

@@ -1,294 +1,121 @@
-# 微信 AI 助手 · 桌面版
+# WxBot 桌面版 · v2.1.3
 
-用 Electron 封装的桌面应用：**有关闭即后台静默运行、有系统托盘入口、可打包成单一安装包**。
+文档更新：2026-10-14。Electron 外壳 + Python sidecar，复用 `src/web`；关闭窗口隐藏到托盘，真正退出先清理后台。
 
----
+[下载当前版本](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
 
-## 架构：外壳与引擎分离
+## 发布产物
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Electron 主进程                                             │
-│                                                              │
-│   ┌────────────────┐  ┌────────────────┐  ┌──────────────┐  │
-│   │ WindowManager  │  │  TrayManager   │  │   Backend    │  │
-│   │ 窗口           │  │ 系统托盘       │  │ 子进程管理    │  │
-│   │ 关闭=隐藏      │  │ 后台入口       │  │ 健康检查/重启 │  │
-│   └────────────────┘  └────────────────┘  └───────┬──────┘  │
-│                                                    │         │
-│   ┌────────────────────────────────────────────────▼──────┐ │
-│   │  preload（contextBridge）                             │ │
-│   │  只暴露白名单方法，渲染进程拿不到 Node                │ │
-│   └───────────────────────────────────────────────────────┘ │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ http://127.0.0.1:<随机端口>
-┌──────────────────────────────▼──────────────────────────────┐
-│  渲染进程 —— 直接复用仓库里的 src/web 界面                    │
-│  （与浏览器版是同一套 HTML/CSS/JS，通过 wxbotDesktop 增强）    │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────┐
-│  Python 引擎（PyInstaller 打成单文件二进制）                  │
-│  适配器 / 触发判定 / 上下文 / LLM 网关 / 发送器                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**为什么不让 Electron 重写引擎？**
-Python 引擎有 6400 行、39 项测试覆盖，且大量逻辑（五层触发漏斗、群聊 @ 检测的三种格式、U+2005 分隔符处理、上下文压缩）都是踩坑换来的。用 sidecar 方式复用，比用 Node 重写一遍风险低得多，而且**用户机器上不需要装 Python**（引擎已打包成二进制）。
-
----
-
-## 目录结构
-
-```
-desktop/
-├── package.json                Electron 工程配置
-├── electron-builder.yml        打包配置（dmg / nsis / portable）
-├── src/
-│   ├── main/                   主进程（Node 环境，有完整系统权限）
-│   │   ├── index.js            入口：编排所有模块 + 应用生命周期
-│   │   ├── window.js           窗口管理（★ 关闭=隐藏）
-│   │   ├── tray.js             系统托盘（★ 后台运行的前台入口）
-│   │   ├── backend.js          Python 子进程管理（健康检查/重启/日志）
-│   │   ├── ipc.js              IPC 白名单接口
-│   │   └── paths.js            跨平台路径解析（开发态 vs 打包态）
-│   └── preload/
-│       └── index.js            contextBridge 安全桥接
-├── backend/
-│   └── entry.py                PyInstaller 打包入口
-├── scripts/
-│   ├── build-backend.sh        macOS/Linux：打包 Python 后端
-│   ├── build-backend.bat       Windows：打包 Python 后端
-│   └── make-icons.py           生成应用/托盘图标
-├── assets/                     图标（icon.png/icns/ico、tray*.png）
-└── resources/backend/          ← 打包产物（wxbot-server[.exe]）
-```
-
-**模块化设计**：每个模块职责单一、互不依赖。`window.js` / `tray.js` / `backend.js` 都不知道对方存在，全部由 `index.js` 编排。想换掉 Python 后端，只改 `backend.js` + `paths.js` 两个文件即可。
-
----
-
-## 开发调试
-
-```bash
-cd desktop
-npm install
-
-# 首次需要生成图标
-npm run icons
-
-# 启动（会自动拉起仓库根目录 .venv 里的 Python 后端）
-npm start
-```
-
-**开发态行为**：`paths.js` 检测到未打包时，会用仓库根目录的 `.venv/bin/python3 -m src.server` 作为后端。所以改 Python 代码后重启应用即可生效，不用重新打包。
-
----
-
-## 打包发布
-
-### 第一步：打包 Python 后端
-
-```bash
-npm run build:backend        # macOS / Linux
-npm run build:backend:win    # Windows
-```
-
-脚本会：
-1. 用 PyInstaller 把整个 Python 引擎打成单文件二进制
-2. 把 `src/web` 静态资源一起塞进去
-3. **自动做冒烟测试** —— 真的启动一次并探测 `/healthz`，不通过就直接失败
-
-产物：`resources/backend/wxbot-server`（约 20-30 MB）
-
-### 第二步：打包桌面应用
-
-```bash
-npm run pack:mac      # 产出 .dmg（arm64）
-npm run pack:mac:x64  # 产出 .dmg（Intel Mac 用）
-npm run pack:win      # 产出 NSIS 安装包 + 免安装 exe
-npm run pack:all      # 当前系统的原生平台包
-```
-
-产物在 `desktop/dist/`：
-
-| 平台 | 文件 | 说明 |
+| 平台 | 文件 | 当前状态 |
 |---|---|---|
-| macOS | `WxBot-2.1.3-macOS-arm64.dmg` | Apple Silicon，拖进 Applications 即可 |
-| macOS | `WxBot-2.1.3-macOS-x64.dmg` | Intel Mac（需用 `pack:mac:x64`） |
-| Windows | `WxBot-2.1.3-Windows-x64-Setup.exe` | 安装向导，可自选目录 |
-| Windows | `WxBot-2.1.3-Windows-x64-Portable.exe` | 免安装单文件 |
+| Windows x64 | `WxBot-2.1.3-Windows-x64-Setup.exe` | NSIS 安装向导，已发布并实测安装/重装 |
+| Windows x64 | `WxBot-2.1.3-Windows-x64-Portable.exe` | 单文件便携包，已发布并实测启动；运行时仍解包内部目录 |
+| macOS arm64 | `WxBot-2.1.3-macOS-arm64.dmg` | Apple Silicon，已发布并验证三项 arm64 架构及 DMG 校验 |
+| 校验文件 | `SHA256SUMS.txt` | 三个二进制文件 SHA256 |
 
-> **跨平台限制**：macOS 上只能打 mac 包，Windows 上只能打 win 包。要同时出两个平台的包，需要在对应系统上分别执行（或用 CI）。
+本版本没有已发布的 Intel Mac、Windows ARM64/32位、Linux AppImage 或 universal 包。Intel 构建命令只是可执行入口，不等于已经构建/上传或实测该架构。
 
-#### ⚠️ 架构必须显式且唯一
+## 架构和资源布局
 
-打包脚本末尾会自动执行 `scripts/verify-arch.sh` 校验架构，**校验不过就直接失败**。
-
-这个校验是有必要的 —— 曾经踩过坑：`electron-builder.yml` 里 `mac.target.arch`
-写成了 `[arm64, x64]`，命令行的 `--arm64` **并未覆盖它**，结果两个架构都被构建，
-最终产出的 DMG 落到了 x64 那份上。用户装到 Apple Silicon 机器上，macOS 提示
-"此应用为 Intel 芯片设计，将来不会再被支持"，只能通过 Rosetta 运行。
-**这类问题在打包日志里完全看不出来**，必须主动校验二进制。
-
-手动校验：
-
-```bash
-npm run verify:arch          # 校验 arm64
-bash scripts/verify-arch.sh x64
+```text
+Electron: 窗口 / 托盘 / IPC / Backend进程管理
+                  │ 127.0.0.1:17800（占用时空闲端口）
+                  ▼
+Python: Web/API / iLink / OneBot / LLM / 人格 / 记忆 / 统计
+                  │
+                  ▼
+固定用户数据目录（不是安装目录）
 ```
 
-它会检查主程序、Electron Framework、Python 后端三个二进制，并统计包内是否有
-架构不一致的残留。
+| 平台 | Python 打包方式 | 内置可执行文件 |
+|---|---|---|
+| macOS | PyInstaller onefile | `resources/backend/wxbot-server` |
+| Windows | PyInstaller onedir | `resources/backend/wxbot-server/wxbot-server.exe`，同时包含 `_internal/` |
 
-### 未签名应用首次打开
+Windows 优先新 onedir 路径，仍兼容旧平铺 `resources/backend/wxbot-server.exe`。不要只复制 onedir 内的 exe；词典、时区和 Python 支持文件同样需要。网页同时作为独立 `resources/web` 和后端冻结资源提供。
 
-本项目未配置代码签名证书，因此：
+主要模块：`src/main/index.js` 编排；`window.js` 窗口；`tray.js` 托盘；`backend.js` 启动/健康/重启/日志；`lifecycle.js` 退出守卫与错误页；`ipc.js` 白名单；`paths.js` 后端与数据路径；`src/preload/index.js` 提供 `wxbotDesktop` 桥接。渲染页面不启用 Node 集成。
 
-- **macOS**：首次打开会提示"无法验证开发者"。右键点应用 → **打开** → 再点"打开"即可（只需一次）。若提示已损坏，执行：
-  ```bash
-  xattr -cr "/Applications/微信AI助手.app"
-  ```
-- **Windows**：SmartScreen 会提示"未知发布者"，点"更多信息" → "仍要运行"。
+## 开发
 
-要消除这些提示，需要购买 Apple Developer（$99/年）和 Windows 代码签名证书，然后在 `electron-builder.yml` 里配置。
+先在仓库根目录建立 Python 3.10+ 虚拟环境并安装 `requirements.txt`，再安装 Node.js 和桌面锁定依赖：
 
----
-
-## 后台运行是怎么实现的
-
-这是桌面版最核心的行为，由三处配合完成：
-
-**① 拦截窗口关闭事件**（`window.js`）
-```javascript
-this.win.on('close', (e) => {
-  if (!app.isQuitting) {
-    e.preventDefault();   // 不销毁窗口
-    this.hide();          // 只隐藏
-  }
-});
+```sh
+cd desktop
+npm ci
+npm start
+# 或跨平台开发入口
+npm run dev
 ```
 
-**② 关掉所有窗口不退出**（`index.js`）
-```javascript
-app.on('window-all-closed', () => {
-  // 故意留空 —— 应用继续在托盘里运行
-});
+开发态优先仓库 `.venv`，Windows 查找 `.venv/Scripts/python.exe`，macOS/Linux 查找 `.venv/bin/python3`，并检查解释器版本。图标已随仓库提供；需要重新生成时执行 `npm run icons`，使用带 Pillow 的 Python。
+
+## 原生构建
+
+### macOS
+
+```sh
+cd desktop
+npm ci
+npm run pack:mac
+# 需要 Intel 时，在原生 Intel 环境准备匹配的 Python/Electron架构
+npm run pack:mac:x64
 ```
 
-**③ 托盘作为前台入口**（`tray.js`）
+`pack:mac` 先构建 onefile 后端，再生成 DMG，最后校验 Electron 主程序、Framework 和 Python 的架构。后端脚本另有真实 `/healthz` 冒烟。构建日志出错或仅出现 DMG 文件不等于验收通过，需要检查完整退出状态、架构与 `hdiutil verify`。
 
-菜单结构刻意保持极简，用户关掉窗口后能凭直觉找到出路：
-
-```
-打开主界面          ← 恢复窗口
-────────────────
-服务状态：运行中     ← 一眼看到机器人是否在跑
-重启后台服务
-────────────────
-退出                ← 真正退出（会先停掉后端）
-```
-
-**真正退出的三个入口**（都会先优雅停止 Python 进程）：
-1. 托盘菜单 → 退出
-2. 界面「模型与行为」页 → 桌面应用 → 退出应用
-3. `Cmd/Ctrl+Q`
-
-**macOS 细节**：窗口隐藏后 Dock 图标也会收起，更像"后台静默"；点 Dock 图标或托盘菜单可恢复。若托盘图标加载失败，则不会收起 Dock 图标，保证用户永远有入口。
-
----
-
-## 数据存放位置
-
-代码目录与数据目录分离 —— 卸载/重装应用不会丢数据：
-
-| 平台 | 数据目录 |
-|---|---|
-| macOS | `~/Library/Application Support/wxbot-desktop/data/` |
-| Windows | `%LOCALAPPDATA%\WxBot\user-data\` |
-| Linux | `~/.config/wxbot-desktop/data/` |
-
-日志在 `.../wxbot-desktop/logs/backend.log`。界面里可以一键打开这两个目录。
-
-> 打包配置里 `deleteAppDataOnUninstall: false` —— **卸载时不删数据**，避免误删配置和聊天记录。要彻底清理请手动删除上述目录。
-
----
-
-## 故障排查
-
-| 现象 | 原因与处理 |
-|---|---|
-| macOS 提示"此应用为 Intel 芯片设计" | 打成了 x64 包。检查 `electron-builder.yml` 的 `mac.target.arch` 是否为单一 `[arm64]`，然后重新打包并跑 `npm run verify:arch` |
-| 窗口显示"后台服务启动失败" | 点「查看运行日志」看 `backend.log`；常见原因是端口被占或后端二进制缺失 |
-| 托盘图标不见了 | 菜单栏图标可能被系统折叠；macOS 可在「系统设置 → 控制中心」里调整 |
-| 关闭窗口后找不到应用 | 看菜单栏托盘图标；macOS 也可点 Dock 图标 |
-| 打包后启动白屏 | 检查 `extraResources` 里的 `web` 目录是否真的被打进去了 |
-| 首次打开提示"已损坏" | `xattr -cr "/Applications/微信AI助手.app"` |
-| 打包报 `asar` 写入失败 | 若你的环境有文件写入限制（企业沙箱等），可临时加 `--config.asar=false` 跳过归档。正式发布建议保持 asar 开启（体积更小、启动更快） |
-| 打包报 `hdiutil detach` 失败 | DMG 其实已经生成，只是卸载虚拟磁盘失败。检查 `dist/*.dmg` 是否存在，存在即成功 |
-| 启动报 `NODE_OPTIONS is not supported` | 无害提示，是外部环境设置了 `NODE_OPTIONS`，Electron 打包应用会忽略它 |
-
----
-
-## 已知限制
-
-- **未签名**：首次打开需要用户手动放行（见上文）
-- **不支持跨平台交叉打包**：在 mac 上打不出 win 包
-- **不提供 universal 包**：macOS 的 arm64 与 x64 是两个独立产物。
-  做 universal 需要 Electron 与 Python 后端**两者**都是 fat binary，
-  而 PyInstaller 无法直接产出 universal 二进制（需分别构建再 `lipo -create` 合并）
-- **sidecar 体积**：打包后约 120-130 MB（Electron 运行时占大头，Python 引擎约 22 MB）
-- **仅 x64/arm64**：未提供 32 位版本
-
----
-
-## 实测记录
-
-以下是在 macOS 26.5.2 / arm64 上跑通的完整链路（可作为验收参考）：
-
-```
-① 后端打包
-   $ npm run build:backend
-   ✓ 后端打包完成：resources/backend/wxbot-server（22M）
-   ✓ 冒烟测试通过，后端可正常启动
-
-② 桌面应用打包
-   $ npm run pack:mac
-   • packaging  platform=darwin arch=arm64 electron=36.9.5
-   • building   target=DMG arch=arm64 file=dist/WxBot-2.1.3-macOS-arm64.dmg
-   ✓ dist/WxBot-2.1.3-macOS-arm64.dmg（124M）
-   ✓ dist/mac-arm64/微信AI助手.app
-
-③ 打包产物核查
-   ✓ Contents/MacOS/微信AI助手
-   ✓ Contents/Resources/backend/wxbot-server（22M，内置引擎）
-   ✓ Contents/Resources/web/index.html
-   ✓ Info.plist: 微信AI助手 / com.siriuspeng.wxbot / 1.0.0
-
-④ 运行打包后的应用
-   [spawn] .../微信AI助手.app/Contents/Resources/backend/wxbot-server (port=49413)
-   [ready] http://127.0.0.1:49413
-   → 打包版正确识别打包态，使用内置二进制而非系统 Python
-
-⑤ 架构校验
-   $ npm run verify:arch
-   ✓ 主可执行文件       —— arm64
-   ✓ Electron Framework —— arm64
-   ✓ Python 后端 sidecar —— arm64
-   架构校验通过 —— 可以分发
-```
-
-
-## Windows原生发布（v2.1.3）
+### Windows x64
 
 ```powershell
 cd desktop
 npm ci
+npm run test:windows
 npm run pack:win
 ```
 
-输出`WxBot-2.1.3-Windows-x64-Setup.exe`及`WxBot-2.1.3-Windows-x64-Portable.exe`。必须在Windows上构建Python侧后端，macOS sidecar不能放入Windows安装包。PowerShell构建脚本支持有空格的Python/工程路径，并在任一步失败时退出。退出/重启使用认证本机关闭接口；Windows兜底只清理该后端的PID进程树。
+`build-backend.bat` 调用 PowerShell 脚本，要求原生 x64 Python 3.10+，构建 onedir 并检查 PE；`pack:win` 随后生成 Setup/Portable 并验证 PE、ASAR 版本、完整后端文件树、Jieba 词典和 `Asia/Shanghai` 时区资源。路径包含中文/空格的原生源码与运行数据已验证。
 
-### v2.1.3 Windows 启动与退出
+需要逐段排查时：`npm run build:backend:win`、`npm run verify:win`；macOS/Linux 后端入口为 `npm run build:backend`。`pack:all` 只选择当前原生平台，不在 macOS 交叉构建 Windows Python 引擎。输出均在 `desktop/dist`。
 
-Windows 后端使用 onedir 原生目录，安装包同时带上 `_internal` 支持文件；不得只分发内部 exe。Setup / Portable 用户下载方式不变。启动/重启任务合并、超时清理、退出守卫与真正的错误页重试详见 [专项说明](../docs/windows-v2.1.3.md)。
+### 包装后的离线验证
+
+在 Windows 的仓库根目录，用原生 Node/Python运行：
+
+```powershell
+node tools/verify_windows_manager.cjs "BACKEND.exe" "MANAGER_REPORT.json"
+python tools/verify_windows_backend.py --binary "BACKEND.exe" --report "BACKEND_REPORT.json"
+```
+
+这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.3.json)。
+
+## 启动、托盘和退出
+
+- 后端首选固定端口17800，避免反向WS配置随每次启动变化；占用时回退，并由运行时使用真实端口。
+- 窗口关闭只是隐藏，后台与平台连接继续。托盘「打开主界面」恢复；「退出」、应用退出入口及 `Cmd/Ctrl+Q` 走统一清理。
+- 并发启动/重启复用同一个就绪任务。停止会取消待启动/退避重启；旧子进程退出事件不覆盖新实例。启动超时先清理本次进程。
+- 优先调用认证的本机 shutdown；Windows 超时仅按本次 PID 清理进程树，不按名称结束其他进程。
+- 错误页「重试启动后端」真正重启服务，不是重新加载错误页。详细日志在数据目录的 `logs/backend.log`。
+- macOS 隐藏后可收起 Dock；托盘失败时保留应用入口。
+
+## 数据位置
+
+| 平台 | 默认活动数据 |
+|---|---|
+| Windows | `%LOCALAPPDATA%\WxBot\user-data` |
+| macOS | `~/Library/Application Support/WxBot/user-data` |
+| Linux源码 | `$XDG_DATA_HOME/wxbot/user-data`，默认 `~/.local/share/wxbot/user-data` |
+
+Electron 自身 profile/cache 与应用长期数据不是同一个目录。普通卸载保留长期数据，`deleteAppDataOnUninstall: false` 同时保留旧 profile；新版本复制迁移可识别的旧数据，不覆盖现有目标。自定义目录优先，实际路径从界面查看；自行放回安装目录时需先备份，不能沿用默认独立目录的保留前提。NapCat 登录状态属于独立 Docker 卷。恢复与备份见[持久化说明](../docs/user-data-persistence.md)。
+
+## 故障排查
+
+| 现象 | 检查 |
+|---|---|
+| 后台启动失败 | 错误页重试、帮助菜单重启；检查数据目录日志、完整 sidecar 资源和匹配架构 |
+| QQ在线但收不到消息 | 区分QQ登录、机器人启动和反向WS/HTTP上报；Windows Docker使用独立callback-only端口及OneBot Token |
+| 设置没有生效 | 使用对应卡片保存按钮；通道变化依接口提示重启机器人，其他支持的配置热更新 |
+| 记忆似乎丢失 | 查看实际数据路径/自定义环境变量、迁移报告与本地备份，不要先覆盖旧目录 |
+| 首次打开系统拦截 | 包未配置代码签名，按系统对本次下载的验证/打开流程处理；不要把文件存在当成校验成功 |
+| 安装退出后仍有后台 | 检查本版本的退出守卫/认证shutdown与日志；关闭窗口≠退出 |
+
+本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。v2.1.3 的运行时构建依赖和文件摘要记录在发布清单；文档更新不会修改已发布安装包或移动发布标签。

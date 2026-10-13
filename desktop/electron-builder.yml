@@ -2,9 +2,9 @@
 #  electron-builder 打包配置
 #
 #  产出：
-#    macOS   → dist/微信AI助手-<版本>-arm64.dmg / -x64.dmg
-#    Windows → dist/微信AI助手 Setup <版本>.exe（NSIS 安装包）
-#              dist/微信AI助手 <版本>.exe（免安装单文件）
+#    macOS   → dist/WxBot-${version}-macOS-${arch}.dmg
+#    Windows → dist/WxBot-${version}-Windows-x64-Setup.exe（NSIS 安装包）
+#              dist/WxBot-${version}-Windows-x64-Portable.exe（免安装单文件）
 # ═══════════════════════════════════════════════════════════════
 
 appId: com.siriuspeng.wxbot
@@ -27,7 +27,7 @@ extraResources:
   # 网页界面（Python 后端直接读这个目录）
   - from: ../src/web
     to: web
-  # Python 后端二进制（由 scripts/build-backend.sh 产出）
+  # Python 后端：macOS onefile / Windows onedir（由对应原生脚本产出）
   - from: resources/backend
     to: backend
   # 图标资源

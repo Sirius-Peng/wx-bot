@@ -35,7 +35,7 @@ class AdapterConfig:
     type: str = ""                    # deprecated，仅用于迁移旧配置
 
     # ── 微信通道 ──────────────────────────────────────────────
-    # 只保留腾讯官方 iLink（合规、零封号、仅私聊）。个人微信的群聊能力已整体下线：
+    # 只保留腾讯 iLink（本项目仅私聊）。个人微信的群聊能力已整体下线：
     # 非官方协议端维护状态不可控，与其留一个随时会坏的通道，不如只保留官方这一条。
     wechat_enabled: bool = True
     bot_nickname: str = ""            # QQ 群 @ 用的昵称（同时作为机器人名的兜底）
@@ -152,7 +152,7 @@ class ConfigStore:
 
         # ⚠️ 个人微信的群聊通道（GeWe / WeChatPadPro 等非官方协议端）已整体下线，
         # 旧配置一律归到腾讯官方 iLink —— 与其留一个随时会坏的通道，
-        # 不如只保留官方这一条（合规、零封号，仅私聊）。
+        # 不如只保留iLink这一条（本项目仅私聊）。
         if cfg.adapter.wechat_type != "ilink":
             cfg.adapter.wechat_type = "ilink"
 
