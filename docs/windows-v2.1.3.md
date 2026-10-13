@@ -30,6 +30,6 @@ npm run pack:win
 产物：`WxBot-2.1.3-Windows-x64-Setup.exe` / `WxBot-2.1.3-Windows-x64-Portable.exe`。
 安装后无需 Python/Node。默认数据位于 `%LOCALAPPDATA%\WxBot\user-data`，不放安装目录；卸载不删除此目录。
 
-离线回归不使用真实聊天或付费模型。原生安装测试在临时中文/空格目录进行；保留默认数据哈希，测试原生 x64 后端、认证、统计词典、时区、首启引导、备份/记忆、端口占用回退、重启、退出和卸载/重装。结果以发布时的验证报告为准，账号登录/模型密钥需要用户自行配置。
+离线回归不使用真实聊天或付费模型。原生测试使用独立安装目录和中文/空格运行数据目录；保留默认数据哈希，测试原生 x64 后端、认证、统计词典、时区、首启引导、备份/记忆、端口占用回退、重启、退出和卸载/重装。结果以发布时的验证报告为准，账号登录/模型密钥需要用户自行配置。
 
 依据：[PyInstaller运行模式](https://pyinstaller.org/en/stable/operating-mode.html)说明 onefile 每次启动解包；[Electron before-quit](https://www.electronjs.org/docs/latest/api/app#event-before-quit)允许在退出前等待清理。
