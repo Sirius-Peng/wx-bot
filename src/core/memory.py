@@ -18,7 +18,10 @@
 """
 from __future__ import annotations
 
+import copy
 import json
+import os
+import tempfile
 import logging
 import math
 import re
@@ -87,16 +90,26 @@ EXTRACT_PROMPT = """从下面这段对话中，抽取值得**长期记住**的�
 - 一次性的提问或请求（"帮我查下天气"）
 - 寒暄、情绪化表达（"哈哈哈"、"谢谢"）
 - 很快就会过时的临时信息
-- 你自己说过的话（只记关于用户的信息）
+- 助手的角色设定、示例、台词和推测（只记用户亲自明确表达的信息）
+- 假设、引用、角色扮演、用户描述的虚构人物；例如“我是漂泊者”不等于现实身份
+- 用户明确说不要记忆的内容；昵称/账号ID不作为未确认身份
 
 【输出格式】严格输出 JSON 数组，不要任何其他内容：
-[{"category":"fact|preference|relation|event|style","content":"一句话描述","keywords":["关键词"]}]
+[{{"category":"fact","content":"一句话描述","keywords":["关键词"]}}]
+category 必须是 fact、preference、relation、event、style 之一。
 
 没有值得记的就输出 []
 
 【对话】
 {conversation}
 """
+
+
+class MemoryExtractionError(RuntimeError):
+    """Malformed/empty model output is a failure, not a successful empty extraction."""
+    def __init__(self, reason: str):
+        self.safe_reason = reason
+        super().__init__(reason)
 
 
 class PersonaMemory:
@@ -107,8 +120,11 @@ class PersonaMemory:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.llm = llm                  # 用于抽取记忆（走便宜模型）
         self.enabled = enabled
+        self.inject = True
         self._items: dict[str, MemoryItem] = {}
         self._load()
+        from .memory_learning import MemoryLearningQueue
+        self.learner = MemoryLearningQueue(self, self.path.with_name("memory-learning.json"))
 
     # ══ 持久化 ═══════════════════════════════════════════════
 
@@ -126,13 +142,16 @@ class PersonaMemory:
             log.warning("知识库加载失败，从空开始", exc_info=True)
 
     def _save(self) -> None:
+        data = {"version": 1, "items": [asdict(i) for i in self._items.values()]}
+        fd, temp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:
-            data = {"version": 1, "items": [asdict(i) for i in self._items.values()]}
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-            tmp.replace(self.path)          # 原子替换，避免写一半损坏
-        except Exception:
-            log.warning("知识库写盘失败", exc_info=True)
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=1)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp, self.path)
+        finally:
+            Path(temp).unlink(missing_ok=True)
 
     # ══ ① 抽取 ═══════════════════════════════════════════════
 
@@ -142,59 +161,63 @@ class PersonaMemory:
 
         @param history 最近几轮问答，形如 [{"user": "...", "assistant": "..."}]
         """
-        if not self.enabled or not self.llm or not history:
+        if not self.enabled:
+            raise MemoryExtractionError("automatic accumulation paused")
+        if not self.llm:
+            raise MemoryExtractionError("extraction provider not configured")
+        if not history:
             return []
-
-        convo = "\n".join(
-            f"用户({user_name}): {t.get('user','')}\n助手: {t.get('assistant','')}"
-            for t in history[-6:]
-        )
+        convo = "\n".join(f"用户({user_name}): {t.get('user', '')}" for t in history[-6:])
+        raw = await self.llm.complete(EXTRACT_PROMPT.format(conversation=convo), max_tokens=1200)
+        extracted = self._parse_json_array(raw, strict=True)
+        if not self.enabled:
+            raise MemoryExtractionError("automatic accumulation paused")
+        valid = []
+        for entry in extracted:
+            content = entry.get("content")
+            keywords = entry.get("keywords", [])
+            if (isinstance(content, str) and 0 < len(content.strip()) <= 200
+                    and isinstance(entry.get("category"), str) and entry["category"] in CATEGORIES and isinstance(keywords, list)
+                    and all(isinstance(k, str) for k in keywords)):
+                valid.append(entry)
+        if extracted and not valid:
+            raise MemoryExtractionError("invalid memory schema")
+        before = copy.deepcopy(self._items)
+        added = []
         try:
-            raw = await self.llm.complete(
-                EXTRACT_PROMPT.format(conversation=convo), max_tokens=600
-            )
-            extracted = self._parse_json_array(raw)
+            for entry in valid:
+                added.append(self._merge_or_create(
+                    scope=SCOPE_USER, owner_id=user_id, category=entry["category"],
+                    content=entry["content"].strip(), keywords=entry.get("keywords", []),
+                    source_chat=chat_id))
+            if added:
+                self._trim()
+                self._save()
+                log.info("知识库更新：新增/合并 %d 条", len(added))
         except Exception:
-            log.debug("记忆抽取失败", exc_info=True)
-            return []
-
-        added: list[MemoryItem] = []
-        for e in extracted:
-            content = str(e.get("content") or "").strip()
-            if not content or len(content) > 200:
-                continue
-            category = e.get("category") if e.get("category") in CATEGORIES else "fact"
-            kws = [str(k).strip() for k in (e.get("keywords") or []) if str(k).strip()]
-
-            item = self._merge_or_create(
-                scope=SCOPE_USER, owner_id=user_id, category=category,
-                content=content, keywords=kws, source_chat=chat_id,
-            )
-            added.append(item)
-
-        if added:
-            self._trim()
-            self._save()
-            log.info("知识库更新：新增/合并 %d 条", len(added))
+            self._items = before
+            raise
         return added
 
     @staticmethod
-    def _parse_json_array(raw: str) -> list[dict]:
-        """从模型输出里抠出 JSON 数组（模型常带 markdown 代码块或多余说明）。"""
-        if not raw:
+    def _parse_json_array(raw: str, strict: bool = False) -> list[dict]:
+        if not raw or not raw.strip():
+            if strict:
+                raise MemoryExtractionError("empty model response")
             return []
-        s = raw.strip()
-        # 去掉 ```json ... ``` 包裹
-        s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+        s = re.sub(r"^```[a-zA-Z]*\s*", "", raw.strip())
         s = re.sub(r"\s*```$", "", s)
-        # 截取第一个 [ 到最后一个 ]
         i, j = s.find("["), s.rfind("]")
-        if i < 0 or j <= i:
-            return []
         try:
+            if i < 0 or j <= i:
+                raise ValueError("missing array")
             arr = json.loads(s[i:j + 1])
-            return [x for x in arr if isinstance(x, dict)]
-        except json.JSONDecodeError:
+            if not isinstance(arr, list) or not all(isinstance(x, dict) for x in arr):
+                raise ValueError("invalid array elements")
+            return arr
+        except (ValueError, TypeError) as exc:
+            if strict:
+                raise MemoryExtractionError("invalid JSON array") from exc
             return []
 
     # ══ ② 融合 ═══════════════════════════════════════════════
@@ -311,7 +334,10 @@ class PersonaMemory:
             it.hits += 1
             picked.append(it)
         if picked:
-            self._save()
+            try:
+                self._save()
+            except OSError:
+                log.warning("记忆引用次数写盘失败，仍使用已加载的内容")
         return picked
 
     # ══ ④ 注入 ═══════════════════════════════════════════════
@@ -372,6 +398,7 @@ class PersonaMemory:
             n = len(ids)
             for i in ids:
                 del self._items[i]
+        self.learner.clear(scope, owner_id)
         self._save()
         return n
 
@@ -397,6 +424,8 @@ class PersonaMemory:
             owners.add(f"{it.scope}:{it.owner_id}")
         return {
             "total": len(self._items),
+            "enabled": bool(self.enabled), "inject": bool(self.inject),
+            "learning": self.learner.status(),
             "byCategory": by_cat,
             "byScope": by_scope,
             "owners": len(owners),

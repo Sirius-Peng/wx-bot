@@ -27,7 +27,8 @@ import os
 import secrets
 import time
 from collections import deque
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -37,7 +38,7 @@ from .adapters.base import BaseAdapter
 from .adapters.ilink import ILinkAdapter, derive_bot_id
 from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore
-from .core.context import ContextManager
+from .core.context import ContextManager, build_system_prompt
 from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
                           NAPCAT_WEBUI_PORT, DockerManager)
 from .core.http import explain_error, make_client
@@ -237,6 +238,8 @@ class BotRuntime:
         self.qq_orch: Optional[Orchestrator] = None
 
         self.running = False
+        self._lifecycle_lock = asyncio.Lock()
+        self._active_adapter_config: dict = {}
         self.last_error = ""
         self.started_at = 0.0
         self.platforms_running: set[str] = set()   # {"wechat", "qq"}
@@ -255,7 +258,13 @@ class BotRuntime:
     # ── 生命周期 ──────────────────────────────────────────────
 
     async def start(self) -> dict:
-        if self.running:
+        async with self._lifecycle_lock:
+            return await self._start()
+
+    async def _start(self) -> dict:
+        enabled = ({"wechat"} if self.cfg.adapter.wechat_enabled else set()) | (
+            {"qq"} if self.cfg.adapter.qq_enabled else set())
+        if self.running and enabled <= self.platforms_running:
             return {"ok": True, "message": "机器人已在运行"}
         self.cfg = self.config_store.load()
         try:
@@ -268,8 +277,10 @@ class BotRuntime:
         results: list[dict] = []
         a = self.cfg.adapter
 
-        if a.wechat_enabled:
+        if a.wechat_enabled and "wechat" not in self.platforms_running:
             try:
+                if self.wechat_adapter is not None:
+                    await self.wechat_adapter.stop()
                 self.wechat_adapter = self._build_wechat_adapter()
                 self.wechat_orch = self._build_orchestrator(
                     self.wechat_adapter, platform="wechat")
@@ -284,8 +295,10 @@ class BotRuntime:
                 results.append({"ok": False, "platform": "wechat",
                                 "message": f"微信通道启动失败：{e}"})
 
-        if a.qq_enabled:
+        if a.qq_enabled and "qq" not in self.platforms_running:
             try:
+                if self.qq_adapter is not None:
+                    await self.qq_adapter.stop()
                 self.qq_adapter = self._build_qq_adapter()
                 self.qq_orch = self._build_orchestrator(
                     self.qq_adapter, platform="qq")
@@ -303,11 +316,14 @@ class BotRuntime:
                 results.append({"ok": False, "platform": "qq",
                                 "message": f"QQ 通道启动失败：{e}"})
 
-        any_ok = any(r["ok"] for r in results)
+        any_ok = bool(self.platforms_running)
         self.running = any_ok
+        self._active_adapter_config = asdict(self.cfg.adapter)
         if any_ok:
-            self.last_error = ""
-            self.started_at = time.time()
+            self.start_learning()
+            errors = [r["message"] for r in results if not r["ok"]]
+            self.last_error = "；".join(errors)
+            self.started_at = self.started_at or time.time()
             return {"ok": True,
                     "message": "；".join(r["message"] for r in results),
                     "details": results}
@@ -333,12 +349,21 @@ class BotRuntime:
             return          # 已在跑，别起第二个（会重复收消息）
 
         async def runner() -> None:
+            cancelled = False
             try:
                 await adapter.poll_loop()
             except asyncio.CancelledError:
+                cancelled = True
                 raise
-            except Exception:
+            except Exception as e:
+                self.last_error = f"微信消息接收异常：{e}"
                 log.exception("iLink 长轮询异常退出")
+            finally:
+                if not cancelled and self.wechat_adapter is adapter:
+                    self.platforms_running.discard("wechat")
+                    self.running = bool(self.platforms_running)
+                    self.last_error = (getattr(adapter, "last_error", "")
+                                       or self.last_error or "微信消息接收已停止，请重新启动")
 
         self._ilink_task = asyncio.create_task(runner())
         log.info("iLink 长轮询已启动")
@@ -355,7 +380,18 @@ class BotRuntime:
         log.info("iLink 长轮询已停止")
 
     async def stop(self) -> dict:
+        async with self._lifecycle_lock:
+            return await self._stop()
+
+    async def _stop(self) -> dict:
         await self._stop_ilink_poller()
+        if self._qq_sync_task and not self._qq_sync_task.done():
+            self._qq_sync_task.cancel()
+            await asyncio.gather(self._qq_sync_task, return_exceptions=True)
+        self._qq_sync_task = None
+        for orch in (self.wechat_orch, self.qq_orch):
+            if orch is not None:
+                await orch.close()
         for name, adapter in (("wechat", self.wechat_adapter),
                               ("qq", self.qq_adapter)):
             if adapter is not None:
@@ -368,13 +404,46 @@ class BotRuntime:
         self.qq_adapter = None
         self.qq_orch = None
         self.running = False
+        self.started_at = 0.0
         self.platforms_running.clear()
+        if self.memory is not None:
+            await self.memory.learner.close()
+            if self.memory.llm is not None and hasattr(self.memory.llm, "aclose"):
+                await self.memory.llm.aclose()
         return {"ok": True, "message": "机器人已停止"}
 
     async def restart(self) -> dict:
-        await self.stop()
-        await asyncio.sleep(0.3)
-        return await self.start()
+        async with self._lifecycle_lock:
+            await self._stop()
+            return await self._start()
+
+    def apply_config(self, cfg: AppConfig) -> bool:
+        """行为/模型设置热更新；接入通道设置变更明确要求重启。"""
+        self.cfg = cfg
+        for orch in (self.wechat_orch, self.qq_orch):
+            if orch is None:
+                continue
+            orch.ctx.persona_profile = cfg.bot.persona_profile
+            orch.ctx.persona_relationship = cfg.bot.persona_relationship
+            orch.ctx.system_prompt = build_system_prompt(
+                cfg.bot.name, cfg.bot.persona, cfg.bot.persona_profile,
+                cfg.bot.persona_relationship)
+            orch.group_reply_at_sender = bool(cfg.bot.group_reply_at_sender)
+            orch.router.bot_name = cfg.bot.name
+            orch.llm.primary = ProviderCfg(
+                "primary", cfg.llm.primary_base, cfg.llm.primary_key,
+                cfg.llm.primary_model)
+            orch.llm.fallback = (ProviderCfg(
+                "fallback", cfg.llm.fallback_base, cfg.llm.fallback_key,
+                cfg.llm.fallback_model) if cfg.llm.fallback_key else None)
+        if self.memory is not None:
+            self.memory.enabled = bool(cfg.bot.memory_enabled)
+            self.memory.inject = bool(cfg.bot.memory_inject)
+            self.memory.extract_interval = max(1, int(cfg.bot.memory_extract_interval or 3))
+            if self.memory.llm is not None:
+                self.memory.llm.primary = self._memory_provider(cfg)
+            self.memory.learner.retry_now()
+        return bool(self.running and self._active_adapter_config != asdict(cfg.adapter))
 
     def status(self) -> dict:
         st = {
@@ -394,6 +463,8 @@ class BotRuntime:
                 st[f"{name}_platform"] = adapter.platform
         # 官方通道的收消息循环是否在跑 —— 界面/排查都用得上
         st["ilink_polling"] = bool(self._ilink_task and not self._ilink_task.done())
+        if self.wechat_adapter is not None and hasattr(self.wechat_adapter, "delivery_status"):
+            st["wechat_delivery"] = self.wechat_adapter.delivery_status()
         return st
 
     # ── 构建 ──────────────────────────────────────────────────
@@ -410,7 +481,7 @@ class BotRuntime:
 
     def _build_wechat_adapter(self) -> BaseAdapter:
         return ILinkAdapter(state_dir=str(self._ilink_state_dir()),
-                            bot_agent="WxBot/1.0")
+                            bot_agent="WxBot/1.3.4")
 
     def _build_qq_adapter(self) -> BaseAdapter:
         a = self.cfg.adapter
@@ -419,14 +490,32 @@ class BotRuntime:
             bot_qq=a.bot_qq, bot_nickname=a.bot_nickname or self.cfg.bot.name,
         )
 
+    @staticmethod
+    def _judge_provider(cfg: AppConfig) -> ProviderCfg:
+        l = cfg.llm
+        return ProviderCfg(
+            "judge", l.judge_base if l.judge_key else l.primary_base,
+            l.judge_key or l.primary_key,
+            l.judge_model if l.judge_key else l.primary_model,
+            timeout=8.0, max_tokens=600)
+
+    @staticmethod
+    def _memory_provider(cfg: AppConfig) -> ProviderCfg:
+        provider = BotRuntime._judge_provider(cfg)
+        provider.name = "memory"
+        provider.timeout = 30.0
+        provider.max_tokens = 1200
+        provider.temperature = 0.2
+        return provider
+
+    def start_learning(self) -> None:
+        self._ensure_memory().learner.start()
+
     def _build_orchestrator(self, adapter: BaseAdapter,
                             platform: str = "") -> Orchestrator:
         cfg = self.cfg
         # 判定模型只用于知识库抽取，不再做"该不该插话"的判定
-        judge_gw = LLMGateway(ProviderCfg(
-            name="judge", base_url=cfg.llm.judge_base, api_key=cfg.llm.judge_key,
-            model=cfg.llm.judge_model, timeout=8.0, max_tokens=600,
-        ))
+        judge_gw = LLMGateway(self._judge_provider(cfg))
         chat_gw = LLMGateway(
             primary=ProviderCfg(
                 name="primary", base_url=cfg.llm.primary_base,
@@ -441,10 +530,8 @@ class BotRuntime:
         judge = JudgeLLM(judge_gw, timeout=8.0)
         store = MemoryStore()
 
-        memory = PersonaMemory(
-            self.data_dir / "memory.json", llm=judge_gw,
-            enabled=bool(cfg.bot.memory_enabled),
-        )
+        memory = self._ensure_memory()
+        memory.enabled = bool(cfg.bot.memory_enabled)
         memory.extract_interval = max(1, int(cfg.bot.memory_extract_interval or 3))
         memory.inject = bool(cfg.bot.memory_inject)
         self.memory = memory
@@ -453,7 +540,9 @@ class BotRuntime:
         orch = Orchestrator(
             adapter=adapter, store=store, llm=chat_gw, judge=judge,
             ctx=ContextManager(store, bot_name=cfg.bot.name,
-                               persona=cfg.bot.persona),
+                               persona=cfg.bot.persona,
+                               persona_profile=cfg.bot.persona_profile,
+                               persona_relationship=cfg.bot.persona_relationship),
             router=TriggerRouter(bot_name=cfg.bot.name),
             sender=HumanLikeSender(adapter), memory=memory,
             group_reply_at_sender=bool(cfg.bot.group_reply_at_sender),
@@ -464,14 +553,15 @@ class BotRuntime:
     def _wire_logging(self, orch: Orchestrator, adapter: BaseAdapter,
                       platform: str = "") -> None:
         """挂日志钩子，让界面能看到每条消息的判定结果。"""
-        last: dict = {"layer": "", "reason": ""}
+        last: ContextVar = ContextVar("trigger_decision", default=("", ""))
+        replied_count: ContextVar = ContextVar("reply_count", default=0)
         plat = platform or adapter.platform
 
         orig_decide = orch.router.decide
 
         async def decide_wrapped(msg: WxMessage):
             d = await orig_decide(msg)
-            last["layer"], last["reason"] = d.layer, d.reason
+            last.set((d.layer, d.reason))
             return d
 
         orch.router.decide = decide_wrapped        # type: ignore[method-assign]
@@ -479,20 +569,29 @@ class BotRuntime:
         orig_process = orch._process
 
         async def process_wrapped(msg: WxMessage) -> None:
-            out_before = self.log._stats["out"]
+            marker = replied_count.set(0)
+            decision_marker = last.set(("", ""))
             try:
                 await orig_process(msg)
             finally:
-                replied = self.log._stats["out"] > out_before
-                self.log.add_in(msg, last.get("layer", ""),
-                                last.get("reason", ""), replied, platform=plat)
+                layer, reason = last.get()
+                self.log.add_in(msg, layer, reason, replied_count.get() > 0, platform=plat)
+                replied_count.reset(marker)
+                last.reset(decision_marker)
 
         orch._process = process_wrapped             # type: ignore[method-assign]
 
         orig_send = adapter.send_text
 
         async def send_wrapped(chat_id: str, text: str, at=None) -> str:
-            mid = await orig_send(chat_id, text, at=at)
+            try:
+                mid = await orig_send(chat_id, text, at=at)
+            except Exception as exc:
+                self.last_error = f"{plat} 回复接口提交失败：{type(exc).__name__}"
+                raise
+            if self.last_error.startswith(f"{plat} 回复接口提交失败："):
+                self.last_error = ""
+            replied_count.set(replied_count.get() + 1)
             self.log.add_out(WxMessage(
                 msg_id="", platform=plat,
                 chat_type=self._guess_chat_type(chat_id),
@@ -741,9 +840,12 @@ class BotRuntime:
         这样用户不启动机器人也能查看/编辑已有记忆。"""
         if self.memory is None:
             self.memory = PersonaMemory(
-                self.data_dir / "memory.json", llm=None,
+                self.data_dir / "memory.json", llm=LLMGateway(self._memory_provider(self.cfg)),
                 enabled=bool(self.cfg.bot.memory_enabled),
             )
+        self.memory.enabled = bool(self.cfg.bot.memory_enabled)
+        self.memory.inject = bool(self.cfg.bot.memory_inject)
+        self.memory.extract_interval = max(1, int(self.cfg.bot.memory_extract_interval or 3))
         return self.memory
 
     def memory_list(self, scope: str = "", owner_id: str = "",
@@ -775,6 +877,13 @@ class BotRuntime:
     def memory_clear(self, scope: str = "", owner_id: str = "") -> dict:
         n = self._ensure_memory().clear(scope, owner_id)
         return {"ok": True, "message": f"已清除 {n} 条记忆"}
+
+    def memory_retry_learning(self) -> dict:
+        memory = self._ensure_memory()
+        if not memory.enabled:
+            return {"ok": False, "message": "请先开启随对话自动积累记忆"}
+        count = memory.learner.retry_now()
+        return {"ok": True, "queued": count, "learning": memory.learner.status()}
 
     def memory_stats(self) -> dict:
         m = self._ensure_memory()

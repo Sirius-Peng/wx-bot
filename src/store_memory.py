@@ -37,6 +37,9 @@ class MemoryStore:
         self._seen[msg_id] = now
         return True
 
+    async def forget_seen(self, msg_id: str) -> None:
+        self._seen.pop(msg_id, None)
+
     # ── 上下文 ────────────────────────────────────────────────
 
     async def get_recent(self, key: str) -> list[dict]:

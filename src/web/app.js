@@ -24,6 +24,9 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
+  if (res.status === 401) {
+    throw new Error('管理会话已过期，请刷新页面并重新登录');
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -113,6 +116,7 @@ window.addEventListener('hashchange', () => {
 /* ══════════ 状态轮询 ══════════ */
 
 async function refreshStatus() {
+  if (STATE.page === 'memory') loadMemory();
   let s;
   try { s = await api('/api/status'); }
   catch { return; }
@@ -141,6 +145,13 @@ async function refreshStatus() {
   $('#hero-desc').textContent = running
     ? `正在接收消息：${rule}`
     : (s.last_error || '完成接入设置后点击「启动机器人」即可开始工作');
+  if (running && s.wechat_delivery) {
+    const d = s.wechat_delivery;
+    const label = { api_accepted: '接口已接受', retry_pending: '等待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status;
+    $('#hero-desc').textContent += `；微信排队 ${d.pending_inbound}，待重试 ${d.pending_replies}，${label}（提交 ${d.last_send_ms}ms）`;
+  }
+  if (running && s.last_error) $('#hero-desc').textContent += `；${s.last_error}`;
+
 
   const platforms = s.platforms || [];
   const platNames = platforms.map(p => p === 'wechat' ? '微信' : 'QQ').join(' · ');
@@ -234,6 +245,8 @@ async function loadConfig() {
   // 机器人行为
   $('#bot-name').value = c.bot.name || '';
   $('#bot-persona').value = c.bot.persona || '';
+  $('#persona-profile').value = c.bot.persona_profile || 'custom';
+  $('#persona-relationship').value = c.bot.persona_relationship || 'neutral';
   $('#group-at-sender').checked = c.bot.group_reply_at_sender !== false;
   $('#memory-enabled').checked = c.bot.memory_enabled !== false;
   $('#memory-inject').checked = c.bot.memory_inject !== false;
@@ -358,6 +371,8 @@ function collectConfig() {
   // 机器人行为
   c.bot.name = $('#bot-name').value.trim() || '小助手';
   c.bot.persona = $('#bot-persona').value.trim();
+  c.bot.persona_profile = $('#persona-profile').value;
+  c.bot.persona_relationship = $('#persona-relationship').value;
   c.bot.group_reply_at_sender = $('#group-at-sender').checked;
   c.bot.memory_enabled = $('#memory-enabled').checked;
   c.bot.memory_inject = $('#memory-inject').checked;
@@ -369,8 +384,15 @@ function collectConfig() {
 async function saveConfig() {
   try {
     const c = collectConfig();
-    await api('/api/config', { method: 'PUT', body: JSON.stringify(c) });
-    toast('配置已保存', 'ok');
+    const saved = await api('/api/config', { method: 'PUT', body: JSON.stringify(c) });
+    if (saved.requires_restart) {
+      const action = (c.adapter.wechat_enabled || c.adapter.qq_enabled) ? 'restart' : 'stop';
+      const restarted = await api(`/api/bot/${action}`, { method: 'POST' });
+      toast(restarted.ok ? '配置已应用' : restarted.message,
+            restarted.ok ? 'ok' : 'err');
+    } else {
+      toast(saved.message || '配置已保存并应用', 'ok');
+    }
     await loadConfig();
   } catch (e) {
     toast('保存失败：' + e.message, 'err');
@@ -902,6 +924,10 @@ function renderMemoryStats(s) {
   $('#mem-owners').textContent = `${s.owners || 0} 个对象`;
   $('#mem-conf').textContent = s.avgConfidence ? Math.round(s.avgConfidence * 100) + '%' : '—';
   $('#mem-enabled').textContent = s.enabled ? '已开启' : '已关闭';
+  const learning = s.learning || {};
+  const labels = { idle: '等待对话', queued: '等待抽取', extracting: '正在抽取', learned: '已保存', empty: '本批次没有长期信息', retry_wait: '抽取失败，等待重试', save_failed: '写盘失败', disabled: '自动积累已关闭', unconfigured: '抽取模型未配置' };
+  const detail = `${labels[learning.state] || '等待对话'} · 待处理 ${learning.pending_turns || 0} 条 · 已完成 ${learning.completed || 0} 批 · 模型 ${learning.model || '—'}`;
+  $('#memory-learning-status').textContent = detail + (learning.last_error ? ` · ${learning.last_error}` : '');
   const cats = s.byCategory || {};
   const n = Object.keys(cats).length;
   $('#mem-cats').textContent = n;
@@ -1061,6 +1087,13 @@ function bind() {
     $$('#mm-category button').forEach(x => x.classList.toggle('active', x === b));
   }));
   $('#mm-save').addEventListener('click', saveMemory);
+  $('#btn-mem-retry').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/memory/learning/retry', { method: 'POST' });
+      toast(result.ok ? `已重新排队 ${result.queued} 批` : result.message, result.ok ? 'ok' : 'err');
+      await loadMemory();
+    } catch (error) { toast('重试失败：' + error.message, 'err'); }
+  });
   $('#mm-close').addEventListener('click', () => $('#memory-modal').hidden = true);
   $('#mm-cancel').addEventListener('click', () => $('#memory-modal').hidden = true);
   $('#memory-modal').addEventListener('click', e => {
@@ -1093,6 +1126,17 @@ function bind() {
 
   // 设置
   $('#btn-save-settings').addEventListener('click', saveConfig);
+  $('#btn-phrolova-preset').addEventListener('click', async () => {
+    try {
+      const data = await api('/api/persona/profiles');
+      const preset = data.profiles.find(p => p.id === 'phrolova');
+      $('#bot-name').value = preset.default_name;
+      $('#bot-persona').value = preset.default_persona;
+      $('#persona-profile').value = preset.id;
+      $('#persona-relationship').value = 'neutral';
+      toast('弗洛洛预设已填入，请保存设置应用', 'ok');
+    } catch (error) { toast('预设读取失败：' + error.message, 'err'); }
+  });
 
   // 键盘
   document.addEventListener('keydown', e => {
@@ -1178,11 +1222,52 @@ function updateBackendLabel(state) {
   if (el) el.textContent = map[state] || state || '—';
 }
 
+async function loginAdmin() {
+  // Token 只提交给同源后端；不写 localStorage、不放 URL、不显示在日志中。
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#F4F6F8;display:grid;place-items:center';
+  overlay.innerHTML = `<form style="width:340px;background:white;padding:28px;border-radius:14px">
+    <h2>登录管理界面</h2>
+    <p>请输入 WXBOT_ADMIN_TOKEN 或数据目录 admin-token 文件中的管理 Token。</p>
+    <input type="password" required autocomplete="off" aria-label="管理 Token" style="width:100%;margin:14px 0">
+    <button type="submit" class="btn btn-primary">登录</button><p role="alert"></p>
+  </form>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('form');
+  const input = overlay.querySelector('input');
+  input.focus();
+  await new Promise(resolve => {
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const button = form.querySelector('button');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: input.value }),
+        });
+        if (!response.ok) throw new Error('登录失败，请检查管理 Token');
+        input.value = '';
+        overlay.remove();
+        resolve();
+      } catch (error) {
+        form.querySelector('[role=alert]').textContent = error.message;
+      } finally { button.disabled = false; }
+    });
+  });
+}
+
 /* ══════════ 启动 ══════════ */
 
 async function init() {
   bind();
   await initDesktop();          // 桌面版才生效，浏览器里直接跳过
+  const authCheck = await fetch('/api/config');
+  if (authCheck.status === 401) {
+    await loginAdmin();
+  } else if (!authCheck.ok) {
+    throw new Error(`HTTP ${authCheck.status}`);
+  }
   await loadConfig();
   // 支持通过 #memory / #messages 等直达页面
   const hash = location.hash.replace('#', '');

@@ -380,12 +380,14 @@
           </div>
         </div>
 
+        <div class="notice notice-info" id="memory-learning-status" role="status">自动积累状态加载中……</div>
         <div class="card">
           <div class="card-head">
             <h3>记忆列表</h3>
             <div class="head-actions">
               <input type="text" id="mem-search" class="input-sm" placeholder="搜索内容或关键词">
               <button class="btn btn-ghost btn-sm" id="btn-mem-refresh">刷新</button>
+              <button class="btn btn-ghost btn-sm" id="btn-mem-retry">重试待积累</button>
               <button class="btn btn-primary btn-sm" id="btn-mem-add">手动添加</button>
             </div>
           </div>
@@ -459,13 +461,24 @@
           <div class="field-grid">
             <label class="field">
               <span>机器人名称</span>
-              <input type="text" id="bot-name" placeholder="小助手">
+              <input type="text" id="bot-name" placeholder="弗洛洛">
               <em>群里 @ 它时用的名字；也是它在对话里的自称</em>
             </label>
+            <label class="field">
+              <span>人格预设</span>
+              <select id="persona-profile"><option value="phrolova">弗洛洛（鸣潮）</option><option value="custom">自定义人格</option></select>
+              <em>内置身份、行为与场景示例；不是模型权重微调</em>
+            </label>
+            <label class="field">
+              <span>关系模式</span>
+              <select id="persona-relationship"><option value="neutral">普通聊天（默认）</option><option value="trusted">信任日常</option><option value="rover">漂泊者剧情扮演</option></select>
+              <em>普通用户不会自动被当成漂泊者或恋人</em>
+            </label>
+            <div class="field field-full"><button type="button" class="btn btn-secondary" id="btn-phrolova-preset">填入弗洛洛预设</button></div>
             <label class="field field-full">
-              <span>人设描述</span>
+              <span>人设描述 / 预设补充偏好</span>
               <textarea id="bot-persona" rows="4" placeholder="例如：你是「小助手」，说话简洁友好，喜欢用短句。回答技术问题时先给结论再给理由，不确定的就直说不知道。"></textarea>
-              <em>决定机器人的身份、说话风格与边界，会写进每一轮对话的系统提示词</em>
+              <em>自定义模式决定全部人设；预设模式只补充偏好，不覆盖角色内核。保存后热更新。</em>
             </label>
           </div>
           <label class="switch-row">
@@ -489,7 +502,7 @@
             <label class="field">
               <span>每几轮对话抽取一次记忆</span>
               <input type="number" id="memory-interval" min="1" max="50" step="1" placeholder="3">
-              <em>数值越大越省 token，但记得越慢（默认 3）</em>
+              <em>连续对话按此值批量处理；首次、明确要求记住时立即抽取，不足一批空闲2秒后也会处理</em>
             </label>
           </div>
           <div class="card-foot">

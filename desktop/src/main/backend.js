@@ -7,7 +7,8 @@
  */
 'use strict';
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+const crypto = require('crypto');
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +24,8 @@ function tryPort(port) {
     srv.unref();
     srv.on('error', () => resolve(null));
     srv.listen(port, '127.0.0.1', () => {
-      srv.close(() => resolve(port));
+      const assignedPort = srv.address().port;
+      srv.close(() => resolve(assignedPort));
     });
   });
 }
@@ -70,6 +72,7 @@ class Backend extends EventEmitter {
     this.maxRestarts = 5;
     this._logStream = null;
     this._stopping = false;
+    this.controlToken = null;
   }
 
   get url() {
@@ -115,8 +118,12 @@ class Backend extends EventEmitter {
     // 先试固定端口（保持 QQ 网关配置长期有效），占用则退化为随机端口
     this.port = (await tryPort(PREFERRED_PORT)) || (await findFreePort());
 
+    this.controlToken = process.env.WXBOT_ADMIN_TOKEN || crypto.randomBytes(32).toString('hex');
     const env = {
       ...process.env,
+      WXBOT_ADMIN_TOKEN: this.controlToken,
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
       WXBOT_HOST: '127.0.0.1',
       WXBOT_PORT: String(this.port),
       WXBOT_DATA_DIR: P.userDataDir(),
@@ -197,32 +204,45 @@ class Backend extends EventEmitter {
     return { ok: false, error };
   }
 
-  /** 优雅停止 */
-  async stop() {
-    if (!this.proc) {
-      this.state = 'stopped';
-      return;
+  _requestShutdown() {
+    if (!this.port || !this.controlToken) return Promise.resolve(false);
+    return new Promise(resolve => {
+      const request = http.request({ host: '127.0.0.1', port: this.port,
+        path: '/api/app/shutdown', method: 'POST', timeout: 2000,
+        headers: { Authorization: `Bearer ${this.controlToken}` } }, response => {
+        response.resume(); resolve(response.statusCode === 200);
+      });
+      request.on('error', () => resolve(false));
+      request.on('timeout', () => { request.destroy(); resolve(false); });
+      request.end();
+    });
+  }
+
+  _killTree(proc) {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(proc.pid), '/T', '/F'], {
+        windowsHide: true, timeout: 5000, stdio: 'ignore',
+      });
+    } else {
+      try { proc.kill('SIGKILL'); } catch (_) { }
     }
+  }
+
+  /** 优雅关闭后端和子进程；Windows 不仅终止单文件引导器。 */
+  async stop() {
+    if (!this.proc) { this.state = 'stopped'; return; }
     this._stopping = true;
     const proc = this.proc;
-
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch (_) { /* 已退出 */ }
-        resolve();
-      }, 5000);
-
-      proc.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
+    await new Promise(resolve => {
+      const timer = setTimeout(() => { this._killTree(proc); resolve(); }, 8000);
+      proc.once('exit', () => { clearTimeout(timer); resolve(); });
+      this._requestShutdown().then(ok => {
+        if (this.proc !== proc) return;
+        if (!ok) {
+          if (process.platform === 'win32') this._killTree(proc);
+          else { try { proc.kill('SIGTERM'); } catch (_) { clearTimeout(timer); resolve(); } }
+        }
       });
-
-      try {
-        proc.kill('SIGTERM');
-      } catch (_) {
-        clearTimeout(timer);
-        resolve();
-      }
     });
   }
 

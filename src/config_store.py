@@ -15,6 +15,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .core.personality import PROFILE_IDS, RELATIONSHIP_IDS
+from .personas.phrolova import OVERVIEW
+
 CONFIG_DIR = Path(os.environ.get("WXBOT_DATA_DIR", "./data"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -72,8 +75,10 @@ class BotConfig:
     （见 `core/context.py::build_system_prompt`），
     `memory_*` 控制人格知识库。改了界面上的值就必须能看到行为变化。
     """
-    name: str = "小助手"
-    persona: str = "友好、简洁、乐于助人的助手"
+    name: str = "弗洛洛"
+    persona: str = OVERVIEW
+    persona_profile: str = "phrolova"
+    persona_relationship: str = "neutral"
     # 群聊里回复时是否 @ 提问者（QQ 群用）
     group_reply_at_sender: bool = True
 
@@ -138,7 +143,14 @@ class ConfigStore:
         cfg.llm = LLMConfig(**{k: v for k, v in l.items()
                                if k in LLMConfig.__dataclass_fields__})
 
-        b = raw.get("bot") or {}
+        b = dict(raw.get("bot") or {})
+        # 旧的明确自定义人设保持自定义；不擅自覆写其他用户的角色卡。
+        if "persona_profile" not in b and ("name" in b or "persona" in b):
+            b["persona_profile"] = "custom"
+        if not isinstance(b.get("persona_profile", "phrolova"), str) or b.get("persona_profile", "phrolova") not in PROFILE_IDS:
+            b["persona_profile"] = "custom"
+        if not isinstance(b.get("persona_relationship", "neutral"), str) or b.get("persona_relationship", "neutral") not in RELATIONSHIP_IDS:
+            b["persona_relationship"] = "neutral"
         cfg.bot = BotConfig(**{k: v for k, v in b.items()
                                if k in BotConfig.__dataclass_fields__})
 

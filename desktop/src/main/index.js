@@ -28,6 +28,13 @@ const { WindowManager } = require('./window');
 const { TrayManager } = require('./tray');
 const { registerIpc } = require('./ipc');
 
+// 可选隔离数据目录：测试/便携部署时不污染默认用户配置。
+if (process.env.WXBOT_USER_DATA_DIR) {
+  const dir = path.resolve(process.env.WXBOT_USER_DATA_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  app.setPath('userData', dir);
+}
+
 // ── 单实例：重复启动时激活已有窗口，而不是开第二个 ────────────
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

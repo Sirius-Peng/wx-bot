@@ -55,6 +55,7 @@ def _run(cmd: list[str], timeout: float = 20.0) -> tuple[int, str, str]:
     try:
         p = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WIN else 0,
             env={**os.environ, "PATH": _augmented_path()},
         )
         return p.returncode, p.stdout.strip(), p.stderr.strip()

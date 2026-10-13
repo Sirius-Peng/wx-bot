@@ -93,10 +93,10 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: 微信 AI 助手
   deleteAppDataOnUninstall: false      # 卸载不删数据，避免误删配置与聊天记录
-  artifactName: ${productName}-Setup-${version}.${ext}
+  artifactName: WxBot-${version}-Windows-${arch}-Setup.${ext}
 
 portable:
-  artifactName: ${productName}-${version}-portable.${ext}
+  artifactName: WxBot-${version}-Windows-${arch}-Portable.${ext}
 
 # ── Linux（可选，配置留好方便扩展）──────────────────────────
 linux:

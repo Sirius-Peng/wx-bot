@@ -1,300 +1,167 @@
-"""端到端测试：模拟一个 OneBot 11 网关，验证 QQ 链路是否真的通。
+"""Offline QQ end-to-end test: fake OneBot + fake LLM, real HTTP and WS routes.
 
-运行：
-    python -m src.verify_qq
-
-做的事：
-  1. 起一个假的 OneBot 网关（HTTP API + 反向 WebSocket）
-  2. 起本程序，配置成 QQ 通道
-  3. 假网关连上本程序的 /ws/onebot，推送一条群消息（@机器人）
-  4. 检查本程序是否通过 HTTP API 把回复发回假网关
-  5. 检查知识库是否从对话中积累了记忆
+Run: python -m src.verify_qq. Failed assertions produce a nonzero exit status.
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import sys
+import os
+from pathlib import Path
+import socket
 import tempfile
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import uvicorn
+import websockets
 
-# 假网关收到的消息（供断言）
-RECEIVED: list[dict] = []
+TOKEN = "test-onebot-token"
+ADMIN_TOKEN = "test-admin-token"
 LOGIN_INFO = {"user_id": 10001, "nickname": "测试机器人"}
+RECEIVED: list[dict] = []
 
 
 class MockOneBotHandler(BaseHTTPRequestHandler):
-    """假的 OneBot HTTP API。"""
-
-    def log_message(self, *a):        # 静音
-        pass
+    def log_message(self, *args): pass
 
     def do_POST(self):
         action = self.path.lstrip("/")
-        length = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(length) or b"{}")
-
-        # 校验 Token（与真实网关行为一致）
-        if TOKEN:
-            auth = self.headers.get("Authorization", "")
-            if auth != f"Bearer {TOKEN}":
-                self._json({"status": "failed", "retcode": 403,
-                            "message": "token 错误"})
-                return
-
-        if action == "get_login_info":
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            self._json({"status": "failed", "retcode": 403, "message": "token 错误"})
+        elif action == "get_login_info":
             self._json({"status": "ok", "retcode": 0, "data": LOGIN_INFO})
         elif action in ("send_group_msg", "send_private_msg"):
             RECEIVED.append({"action": action, **body})
-            self._json({"status": "ok", "retcode": 0,
-                        "data": {"message_id": 9999}})
-        elif action == "get_group_member_info":
-            self._json({"status": "ok", "retcode": 0, "data": {
-                "user_id": body.get("user_id"), "nickname": "测试用户",
-                "card": "测试-群名片", "role": "member"}})
+            self._json({"status": "ok", "retcode": 0, "data": {"message_id":len(RECEIVED)}})
         else:
             self._json({"status": "ok", "retcode": 0, "data": {}})
 
-    def _json(self, obj):
-        raw = json.dumps(obj).encode()
+    def _json(self, body):
+        data = json.dumps(body).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(raw)
+        self.wfile.write(data)
 
 
-TOKEN = "test-token-abc"
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
-def start_mock_gateway(port: int) -> HTTPServer:
-    srv = HTTPServer(("127.0.0.1", port), MockOneBotHandler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
+async def wait_until(predicate, timeout=5):
+    deadline = asyncio.get_running_loop().time()+timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate(): return
+        await asyncio.sleep(0.02)
+    raise AssertionError("expected QQ event/reply was not observed")
 
 
-async def push_event_via_ws(ws_url: str, event: dict) -> bool:
-    """假网关通过反向 WebSocket 推送一条事件。"""
-    try:
-        import websockets
-    except ImportError:
-        print("  ⚠ 未安装 websockets，跳过 WS 测试")
-        return False
-
-    try:
-        async with websockets.connect(ws_url,
-                                      additional_headers={"Authorization": f"Bearer {TOKEN}"}) as ws:
-            await ws.send(json.dumps(event))
-            await asyncio.sleep(3)          # 给程序处理时间
-            return True
-    except Exception as e:
-        print(f"  ✗ WebSocket 连接失败：{e}")
-        return False
+async def fake_stream(self, messages, **kwargs):
+    yield "离线模型回复第一句，内容超过首段发送阈值，现在仍需等待生成结束。\n\n"
+    yield "第二句会合并到同一条回复里。"
 
 
-async def check_reverse_ws_visibility(app_port: int) -> bool:
-    """验证「网关有没有把消息推过来」这件事在界面上看得见。
-
-    真实故障：桌面版每次启动都会换端口，而 NapCat 的反向 WS 地址是部署时
-    写死的 → HTTP 探测一切正常、界面显示"已登录"，但 QQ 消息一条都收不到。
-    所以 /api/qq/status 必须暴露 reverseWsConnected 与 wsUrl。
-    """
-    try:
-        import websockets
-    except ImportError:
-        print("[6b] ⚠ 未安装 websockets，跳过推送通道检查")
-        return True
-
-    base = f"http://127.0.0.1:{app_port}"
-    url = f"ws://127.0.0.1:{app_port}/ws/onebot"
-    async with websockets.connect(
-            url, additional_headers={"Authorization": f"Bearer {TOKEN}"}) as ws:
-        await asyncio.sleep(1.0)
-        async with httpx.AsyncClient(timeout=8) as c:
-            st = (await c.get(f"{base}/api/qq/status")).json()
-        connected_ok = st.get("reverseWsConnected") is True
-        has_url = bool(st.get("wsUrl"))
-        print(f"[6b] {'✓' if connected_ok and has_url else '✗'} 推送通道状态可观测："
-              f"reverseWsConnected={st.get('reverseWsConnected')} wsUrl={st.get('wsUrl')}")
-        return bool(connected_ok and has_url)
+async def fake_complete(self, prompt, **kwargs):
+    return '[{"category":"fact","content":"用户是后端工程师","keywords":["后端"]}]'
 
 
-async def main() -> None:
-    print("=" * 70)
-    print("QQ（OneBot 11）链路端到端验证")
-    print("=" * 70)
-
-    data_dir = Path(tempfile.mkdtemp())
-    gw_port = 3010
-    app_port = 8941
-
-    # ⚠️ 隔离：本测试会启动 QQ 通道，而 runtime 启动时会把 NapCat 的反向 WS
-    # 地址同步成**自己的端口**。如果不隔离，跑一次测试就会把用户真实网关的
-    # 配置改到一个测试端口上（跑完就没人监听了）——这是真实踩过的坑。
-    import src.core.docker as _docker
-    _docker.NAPCAT_CONFIG_VOLUME = "wxbot-test-config"
-    _docker.NAPCAT_CONTAINER = "wxbot-test-napcat"
-
-    # ── 1. 起假网关 ──
-    srv = start_mock_gateway(gw_port)
-    print(f"\n[1] 假 OneBot 网关已启动 :{gw_port}")
-
-    # ── 2. 起本程序 ──
-    import os
-    os.environ.update({
-        "WXBOT_DATA_DIR": str(data_dir),
-        "WXBOT_NO_BROWSER": "1",
-        "WXBOT_PORT": str(app_port),
-    })
-    from src.server import app
-    cfg = uvicorn.Config(app, host="127.0.0.1", port=app_port, log_level="warning")
-    server = uvicorn.Server(cfg)
-    task = asyncio.create_task(server.serve())
-    for _ in range(40):
-        await asyncio.sleep(0.25)
+async def run(data_dir):
+    from .core.llm import LLMGateway
+    from .core.sender import HumanLikeSender
+    RECEIVED.clear()
+    gateway = HTTPServer(("127.0.0.1", 0), MockOneBotHandler)
+    thread = threading.Thread(target=gateway.serve_forever, daemon=True)
+    thread.start()
+    app_port = free_port()
+    env = {"WXBOT_DATA_DIR":str(data_dir),"WXBOT_PORT":str(app_port),
+           "WXBOT_HOST":"127.0.0.1","WXBOT_NO_BROWSER":"1",
+           "WXBOT_ADMIN_TOKEN":ADMIN_TOKEN,"WXBOT_SKIP_NAPCAT_SYNC":"1"}
+    with patch.dict(os.environ,env), patch.object(LLMGateway,"stream",fake_stream), \
+            patch.object(LLMGateway,"complete",fake_complete), \
+            patch.object(HumanLikeSender,"human_delay",staticmethod(lambda text:0)):
+        from .server import app, runtime
+        runtime.set_http_port(app_port)
+        from .core.docker import DockerState
+        runtime.docker.detect = lambda: DockerState()
+        runtime.docker.napcat_status = lambda: {"running": False}
+        server = uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=app_port,
+                                               log_level="warning",access_log=False))
+        task = asyncio.create_task(server.serve())
         try:
-            async with httpx.AsyncClient(timeout=2) as c:
-                if (await c.get(f"http://127.0.0.1:{app_port}/healthz")).status_code == 200:
-                    break
-        except Exception:
-            pass
-    print(f"[2] 本程序已启动 :{app_port}")
-
-    base = f"http://127.0.0.1:{app_port}"
-    async with httpx.AsyncClient(timeout=10) as c:
-        # ── 3. 配置成 QQ 通道 ──
-        await c.put(f"{base}/api/config", json={
-            "adapter": {
-                "type": "onebot",
-                "onebot_http_url": f"http://127.0.0.1:{gw_port}",
-                "onebot_token": TOKEN,
-            },
-            "llm": {"primary_key": "sk-fake"},
-            "bot": {"name": "小助手", "memory_enabled": True,
-                    "memory_extract_interval": 1},
-            "groups": {},
-        })
-        print("[3] 已配置为 QQ / OneBot 通道")
-
-        # ── 4. 测试连接 ──
-        r = (await c.post(f"{base}/api/qq/test", json={
-            "http_url": f"http://127.0.0.1:{gw_port}", "token": TOKEN,
-        })).json()
-        mark = "✓" if r.get("ok") else "✗"
-        print(f"[4] {mark} 连接测试：{r.get('message')}")
-
-        # Token 错误时应正确识别
-        r2 = (await c.post(f"{base}/api/qq/test", json={
-            "http_url": f"http://127.0.0.1:{gw_port}", "token": "wrong",
-        })).json()
-        mark2 = "✓" if not r2.get("ok") and r2.get("stage") == "auth" else "✗"
-        print(f"[5] {mark2} 错误 Token 被识别：{r2.get('message')}")
-
-    # ── 6. 启动机器人（适配器才会真正接管事件）──
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = (await c.post(f"{base}/api/bot/start")).json()
-        mark = "✓" if r.get("ok") else "✗"
-        print(f"[6] {mark} 启动机器人：{r.get('message')}")
-
-    # ── 6b. 推送通道状态可观测 ──
-    ws_visible = await check_reverse_ws_visibility(app_port)
-
-    # ── 6c. 手动「重新对接」接口必须存在且不报错 ──
-    async with httpx.AsyncClient(timeout=60) as c:
-        r = (await c.post(f"{base}/api/qq/sync-ws")).json()
-    sync_ok = isinstance(r, dict) and "changed" in r
-    print(f"[6c] {'✓' if sync_ok else '✗'} 重新对接接口可用：{str(r.get('message'))[:70]}")
-
-    # ── 7. 通过反向 WS 推送群消息 ──
-    print("[7] 通过反向 WebSocket 推送群消息…")
-    event = {
-        "time": int(time.time()),
-        "self_id": 10001,
-        "post_type": "message",
-        "message_type": "group",
-        "sub_type": "normal",
-        "message_id": 12345,
-        "group_id": 67890,
-        "user_id": 12345,
-        "raw_message": "[CQ:at,qq=10001] 你好",
-        "message": [
-            {"type": "at", "data": {"qq": "10001"}},
-            {"type": "text", "data": {"text": "你好，我叫老王，在字节做后端"}},
-        ],
-        "sender": {"user_id": 12345, "nickname": "老王", "card": "后端-老王",
-                   "role": "member"},
-    }
-    ws_ok = await push_event_via_ws(
-        f"ws://127.0.0.1:{app_port}/ws/onebot", event)
-
-    if ws_ok:
-        # primary_key 是假的 → LLM 调用会失败 → 走兜底文案；
-        # 关键看程序有没有真的回调 send_group_msg 把消息发出去
-        await asyncio.sleep(5)
-        if RECEIVED:
-            msg = RECEIVED[-1]
-            print(f"  ✓ 程序已回调网关发送消息")
-            print(f"     action={msg.get('action')} group_id={msg.get('group_id')}")
-            content = msg.get("message") or []
-            text = "".join(s.get("data", {}).get("text", "") for s in content
-                           if isinstance(s, dict) and s.get("type") == "text")
-            ats = [s.get("data", {}).get("qq") for s in content
-                   if isinstance(s, dict) and s.get("type") == "at"]
-            print(f"     内容={text[:60]!r}")
-            print(f"     @对象={ats}（群聊回复会 @ 提问者）")
-        else:
-            print("  ✗ 未观察到发送 —— 链路可能有问题")
-
-    ws_url = f"ws://127.0.0.1:{app_port}/ws/onebot"
-
-    # ── 7b. 群里没 @ 机器人 → 必须保持沉默（不刷屏是群聊场景的底线）──
-    before = len(RECEIVED)
-    event_quiet = {**event, "message_id": 12346,
-                   "message": [{"type": "text",
-                                "data": {"text": "大家早上好，今天天气不错"}}]}
-    await push_event_via_ws(ws_url, event_quiet)
-    await asyncio.sleep(2)
-    quiet_ok = len(RECEIVED) == before
-    print(f"[7b] {'✓' if quiet_ok else '✗'} 群里没 @ 机器人时不回复"
-          f"（新增发送 {len(RECEIVED) - before} 条）")
-
-    # ── 7c. 私聊 → 一律回复 ──
-    before = len(RECEIVED)
-    event_private = {
-        "time": int(time.time()), "self_id": 10001, "post_type": "message",
-        "message_type": "private", "sub_type": "friend", "message_id": 12347,
-        "user_id": 55555, "raw_message": "在吗",
-        "message": [{"type": "text", "data": {"text": "在吗，帮我看看这个报错"}}],
-        "sender": {"user_id": 55555, "nickname": "小李"},
-    }
-    await push_event_via_ws(ws_url, event_private)
-    await asyncio.sleep(4)
-    new_msgs = RECEIVED[before:]
-    private_ok = bool(new_msgs) and new_msgs[-1].get("action") == "send_private_msg"
-    print(f"[7c] {'✓' if private_ok else '✗'} 私聊一律回复"
-          f"（action={(new_msgs[-1].get('action') if new_msgs else '无')}）")
-
-    # ── 8. 检查知识库 ──
-    async with httpx.AsyncClient(timeout=10) as c:
-        st = (await c.get(f"{base}/api/memory/stats")).json()
-        print(f"[8] 知识库：启用={st.get('enabled')} 记忆数={st.get('total')}"
-              f"（抽取需真实 LLM，此处为 0 属预期）")
-
-    print("\n" + "=" * 70)
-    print("验证完成")
-    print("=" * 70)
-
-    server.should_exit = True
-    await asyncio.sleep(0.5)
-    task.cancel()
-    srv.shutdown()
+            await wait_until(lambda:server.started)
+            base = f"http://127.0.0.1:{app_port}"
+            async with httpx.AsyncClient(base_url=base,trust_env=False,timeout=10,
+                    headers={"Authorization":f"Bearer {ADMIN_TOKEN}"}) as c:
+                assert (await c.get('/api/config',headers={'Authorization':'Bearer wrong'})).status_code==401
+                r=await c.put('/api/config',json={
+                    'adapter':{'wechat_enabled':False,'qq_enabled':True,
+                               'onebot_http_url':f'http://127.0.0.1:{gateway.server_port}',
+                               'onebot_token':TOKEN},
+                    'llm':{'primary_key':'offline-key','judge_key':'offline-key'},
+                    'bot':{'name':'测试助手','memory_enabled':True,'memory_extract_interval':1}})
+                assert r.status_code==200
+                good=(await c.post('/api/qq/test',json={})).json()
+                assert good['ok']
+                bad=(await c.post('/api/qq/test',json={'token':'wrong'})).json()
+                assert not bad['ok'] and bad['stage']=='auth'
+                assert (await c.post('/api/bot/start')).json()['ok']
+                assert (await c.post('/api/qq/sync-ws')).json()['skipped']
+                async with websockets.connect(f'ws://127.0.0.1:{app_port}/ws/onebot',
+                        additional_headers={'Authorization':f'Bearer {TOKEN}'},proxy=None) as ws:
+                    await wait_until(lambda:runtime.qq_adapter.reverse_ws_connected)
+                    status=(await c.get('/api/qq/status')).json()
+                    assert status['reverseWsConnected'] and str(app_port) in status['wsUrl']
+                    event={'time':1,'self_id':10001,'post_type':'message','message_type':'group',
+                           'sub_type':'normal','message_id':1,'group_id':67890,'user_id':12345,
+                           'message':[{'type':'at','data':{'qq':'10001'}},
+                                      {'type':'text','data':{'text':'我是后端工程师'}}],
+                           'sender':{'nickname':'测试用户','card':'后端用户'}}
+                    await ws.send(json.dumps(event))
+                    await wait_until(lambda:len(RECEIVED)==1)
+                    reply=RECEIVED[0]
+                    assert reply['action']=='send_group_msg' and reply['group_id']==67890
+                    assert reply['message'][0]=={'type':'at','data':{'qq':'12345'}}
+                    assert '离线模型回复' in reply['message'][1]['data']['text']
+                    assert '第二句' in reply['message'][1]['data']['text']
+                    assert '\n' not in reply['message'][1]['data']['text']
+                    quiet={**event,'message_id':2,'message':[{'type':'text','data':{'text':'闲聊'}}]}
+                    await ws.send(json.dumps(quiet))
+                    await wait_until(lambda:runtime.qq_adapter.event_count>=2)
+                    await asyncio.sleep(0.05)
+                    assert len(RECEIVED)==1
+                    private={**event,'message_id':3,'message_type':'private','user_id':55555,
+                             'message':[{'type':'text','data':{'text':'你好'}}]}
+                    await ws.send(json.dumps(private))
+                    await wait_until(lambda:len(RECEIVED)==2)
+                    assert RECEIVED[-1]['action']=='send_private_msg'
+                    before=runtime.qq_adapter.event_count
+                    await ws.send(json.dumps(private))
+                    await wait_until(lambda:runtime.qq_adapter.event_count>before)
+                    assert len(RECEIVED)==2
+                    # 抽取是同步链路末尾，等待归档完成再核对知识库。
+                    await wait_until(lambda:runtime.memory.stats()['total']>=2)
+                    assert (await c.get('/api/memory/stats')).json()['total']>=2
+                assert (await c.post('/api/bot/stop')).json()['ok']
+                assert not (await c.get('/api/status')).json()['running']
+            print('PASS QQ: auth, gateway token, WS status, group mention, silence, private reply, dedup, memory, stop (offline)')
+        finally:
+            server.should_exit=True
+            try:await asyncio.wait_for(task,5)
+            except asyncio.TimeoutError:
+                task.cancel();await asyncio.gather(task,return_exceptions=True)
+            gateway.shutdown();gateway.server_close();thread.join(timeout=2)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def main():
+    with tempfile.TemporaryDirectory(prefix='wxbot-qq-test-') as d:
+        asyncio.run(run(Path(d)))
+
+
+if __name__=='__main__':main()

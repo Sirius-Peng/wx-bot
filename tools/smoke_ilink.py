@@ -41,6 +41,8 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 PERSONA = "你是一只测试用的猫娘助手，每次回答都必须以「喵」结尾。"
 INBOUND_TEXT = "你好呀"
+EXPECTED_REPLY = "收到啦，我会把完整回复整理后一次发给你，不再把一句回答拆成多条消息。后面的内容会一起保留，也会合并普通聊天中多余的换行喵。"
+STREAM_REPLY = EXPECTED_REPLY.replace("后面的内容", "\n\n后面的内容")
 CTX_TOKEN = "ctx-token-abc123"
 BOT_ID = "bot_abc@im.bot"                    # 机器人自己（@im.bot 命名空间）
 OWNER_ID = "user_abc@im.wechat"              # 扫码绑定它的那个人（@im.wechat）
@@ -107,7 +109,7 @@ def build_fake_server() -> FastAPI:
     async def chat_completions(request: Request):
         body = await request.json()
         REC["chat"].append(body)
-        reply = "收到啦，我在的喵"
+        reply = STREAM_REPLY
 
         if not body.get("stream"):
             return JSONResponse({
@@ -119,7 +121,7 @@ def build_fake_server() -> FastAPI:
             })
 
         async def sse():
-            for ch in (reply[:3], reply[3:]):
+            for ch in (reply[i:i + 12] for i in range(0, len(reply), 12)):
                 chunk = {
                     "id": "cmpl-1", "object": "chat.completion.chunk", "created": 0,
                     "model": body.get("model", "fake"),
@@ -263,6 +265,12 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
         check("回复内容非空",
               bool((sent.get("item_list") or [{}])[0].get("text_item", {}).get("text")),
               json.dumps(sent, ensure_ascii=False)[:160])
+        text = (sent.get("item_list") or [{}])[0].get("text_item", {}).get("text", "")
+        check("多块流式回复只发送一条完整消息",
+              len(REC["sent"]) == 1 and text == EXPECTED_REPLY,
+              f"发送 {len(REC['sent'])} 条，完整正文一致={text == EXPECTED_REPLY}")
+        check("普通聊天多余换行已合并", "\n" not in text,
+              f"换行数={text.count(chr(10))}")
     else:
         check("回复已发出", False, "没有收到 sendmessage 调用")
 
