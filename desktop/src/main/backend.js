@@ -43,7 +43,8 @@ function findFreePort() {
  *  而让 NapCat 重新读配置需要重启容器，重启容器会**掉登录态、要重新扫码**。
  *  所以这里优先固定端口，只有确实被占用时才退化成随机端口。
  */
-const PREFERRED_PORT = Number(process.env.WXBOT_PREFERRED_PORT || 17800);
+const requestedPort = Number(process.env.WXBOT_PREFERRED_PORT || 17800);
+const PREFERRED_PORT = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535 ? requestedPort : 17800;
 
 /** 探测后端是否已就绪 */
 function probe(port, timeoutMs = 1500) {
@@ -73,6 +74,11 @@ class Backend extends EventEmitter {
     this._logStream = null;
     this._stopping = false;
     this.controlToken = null;
+    this._generation = 0;
+    this._startPromise = null;
+    this._stopPromise = null;
+    this._restartPromise = null;
+    this._restartTimer = null;
   }
 
   get url() {
@@ -98,8 +104,14 @@ class Backend extends EventEmitter {
    * 启动后端并等待就绪。
    * @returns {Promise<{ok: boolean, port?: number, error?: string}>}
    */
-  async start() {
-    if (this.state === 'running' || this.state === 'starting') {
+  start() {
+    if (this._startPromise) return this._startPromise;
+    this._startPromise = this._start().finally(() => { this._startPromise = null; });
+    return this._startPromise;
+  }
+
+  async _start() {
+    if (this.state === 'running') {
       return { ok: true, port: this.port };
     }
 
@@ -115,8 +127,11 @@ class Backend extends EventEmitter {
 
     this.state = 'starting';
     this._stopping = false;
+    const generation = ++this._generation;
     // 先试固定端口（保持 QQ 网关配置长期有效），占用则退化为随机端口
     this.port = (await tryPort(PREFERRED_PORT)) || (await findFreePort());
+
+    if (generation !== this._generation || this._stopping) return { ok: false, error: '后端启动已取消' };
 
     this.controlToken = process.env.WXBOT_ADMIN_TOKEN || crypto.randomBytes(32).toString('hex');
     const env = {
@@ -125,8 +140,12 @@ class Backend extends EventEmitter {
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
       WXBOT_HOST: '127.0.0.1',
+      WXBOT_DESKTOP: '1',
       WXBOT_PORT: String(this.port),
       WXBOT_DATA_DIR: P.userDataDir(),
+      WXBOT_DEFAULT_DATA_DIR: process.env.WXBOT_DATA_DIR || process.env.WXBOT_USER_DATA_DIR ? '0' : '1',
+      WXBOT_MIGRATE_LEGACY: process.env.WXBOT_MIGRATE_LEGACY || (process.env.WXBOT_DATA_DIR || process.env.WXBOT_USER_DATA_DIR ? '0' : '1'),
+      WXBOT_LEGACY_DATA_DIRS: process.env.WXBOT_LEGACY_DATA_DIRS || JSON.stringify(P.legacyDataDirs()),
       WXBOT_NO_BROWSER: '1',
       PYTHONUNBUFFERED: '1',
       PYTHONDONTWRITEBYTECODE: '1',
@@ -149,16 +168,21 @@ class Backend extends EventEmitter {
       return { ok: false, error };
     }
 
+    const proc = this.proc;
     this.proc.stdout.on('data', (d) => log.write(d));
     this.proc.stderr.on('data', (d) => log.write(d));
 
     this.proc.on('error', (e) => {
       log.write(`[error] ${e.message}\n`);
+      if (this.proc !== proc) return;
+      this.proc = null;
+      this.state = 'crashed';
       this.emit('error', `后端进程错误：${e.message}`);
     });
 
     this.proc.on('exit', (code, signal) => {
       log.write(`[exit] code=${code} signal=${signal}\n`);
+      if (this.proc !== proc) return; // A stale child must not clear a replacement process.
       const wasStopping = this._stopping;
       this.proc = null;
 
@@ -174,7 +198,8 @@ class Backend extends EventEmitter {
         this.restarts += 1;
         const delay = Math.min(1000 * 2 ** this.restarts, 15000);
         this.emit('crashed', { code, restarts: this.restarts, retryInMs: delay });
-        setTimeout(() => {
+        this._restartTimer = setTimeout(() => {
+          this._restartTimer = null;
           if (!this._stopping) this.start().then((r) => this.emit('restarted', r));
         }, delay);
       } else {
@@ -185,10 +210,12 @@ class Backend extends EventEmitter {
     // 等待就绪（最多 40 秒 —— 首次启动要初始化依赖）
     const deadline = Date.now() + 40000;
     while (Date.now() < deadline) {
-      if (this.proc === null) {
+      if (generation !== this._generation || this._stopping) return { ok: false, error: '后端启动已取消' };
+      if (this.proc !== proc) {
         return { ok: false, error: '后端进程已退出，请查看日志' };
       }
       if (await probe(this.port)) {
+        if (generation !== this._generation || this._stopping || this.proc !== proc) return { ok: false, error: '后端启动已取消' };
         this.state = 'running';
         this.restarts = 0;
         log.write(`[ready] http://127.0.0.1:${this.port}\n`);
@@ -198,6 +225,7 @@ class Backend extends EventEmitter {
       await sleep(400);
     }
 
+    await this.stop(); // Do not leave an unready Windows sidecar behind.
     this.state = 'crashed';
     const error = '后端启动超时（40 秒），请查看日志';
     this.emit('error', error);
@@ -229,9 +257,18 @@ class Backend extends EventEmitter {
   }
 
   /** 优雅关闭后端和子进程；Windows 不仅终止单文件引导器。 */
-  async stop() {
-    if (!this.proc) { this.state = 'stopped'; return; }
+  stop() {
+    this._generation += 1; // Every stop request cancels an in-flight start/restart.
+    if (this._stopPromise) return this._stopPromise;
+    this._stopPromise = this._stop().finally(() => { this._stopPromise = null; });
+    return this._stopPromise;
+  }
+
+  async _stop() {
     this._stopping = true;
+    if (this._restartTimer) clearTimeout(this._restartTimer);
+    this._restartTimer = null;
+    if (!this.proc) { this.state = 'stopped'; return; }
     const proc = this.proc;
     await new Promise(resolve => {
       const timer = setTimeout(() => { this._killTree(proc); resolve(); }, 8000);
@@ -247,10 +284,20 @@ class Backend extends EventEmitter {
   }
 
   /** 重启（用于"应用内重启后端"） */
-  async restart() {
-    await this.stop();
+  restart() {
+    if (this._restartPromise) return this._restartPromise;
+    this._restartPromise = this._restart().finally(() => { this._restartPromise = null; });
+    return this._restartPromise;
+  }
+
+  async _restart() {
+    const stopping = this.stop();
+    const generation = this._generation;
+    await stopping;
+    if (this._startPromise) await this._startPromise;
     this.restarts = 0;
     await sleep(600);
+    if (generation !== this._generation) return { ok: false, error: '后端重启已取消' };
     return this.start();
   }
 

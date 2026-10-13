@@ -22,15 +22,34 @@ const isDev = () => !app.isPackaged || process.env.WXBOT_DEV === '1';
  * 用户数据目录 —— 配置、聊天记录、日志都放这里。
  * 与代码目录分离，卸载/重装应用不会丢数据。
  */
+function persistentDataPath(platform = process.platform, home = os.homedir(), env = process.env) {
+  if (env.WXBOT_DATA_DIR) return path.resolve(env.WXBOT_DATA_DIR);
+  if (env.WXBOT_USER_DATA_DIR) return path.resolve(env.WXBOT_USER_DATA_DIR, 'data');
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'WxBot', 'user-data');
+  if (platform === 'win32') return path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'WxBot', 'user-data');
+  const base = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path.join(home, '.local', 'share');
+  return path.join(base, 'wxbot', 'user-data');
+}
+
 function userDataDir() {
-  const dir = path.join(app.getPath('userData'), 'data');
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = persistentDataPath();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+function legacyDataDirs() {
+  // Old Electron names remain candidates if branding/version changes later.
+  const base = app.getPath('appData');
+  const dirs = [path.join(app.getPath('userData'), 'data'),
+    ...['微信AI助手', '微信 AI 助手', 'wxbot-desktop', 'wxbot', 'WxBot'].map(name => path.join(base, name, 'data'))];
+  if (!app.isPackaged) dirs.push(path.resolve(__dirname, '..', '..', '..', 'data'));
+  else dirs.push(path.join(path.dirname(app.getPath('exe')), 'data'));
+  return [...new Set(dirs)];
 }
 
 /** 日志目录 */
 function logDir() {
-  const dir = path.join(app.getPath('userData'), 'logs');
+  const dir = path.join(userDataDir(), 'logs');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -44,7 +63,10 @@ function logDir() {
 function resolveBackend() {
   if (isPackaged()) {
     const exe = process.platform === 'win32' ? 'wxbot-server.exe' : 'wxbot-server';
-    const bundled = path.join(process.resourcesPath, 'backend', exe);
+    // Windows onedir avoids re-extracting the Python runtime on every restart.
+    const base = path.join(process.resourcesPath, 'backend');
+    const bundled = process.platform === 'win32' && fs.existsSync(path.join(base, 'wxbot-server', exe))
+      ? path.join(base, 'wxbot-server', exe) : path.join(base, exe);
     if (fs.existsSync(bundled)) {
       return { kind: 'binary', command: bundled, args: [] };
     }
@@ -98,7 +120,7 @@ function assetsDir() {
 }
 
 module.exports = {
-  isPackaged, isDev, userDataDir, logDir,
+  isPackaged, isDev, userDataDir, logDir, persistentDataPath, legacyDataDirs,
   resolveBackend, webRoot, assetsDir, findSystemPython,
   platform: process.platform,
   homeDir: os.homedir(),

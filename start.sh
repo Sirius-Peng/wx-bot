@@ -38,9 +38,10 @@ source "$VENV/bin/activate"
 
 if [ ! -f "$VENV/.deps-installed" ]; then
   echo -e "  ${DIM}安装依赖…${NC}"
-  python -m pip install --upgrade pip -q
-  python -m pip install -q -r requirements.txt \
-    || python -m pip install -q -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+  PIP_SOURCE="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+  python -m pip install --upgrade pip -q --index-url "$PIP_SOURCE" || true
+  python -m pip install -q -r requirements.txt --index-url "$PIP_SOURCE" \
+    || python -m pip install -q -r requirements.txt --index-url https://pypi.org/simple
   touch "$VENV/.deps-installed"
   echo -e "  ${GREEN}✓${NC} 依赖安装完成"
 fi

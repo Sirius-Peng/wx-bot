@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -18,7 +19,9 @@ from typing import Any, Optional
 from .core.personality import PROFILE_IDS, RELATIONSHIP_IDS
 from .personas.phrolova import OVERVIEW
 
-CONFIG_DIR = Path(os.environ.get("WXBOT_DATA_DIR", "./data"))
+from .core.storage import resolve_data_dir
+
+CONFIG_DIR = resolve_data_dir()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
@@ -51,6 +54,7 @@ class AdapterConfig:
     # NapCat WebUI Token：一键部署时自动生成并写进容器，
     # 保存下来是为了重启后还能登录同一个容器的 WebUI 拿二维码
     napcat_webui_token: str = ""
+    napcat_image_mirror: str = "docker.m.daocloud.io"
 
 
 @dataclass
@@ -58,13 +62,20 @@ class LLMConfig:
     """大模型配置。"""
     primary_base: str = "https://api.deepseek.com"
     primary_key: str = ""
-    primary_model: str = "deepseek-chat"
+    primary_model: str = "deepseek-flash"
     fallback_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     fallback_key: str = ""
     fallback_model: str = "qwen-plus"
     judge_base: str = "https://open.bigmodel.cn/api/paas/v4"
     judge_key: str = ""
     judge_model: str = "glm-4.7-flash"
+    vision_base: str = ""
+    vision_key: str = ""
+    vision_model: str = ""  # empty: primary must support images
+    search_enabled: bool = True
+    search_key: str = ""  # blank: reuse primary only when it is official DeepSeek
+    search_model: str = "deepseek-flash"
+    context_timezone: str = "Asia/Shanghai"
 
 
 @dataclass
@@ -83,6 +94,12 @@ class BotConfig:
     group_reply_at_sender: bool = True
 
     # ── 人格知识库 ────────────────────────────────────────────
+    humanized_wait: bool = True
+    typing_indicator: bool = True
+    message_pause_timeout: float = 120.0
+    message_merge_window: float = 2.0
+    message_merge_max_wait: float = 10.0
+
     memory_enabled: bool = True       # 是否随对话积累记忆
     memory_inject: bool = True        # 是否把记忆注入到回答上下文
     memory_extract_interval: int = 3  # 每多少轮对话抽取一次（省 token）
@@ -143,6 +160,13 @@ class ConfigStore:
         cfg.llm = LLMConfig(**{k: v for k, v in l.items()
                                if k in LLMConfig.__dataclass_fields__})
 
+        from .core.reality import valid_timezone
+        cfg.llm.context_timezone = valid_timezone(cfg.llm.context_timezone)
+        cfg.llm.search_enabled = cfg.llm.search_enabled is True
+        if not isinstance(cfg.llm.search_model, str) or not cfg.llm.search_model.strip():
+            cfg.llm.search_model = "deepseek-flash"
+        if not isinstance(cfg.llm.search_key, str): cfg.llm.search_key = ""
+
         b = dict(raw.get("bot") or {})
         # 旧的明确自定义人设保持自定义；不擅自覆写其他用户的角色卡。
         if "persona_profile" not in b and ("name" in b or "persona" in b):
@@ -151,6 +175,11 @@ class ConfigStore:
             b["persona_profile"] = "custom"
         if not isinstance(b.get("persona_relationship", "neutral"), str) or b.get("persona_relationship", "neutral") not in RELATIONSHIP_IDS:
             b["persona_relationship"] = "neutral"
+        for key,default,lo,hi in [('message_merge_window',2.0,0.0,10.0),('message_merge_max_wait',10.0,0.1,60.0),('message_pause_timeout',120.0,5.0,600.0)]:
+            try:value=float(b.get(key,default));value=value if math.isfinite(value) else default
+            except (TypeError,ValueError):value=default
+            b[key]=min(hi,max(lo,value))
+        b['message_merge_max_wait']=max(b['message_merge_window'],b['message_merge_max_wait'])
         cfg.bot = BotConfig(**{k: v for k, v in b.items()
                                if k in BotConfig.__dataclass_fields__})
 
@@ -186,7 +215,7 @@ class ConfigStore:
             "llm": asdict(cfg.llm),
             "bot": asdict(cfg.bot),
         }
-        for k in ("primary_key", "fallback_key", "judge_key"):
+        for k in ("primary_key", "fallback_key", "judge_key", "vision_key", "search_key"):
             d["llm"][k] = _mask(d["llm"].get(k, ""))
         d["adapter"]["onebot_token"] = _mask(d["adapter"].get("onebot_token", ""))
         d["adapter"]["napcat_webui_token"] = _mask(

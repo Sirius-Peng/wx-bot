@@ -116,7 +116,7 @@ def build_fake_server() -> FastAPI:
                 "id": "cmpl-1", "object": "chat.completion", "created": 0,
                 "model": body.get("model", "fake"),
                 "choices": [{"index": 0, "finish_reason": "stop",
-                             "message": {"role": "assistant", "content": "[]"}}],
+                             "message": {"role": "assistant", "content": reply if body.get("tools") else "[]"}}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             })
 
@@ -178,6 +178,7 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
         "llm": {
             "primary_base": f"{BASE}/v1", "primary_key": "test-key",
             "primary_model": "fake-model",
+            "search_enabled": os.environ.get("WXBOT_SMOKE_SEARCH") == "1",
             "judge_base": f"{BASE}/v1", "judge_key": "test-key",
             "judge_model": "fake-model",
         },
@@ -234,12 +235,15 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
           st.get("bot") is not None and st2_bot_id(runtime) == BOT_ID,
           f"bot_id={st2_bot_id(runtime)}")
 
-    check("收到并处理了入站消息", bool(REC["chat"]),
+    chat_requests = [body for body in REC["chat"] if body.get("stream") or body.get("tools")]
+    check("收到并处理了入站消息", bool(chat_requests),
           f"getupdates 调用 {REC['getupdates']} 次，模型调用 {len(REC['chat'])} 次")
 
     # 系统提示词里必须有人设 —— 这是"人格无法加载"的核心断言
-    if REC["chat"]:
-        msgs = REC["chat"][0].get("messages") or []
+    if chat_requests:
+        # Background memory extraction may reach the model before the actual reply.
+        # Identify the conversation request (stream or search-tool route), not arrival order.
+        msgs = chat_requests[0].get("messages") or []
         sys_text = "\n".join(m.get("content", "") for m in msgs
                              if m.get("role") == "system")
         check("人设写进了系统提示词", PERSONA in sys_text,
@@ -266,7 +270,7 @@ async def run_checks(data_dir: Path) -> list[tuple[str, bool, str]]:
               bool((sent.get("item_list") or [{}])[0].get("text_item", {}).get("text")),
               json.dumps(sent, ensure_ascii=False)[:160])
         text = (sent.get("item_list") or [{}])[0].get("text_item", {}).get("text", "")
-        check("多块流式回复只发送一条完整消息",
+        check("工具模式回复只发一条完整消息" if os.environ.get("WXBOT_SMOKE_SEARCH")=="1" else "多块流式回复只发送一条完整消息",
               len(REC["sent"]) == 1 and text == EXPECTED_REPLY,
               f"发送 {len(REC['sent'])} 条，完整正文一致={text == EXPECTED_REPLY}")
         check("普通聊天多余换行已合并", "\n" not in text,

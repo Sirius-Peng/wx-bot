@@ -344,7 +344,7 @@ a { color: var(--primary); text-decoration: none; }
 .field > span b { color: var(--primary); font-variant-numeric: tabular-nums; }
 .field > em { font-size: 11.5px; color: var(--text-3); font-style: normal; line-height: 1.5; }
 
-input[type="text"], input[type="password"], input[type="number"], textarea {
+input[type="text"], input[type="password"], input[type="number"], .field select, textarea {
   width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--border-strong);
@@ -934,3 +934,110 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
   .stat-grid { grid-template-columns: 1fr; }
   .hero-meta { gap: 20px; }
 }
+/* Identity history controls must wrap in both the desktop window and side panel. */
+.memory-list-head { flex-wrap: wrap; }
+.memory-list-head h3 { white-space: nowrap; }
+.memory-list-head > label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.memory-list-head .head-actions { flex-basis: 100%; flex-wrap: wrap; }
+#identity-list { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; gap: 10px; }
+  .topbar > div:first-child { min-width: 0; flex-basis: 100%; }
+  .card-head { flex-wrap: wrap; }
+  .head-actions { flex-wrap: wrap; max-width: 100%; }
+  .memory-list-head .input-sm { flex: 1 1 100%; width: 100%; min-width: 0; }
+  .memory-item { gap: 8px; padding: 12px; flex-wrap: wrap; }
+  .mem-actions { margin-left: auto; }
+}
+
+/* 独立保存与 NapCat 登录 */
+.save-state {font-size:12px;color:var(--text-2);margin-right:auto;align-self:center;}
+.save-state.dirty {color:var(--warning, #aa751f);}
+.quick-login-panel {padding:16px;border:1px solid var(--border);border-radius:12px;margin:16px 0;}
+.quick-login-panel .field {margin:0 0 12px;}
+.quick-login-actions {display:flex;gap:8px;flex-wrap:wrap;}
+.quick-remember {display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;}
+.mirror-field {margin-top:16px;}
+.qq-login-modal {max-width:560px;width:calc(100% - 32px);}
+.qq-login-modal .qr-wrap {padding:20px;flex-wrap:wrap;justify-content:center;}
+.qq-login-modal .qr-box {flex-shrink:0;}
+@media(max-width:600px){.qq-login-modal .qr-info{text-align:center;}.quick-login-actions .btn{flex:1;}}
+
+/* First-run guide: readable steps with one simple homepage gateway action. */
+.home-qq-card {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px;}
+.home-qq-card h3 {margin:0 0 6px;font-size:16px;}
+.home-qq-card p {margin:0;color:var(--text-2);font-size:13px;line-height:1.7;}
+.home-qq-card .btn {flex-shrink:0;}
+.setup-resume {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.guide-intro {margin:6px 0 22px;}
+.guide-intro h2 {font-size:26px;margin:12px 0 8px;letter-spacing:-.4px;}
+.guide-intro p {font-size:14px;color:var(--text-2);line-height:1.8;}
+.guide-steps {display:flex;gap:10px;padding:0;margin:0 0 24px;list-style:none;}
+.guide-steps li {display:flex;align-items:center;gap:7px;flex:1;font-size:13px;color:var(--text-3);}
+.guide-steps li span {display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--surface-3);}
+.guide-steps li.active {color:var(--text);font-weight:600;}
+.guide-steps li.active span {background:var(--primary);color:white;}
+.guide-steps li.done span {background:var(--primary-soft);color:var(--primary);}
+.guide-steps li.skipped {opacity:.5;}
+.guide-body {padding:22px 24px;line-height:1.8;font-size:14px;}
+.guide-body>p:first-child {margin-top:0;}
+.guide-body .field {margin:16px 0;}
+.guide-body .field-grid {padding:0;}
+.guide-body .link {display:inline-block;margin-top:12px;}
+.guide-platforms {display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.guide-platforms label {position:relative;display:flex;flex-direction:column;gap:8px;padding:24px 20px;border:1px solid var(--border);border-radius:12px;cursor:pointer;}
+.guide-platforms label:has(input:checked){border-color:var(--primary);background:var(--primary-soft);}
+.guide-platforms input {position:absolute;right:16px;top:24px;accent-color:var(--primary);}
+.guide-platforms strong {font-size:18px;}
+.guide-platforms span {font-size:13px;color:var(--text-2);}
+.key-tutorial {padding-left:22px;line-height:1.9;margin:16px 0 20px;}
+.key-tutorial li {margin-bottom:9px;}
+.key-tutorial a,.guide-body>a {color:var(--primary-hover);}
+.guide-action-line {display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.guide-action-line span,.guide-status {color:var(--text-2);font-size:13px;}
+.guide-help {padding:12px 16px;background:var(--surface-2);border-radius:8px;margin:16px 0;}
+.guide-help summary {cursor:pointer;font-weight:500;}
+.guide-footer {display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0 28px;}
+.guide-footer>div {display:flex;gap:10px;}
+.guide-feedback {color:var(--text-2);font-size:13px;min-height:20px;line-height:1.8;}
+.guide-review {list-style:none;padding:0;display:grid;gap:10px;}
+.guide-review li {background:var(--surface-2);border-radius:8px;padding:12px 16px;}
+.guide-wechat-qr {padding:20px 0;}
+.guide-wechat-qr img {width:230px;height:230px;object-fit:contain;background:white;border:1px solid var(--border);border-radius:10px;}
+@media(max-width:650px){.home-qq-card{align-items:flex-start;flex-direction:column;}.home-qq-card .btn{width:100%;}.guide-platforms{grid-template-columns:1fr;}.guide-steps{gap:4px;}.guide-steps li{font-size:11px;flex-direction:column;gap:5px;}.guide-body{padding:18px;}.guide-intro h2{font-size:22px;}.setup-resume{align-items:flex-start;flex-direction:column;}}
+
+/* 用户数据卡片：长路径与操作栏在窄窗口不溢出。 */
+#card-user-data .card-foot {flex-wrap:wrap;justify-content:space-between;}
+#card-user-data .head-actions {flex-wrap:wrap;}
+#storage-status {overflow-wrap:anywhere;}
+
+/* 对话统计：离线气泡图、键盘可达排行与响应式筛选。 */
+.stats-filters .field-grid {grid-template-columns:repeat(3,minmax(0,1fr));}
+.stats-filters .hint {margin:5px 0 0;}
+.stats-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.stats-toolbar p {font-size:13px;color:var(--text-2);margin:0;}
+.stats-status {font-size:12px;color:var(--text-3);overflow-wrap:anywhere;margin:0;}
+.stats-columns {display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:20px;align-items:start;}
+.stats-bubbles {min-height:360px;background:radial-gradient(ellipse at center,#fafcfb,white);}
+.stats-bubbles svg {display:block;}
+.stats-bubbles g {cursor:pointer;outline:none;}
+.stats-bubbles g circle {stroke:white;stroke-width:2;transition:stroke .15s;}
+.stats-bubbles g:hover circle,.stats-bubbles g:focus circle,.stats-bubbles g.selected circle {stroke:var(--primary-hover);stroke-width:3;}
+.stats-selection {padding:15px 20px;border-top:1px solid var(--border);font-size:13px;min-height:60px;line-height:1.7;color:var(--text-2);overflow-wrap:anywhere;}
+.stats-ranking {max-height:480px;overflow:auto;padding:8px 0;}
+.stats-rank-row {display:flex;align-items:center;width:100%;gap:12px;text-align:left;padding:11px 18px;border-bottom:1px solid var(--border);}
+.stats-rank-row:last-child {border:0;}
+.stats-rank-row:hover,.stats-rank-row:focus-visible,.stats-rank-row.selected {background:var(--primary-soft);outline:2px solid transparent;}
+.stats-rank-row:focus-visible {outline-color:var(--primary-hover);outline-offset:-2px;}
+.stats-rank-number {font-size:12px;color:var(--text-3);width:20px;flex-shrink:0;}
+.stats-rank-main {flex:1;min-width:0;}
+.stats-rank-main strong {display:block;font-size:13px;font-weight:500;overflow-wrap:anywhere;}
+.stats-rank-track {display:block;height:5px;margin-top:7px;border-radius:6px;background:var(--surface-3);overflow:hidden;}
+.stats-rank-track i {display:block;height:100%;background:var(--primary);border-radius:6px;}
+.stats-rank-value {font-size:13px;font-variant-numeric:tabular-nums;text-align:right;flex-shrink:0;}
+.stats-rank-value small {display:block;font-size:11px;color:var(--text-3);margin-top:4px;}
+.stats-empty {min-height:260px;display:flex;align-items:center;justify-content:center;padding:32px;text-align:center;font-size:13px;color:var(--text-3);line-height:1.8;}
+.stats-method {margin:0;line-height:1.8;}
+@media(max-width:950px){.stats-columns{grid-template-columns:1fr;}.stats-ranking{max-height:360px;}}
+@media(max-width:650px){.stats-filters .field-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.stats-toolbar{align-items:flex-start;flex-direction:column;}.stats-filters .card-head{align-items:flex-start;gap:12px;}.stats-filters .btn{flex-shrink:0;}}
+@media(prefers-reduced-motion:reduce){.stats-bubbles g circle{transition:none;}}

@@ -92,7 +92,7 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 微信 AI 助手
-  deleteAppDataOnUninstall: false      # 卸载不删数据，避免误删配置与聊天记录
+  deleteAppDataOnUninstall: false      # 保留旧版 profile；实际数据独立放在 LocalAppData/WxBot/user-data
   artifactName: WxBot-${version}-Windows-${arch}-Setup.${ext}
 
 portable:

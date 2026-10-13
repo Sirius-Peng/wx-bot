@@ -35,9 +35,9 @@ echo -e "  ${DIM}Python: $($PY --version 2>&1)${NC}"
 
 # ── 2. 安装打包依赖 ──────────────────────────────────────────
 echo -e "  ${DIM}检查打包依赖…${NC}"
-"$PY" -m pip install -q -r "$REPO_ROOT/requirements.txt" 2>/dev/null || true
-"$PY" -m pip install -q pyinstaller 2>/dev/null || \
-  "$PY" -m pip install -q pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+PIP_SOURCE="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+"$PY" -m pip install -q -r "$REPO_ROOT/requirements.txt" pyinstaller --index-url "$PIP_SOURCE" || \
+  "$PY" -m pip install -q -r "$REPO_ROOT/requirements.txt" pyinstaller --index-url https://pypi.org/simple
 
 # ── 3. 清理旧产物 ────────────────────────────────────────────
 # 只清后端自己的产物；dist/ 是应用打包的输出，不归这里管
@@ -79,6 +79,8 @@ SEP=":"   # macOS / Linux 用冒号分隔 add-data
   --collect-all httpx \
   --collect-all httpcore \
   --collect-all certifi \
+  --collect-all tzdata \
+  --collect-all jieba \
   "$DESKTOP_DIR/backend/entry.py"
 
 # ── 5. 校验 ──────────────────────────────────────────────────

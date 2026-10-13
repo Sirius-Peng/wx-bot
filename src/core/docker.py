@@ -54,11 +54,14 @@ def _run(cmd: list[str], timeout: float = 20.0) -> tuple[int, str, str]:
     """同步执行命令，返回 (退出码, stdout, stderr)。"""
     try:
         p = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WIN else 0,
             env={**os.environ, "PATH": _augmented_path()},
         )
-        return p.returncode, p.stdout.strip(), p.stderr.strip()
+        def output(value):
+            if isinstance(value,bytes):return value.decode('utf-8',errors='replace').strip()
+            return (value or '').strip()
+        return p.returncode, output(p.stdout), output(p.stderr)
     except FileNotFoundError:
         return 127, "", "命令不存在"
     except subprocess.TimeoutExpired:
@@ -119,6 +122,9 @@ class DockerManager:
 
     def __init__(self, download_dir: Optional[Path] = None):
         self.download_dir = download_dir or Path.home() / "Downloads"
+        self.image_mirror = "docker.m.daocloud.io"
+        self.image_sources = {}
+        self._napcat_task = None
         # 长任务的进度状态，供前端轮询
         self.task: dict = {"running": False, "stage": "", "progress": 0,
                            "message": "", "error": "", "needsUser": False}
@@ -265,6 +271,7 @@ class DockerManager:
         if self.task.get("running"):
             return {"ok": False, "message": "已有任务在执行中"}
 
+        self._set_task(running=True, stage='detect', progress=5, message='正在检测 Docker 环境…', error='', needsUser=False)
         asyncio.create_task(self._prepare_impl())
         return {"ok": True, "message": "已开始准备"}
 
@@ -457,11 +464,12 @@ class DockerManager:
     # 而 OneBot 配置的写入接口又有 "Not Login" 前置检查。
     # 所以必须在容器**启动前**把配置灌进卷里 —— 见 `seed_napcat_config()`。
 
-    def napcat_status(self) -> dict:
+    def napcat_status(self, docker_state=None) -> dict:
         """NapCat 容器状态快照。"""
         base = {
             "container": NAPCAT_CONTAINER,
             "image": NAPCAT_IMAGE,
+            "downloadSource": self.image_sources.get(NAPCAT_IMAGE, self.image_mirror),
             "running": False,
             "exists": False,
             "state": "",
@@ -469,7 +477,7 @@ class DockerManager:
             "httpPort": NAPCAT_HTTP_PORT,
             "message": "",
         }
-        st = self.detect()
+        st = docker_state or self.detect()
         if not st.installed:
             return {**base, "message": "Docker 未安装"}
         if not st.running:
@@ -493,7 +501,7 @@ class DockerManager:
         return {**base, "message": "尚未创建 NapCat 容器"}
 
     def napcat_config_files(self, webui_token: str,
-                            ws_url: str) -> tuple[dict, dict]:
+                            ws_url: str, access_token: str = "") -> tuple[dict, dict]:
         """生成要预置进容器的 two 个配置文件。
 
         `onebot11.json` 字段来自 NapCat 的 `OneBotConfigSchema`，
@@ -520,7 +528,7 @@ class DockerManager:
                     "host": "0.0.0.0",
                     "enableCors": True,
                     "messagePostFormat": "array",
-                    "token": "",
+                    "token": access_token,
                     "debug": False,
                 }],
                 "httpSseServers": [],
@@ -532,7 +540,7 @@ class DockerManager:
                     "url": ws_url,
                     "reportSelfMessage": False,
                     "messagePostFormat": "array",
-                    "token": "",
+                    "token": access_token,
                     "debug": False,
                     "heartInterval": 30000,
                     "reconnectInterval": 5000,
@@ -552,7 +560,7 @@ class DockerManager:
         }
         return webui, onebot
 
-    async def seed_napcat_config(self, webui_token: str, ws_url: str) -> dict:
+    async def seed_napcat_config(self, webui_token: str, ws_url: str, access_token: str = "") -> dict:
         """把配置写进 named volume（**必须在容器启动前**执行）。
 
         为什么不用环境变量？NapCat 的 entrypoint **只在配置文件不存在时**
@@ -570,16 +578,14 @@ class DockerManager:
         if not st.installed or not st.running:
             return {"ok": False, "message": "Docker 未就绪"}
 
-        webui, onebot = self.napcat_config_files(webui_token, ws_url)
+        webui, onebot = self.napcat_config_files(webui_token, ws_url, access_token)
         payload = {
             "webui.json": json.dumps(webui, ensure_ascii=False, indent=2),
             "onebot11.json": json.dumps(onebot, ensure_ascii=False, indent=2),
         }
 
-        code, _, err = await asyncio.to_thread(
-            _run, [st.cli_path, "pull", "alpine:latest"], 600)
-        if code != 0:
-            log.warning("拉取 alpine 失败，尝试直接灌卷：%s", err[:200])
+        image = await self.ensure_image(st.cli_path, 'alpine:latest')
+        if not image['ok']:return image
 
         tmpdir = Path(tempfile.mkdtemp(prefix="wxbot-napcat-"))
         try:
@@ -625,7 +631,7 @@ class DockerManager:
 
             # 已登录过的账号会有一份 onebot11_<qq>.json 且优先生效，
             # 只写 onebot11.json 是不够的 —— 顺手把旧文件里的地址一起改掉
-            await self.sync_napcat_ws_url(ws_url)
+            await self.sync_napcat_ws_url(ws_url, access_token)
 
             return {"ok": True, "message": "配置已预置"}
         finally:
@@ -634,186 +640,125 @@ class DockerManager:
     #: 只允许这种形态的反向 WS 地址进入 shell（防注入）
     _WS_URL_RE = re.compile(r"^wss?://[A-Za-z0-9._:\-]+(?::\d+)?/[A-Za-z0-9._/\-]*$")
 
-    async def sync_napcat_ws_url(self, ws_url: str) -> dict:
-        """把 NapCat 配置里的反向 WS 地址改成当前后端地址。
+    async def sync_napcat_ws_url(self, ws_url: str, access_token: str = "") -> dict:
+        """Offline fallback for older WebUI versions: copy/parse only owned JSON entries.
 
-        ⚠️ 这是真实踩过的坑：桌面版**每次启动都会挑一个空闲端口**
-        （见 desktop/src/main/backend.js 的 findFreePort），而反向 WS 地址是
-        **部署那一刻**写进 NapCat 配置的。只要下次启动换了端口，
-        网关就会一直去连一个早已没人监听的端口 ——
-        表现为「QQ 一条消息都收不到」，而界面上却显示"已连接"（HTTP 探测是通的）。
-
-        还有一个更隐蔽的点：NapCat 登录后会生成**每个账号一份**的配置
-        `onebot11_<qq>.json`，它**优先于** `onebot11.json`。
-        只改通用的那份是没用的，必须把所有 onebot11*.json 一起改。
+        Update base and per-account configs, verify round-trip bytes, restart only
+        after a real change. Never sed-replace other applications' WebSocket URLs.
         """
-        if not self._WS_URL_RE.match(ws_url or ""):
-            return {"ok": False, "changed": False,
-                    "message": f"反向 WS 地址不合法：{ws_url!r}"}
-
-        st = self.detect()
+        from .napcat import merge_managed_onebot
+        if not self._WS_URL_RE.fullmatch(ws_url or ''):
+            return {'ok': False, 'changed': False, 'message': '反向 WS 地址不合法'}
+        st = await asyncio.to_thread(self.detect)
         if not st.installed or not st.running:
-            return {"ok": False, "changed": False, "message": "Docker 未运行"}
-
-        helper = "wxbot-cfg-helper"
-        await asyncio.to_thread(_run, [st.cli_path, "rm", "-f", helper], 60)
-        code, _, err = await asyncio.to_thread(_run, [
-            st.cli_path, "run", "-d", "--name", helper,
-            "-v", f"{NAPCAT_CONFIG_VOLUME}:/dst",
-            "alpine:latest", "sleep", "120",
-        ], 120)
-        if code != 0:
-            return {"ok": False, "changed": False,
-                    "message": f"创建临时容器失败：{err[:200]}"}
-
+            return {'ok': False, 'changed': False, 'message': 'Docker 未运行'}
+        image = await self.ensure_image(st.cli_path, 'alpine:latest')
+        if not image['ok']:
+            return image
+        import uuid
+        helper = 'wxbot-sync-' + uuid.uuid4().hex[:12]
+        code, _, err = await asyncio.to_thread(_run, [st.cli_path, 'run', '-d', '--name', helper,
+            '-v', f'{NAPCAT_CONFIG_VOLUME}:/dst', 'alpine:latest', 'sleep', '120'], 120)
+        if code:
+            return {'ok': False, 'changed': False, 'message': '配置读取容器启动失败：' + err[:160]}
+        changed = []
         try:
-            # ① 先看现在写的是什么（一个文件都没有 = 还没部署过，无需同步）
-            code, out, _ = await asyncio.to_thread(_run, [
-                st.cli_path, "exec", helper, "sh", "-c",
-                "grep -h -o 'ws://[^\"]*' /dst/onebot11*.json 2>/dev/null | sort -u",
-            ], 60)
-            old_urls = [x.strip() for x in out.splitlines() if x.strip()]
-            if not old_urls:
-                return {"ok": True, "changed": False,
-                        "message": "还没有 NapCat 配置，无需同步"}
-            if old_urls == [ws_url]:
-                return {"ok": True, "changed": False, "url": ws_url,
-                        "message": "反向 WS 地址已是最新"}
-
-            # ② 改所有 onebot11*.json（含每个账号一份的配置）
-            code, _, err = await asyncio.to_thread(_run, [
-                st.cli_path, "exec", helper, "sh", "-c",
-                f"sed -i 's|\"url\": \"ws://[^\"]*\"|\"url\": \"{ws_url}\"|g' "
-                "/dst/onebot11*.json",
-            ], 60)
-            if code != 0:
-                return {"ok": False, "changed": False,
-                        "message": f"写入配置失败：{err[:200]}"}
-
-            # ③ 校验：凡是原本有 ws 地址的文件，现在都必须指向新地址
-            code, out, err = await asyncio.to_thread(_run, [
-                st.cli_path, "exec", helper, "sh", "-c",
-                f"grep -l '\"{ws_url}\"' /dst/onebot11*.json 2>/dev/null | wc -l; "
-                "grep -h -o 'ws://[^\"]*' /dst/onebot11*.json 2>/dev/null | sort -u",
-            ], 60)
-            lines = [x.strip() for x in out.splitlines() if x.strip()]
-            if not lines or not lines[0].isdigit() or int(lines[0]) < 1:
-                return {"ok": False, "changed": False,
-                        "message": f"配置写入后校验失败（{out.strip()[:150]}）"}
-            remaining = lines[1:]
-            if any(u != ws_url for u in remaining):
-                return {"ok": False, "changed": False,
-                        "message": f"仍有旧地址未被替换：{remaining}"}
+            with tempfile.TemporaryDirectory(prefix='wxbot-sync-') as tmp:
+                folder = Path(tmp) / 'read'; folder.mkdir()
+                code, _, err = await asyncio.to_thread(_run, [st.cli_path, 'cp', helper + ':/dst/.', str(folder)], 60)
+                if code:
+                    return {'ok': False, 'changed': False, 'message': '配置读取失败：' + err[:160]}
+                template = self.napcat_config_files('', ws_url, access_token)[1]
+                # Parse ALL selected files before writing any; malformed JSON keeps original volume intact.
+                for file in folder.glob('onebot11*.json'):
+                    before = json.loads(file.read_text(encoding='utf-8-sig'))
+                    after = merge_managed_onebot(before, template)
+                    if before != after:
+                        changed.append((file.name, json.dumps(after, ensure_ascii=False, indent=2)))
+                if not changed:
+                    return {'ok': True, 'changed': False, 'message': '网关对接配置已是最新'}
+                upload = Path(tmp) / 'write'; upload.mkdir()
+                for name, data in changed:
+                    (upload / name).write_text(data, encoding='utf-8')
+                code, _, err = await asyncio.to_thread(_run, [st.cli_path, 'cp', str(upload) + '/.', helper + ':/dst'], 60)
+                if code:
+                    return {'ok': False, 'changed': False, 'message': '配置写入失败：' + err[:160]}
+                verify = Path(tmp) / 'verify'; verify.mkdir()
+                code, _, err = await asyncio.to_thread(_run, [st.cli_path, 'cp', helper + ':/dst/.', str(verify)], 60)
+                if code or any((verify / name).read_text(encoding='utf-8') != data for name, data in changed):
+                    return {'ok': False, 'changed': False, 'message': '配置写入校验失败'}
+        except Exception as exc:
+            return {'ok': False, 'changed': False, 'message': '配置同步失败：' + str(exc)[:160]}
         finally:
-            await asyncio.to_thread(_run, [st.cli_path, "rm", "-f", helper], 60)
-
-        # ④ NapCat 只在启动时读配置 → 必须重启容器才生效
-        restarted = False
-        code, out, _ = await asyncio.to_thread(_run, [
-            st.cli_path, "ps", "--filter", f"name=^{NAPCAT_CONTAINER}$",
-            "--format", "{{.Names}}"], 30)
-        if code == 0 and out.strip() == NAPCAT_CONTAINER:
-            self._set_task(running=True, stage="napcat", progress=50,
-                           message="正在让 QQ 网关重新连接…", error="", needsUser=False)
-            await asyncio.to_thread(_run, [st.cli_path, "restart", NAPCAT_CONTAINER], 180)
-            restarted = True
-            self._set_task(running=False, stage="waiting_login", progress=100,
-                           message="QQ 网关已重新连接")
-
-        log.info("NapCat 反向 WS 地址已同步为 %s（旧：%s，重启容器=%s）",
-                 ws_url, old_urls, restarted)
-        msg = "已让 QQ 网关连到当前端口"
+            await asyncio.to_thread(_run, [st.cli_path, 'rm', '-f', helper], 60)
+        code, out, _ = await asyncio.to_thread(_run, [st.cli_path, 'inspect', '--format', '{{.State.Running}}', NAPCAT_CONTAINER], 30)
+        restarted = code == 0 and out.lower() == 'true'
         if restarted:
-            # ⚠️ 重启容器可能掉 QQ 登录态（实测过），必须提前说清楚
-            msg += "并重启了网关；若 QQ 提示未登录，请重新扫码一次"
-        return {"ok": True, "changed": True, "restarted": restarted, "url": ws_url,
-                "oldUrls": old_urls, "message": msg}
+            code, _, err = await asyncio.to_thread(_run, [st.cli_path, 'restart', NAPCAT_CONTAINER], 180)
+            if code:
+                return {'ok': False, 'changed': True, 'message': '配置已更新，网关重启失败：' + err[:160]}
+        return {'ok': True, 'changed': True, 'restarted': restarted, 'url': ws_url,
+                'message': '网关对接配置已更新' + ('；旧版接口需重启网关，请检查 QQ 在线状态' if restarted else '')}
 
-    async def ensure_napcat(self, webui_token: str, ws_url: str,
-                            extra_hosts: bool = True) -> dict:
-        """拉镜像 → 预置配置 → 启动容器 → 等 WebUI 端口就绪。"""
-        if self.task.get("running"):
-            return {"ok": False, "message": "已有任务在执行中"}
-        asyncio.create_task(self._ensure_napcat_impl(webui_token, ws_url, extra_hosts))
-        return {"ok": True, "message": "已开始部署 QQ 网关"}
+    async def ensure_image(self,cli,image):
+        code,_,_=await asyncio.to_thread(_run,[cli,'image','inspect',image],20)
+        if code==0:return {'ok':True,'cached':True,'image':image}
+        canonical=image if '/' in image else 'library/'+image
+        mirror=(self.image_mirror or '').strip().rstrip('/')
+        sources=([mirror+'/'+canonical] if mirror else [])+[image]
+        for source in dict.fromkeys(sources):
+            self._set_task(message='正在下载镜像：'+source,downloadSource=source)
+            code,_,err=await asyncio.to_thread(_run,[cli,'pull',source],1800)
+            if code:continue
+            if source!=image:
+                code,_,err=await asyncio.to_thread(_run,[cli,'tag',source,image],30)
+                if code:continue
+            self.image_sources[image]=source
+            return {'ok':True,'image':image,'source':source}
+        return {'ok':False,'message':'镜像下载失败，请检查网络或在详细设置中修改镜像源','detail':(err or '')[:200]}
 
-    async def _ensure_napcat_impl(self, webui_token: str, ws_url: str,
-                                  extra_hosts: bool) -> None:
-        self._set_task(running=True, stage="napcat", progress=5,
-                       message="正在检查 Docker…", error="", needsUser=False)
+    async def ensure_napcat(self,webui_token,ws_url,extra_hosts=True,access_token=''):
+        if self.task.get('running') or (self._napcat_task and not self._napcat_task.done()):
+            return {'ok':True,'pending':True,'message':'QQ网关启动任务正在进行'}
+        self._set_task(running=True,stage='napcat',progress=5,message='正在启动 QQ 网关',error='')
+        self._napcat_task=asyncio.create_task(self._ensure_napcat_impl(webui_token,ws_url,extra_hosts,access_token))
+        return {'ok':True,'message':'已开始启动 QQ 网关'}
+
+    async def _ensure_napcat_impl(self,webui_token,ws_url,extra_hosts,access_token=''):
         try:
-            st = self.detect()
-            if not st.installed:
-                self._set_task(running=False, stage="need_docker", needsUser=True,
-                               message="需要先安装 Docker")
+            st=await asyncio.to_thread(self.detect)
+            if not st.installed or not st.running:
+                self._set_task(running=False,stage='need_docker' if not st.installed else 'need_daemon',needsUser=True,message='请先准备 Docker 环境')
                 return
-            if not st.running:
-                self._set_task(running=False, stage="need_daemon", needsUser=True,
-                               message="需要先启动 Docker 服务")
-                return
-            cli = st.cli_path
-
-            self._set_task(progress=10, message="正在准备 NapCat 配置…")
-            seed = await self.seed_napcat_config(webui_token, ws_url)
-            if not seed.get("ok"):
-                self._set_task(running=False, stage="error",
-                               error=seed.get("message", ""),
-                               message=seed.get("message", "配置预置失败"))
-                return
-
-            self._set_task(progress=30, message="正在拉取 NapCat 镜像（首次约 500MB）…")
-            code, _, err = await asyncio.to_thread(
-                _run, [cli, "pull", NAPCAT_IMAGE], 3600)
-            if code != 0:
-                self._set_task(running=False, stage="error", error=err[:300],
-                               message=f"拉取镜像失败：{err[:200]}")
-                return
-
-            # 已有同名容器 → 重新创建（保证配置生效）
-            code, out, _ = await asyncio.to_thread(_run, [
-                cli, "ps", "-a", "--filter", f"name=^{NAPCAT_CONTAINER}$",
-                "--format", "{{.Names}}"], 20)
-            if code == 0 and out.strip() == NAPCAT_CONTAINER:
-                self._set_task(progress=50, message="正在重建容器（让新配置生效）…")
-                await asyncio.to_thread(_run, [cli, "rm", "-f", NAPCAT_CONTAINER], 120)
-
-            self._set_task(progress=70, message="正在启动 NapCat…")
-            cmd = [
-                cli, "run", "-d",
-                "--name", NAPCAT_CONTAINER,
-                "--restart", "unless-stopped",
-                "-p", f"127.0.0.1:{NAPCAT_WEBUI_PORT}:{NAPCAT_WEBUI_PORT}",
-                "-p", f"127.0.0.1:{NAPCAT_HTTP_PORT}:{NAPCAT_HTTP_PORT}",
-                "-v", f"{NAPCAT_CONFIG_VOLUME}:/app/napcat/config",
-                "-v", f"{NAPCAT_DATA_VOLUME}:/app/.config/QQ",
-            ]
-            if extra_hosts and not IS_MAC and not IS_WIN:
-                # Linux 下容器访问宿主需要显式映射
-                cmd += ["--add-host", "host.docker.internal:host-gateway"]
-            cmd.append(NAPCAT_IMAGE)
-
-            code, _, err = await asyncio.to_thread(_run, cmd, 180)
-            if code != 0:
-                self._set_task(running=False, stage="error", error=err[:300],
-                               message=f"创建容器失败：{err[:200]}")
-                return
-
-            self._set_task(progress=85, message="正在等待 NapCat 就绪…")
-            for i in range(90):
-                await asyncio.sleep(2)
-                if port_open(NAPCAT_WEBUI_PORT):
-                    self._set_task(running=False, stage="waiting_login", progress=100,
-                                   message="部署完成，请用手机 QQ 扫码登录")
+            cli=st.cli_path
+            code,out,err=await asyncio.to_thread(_run,[cli,'inspect','--format','{{.State.Running}}',NAPCAT_CONTAINER],20)
+            if code==0:
+                # Reuse the existing container and its saved session; no rm/pull/seed.
+                if out.lower()!='true':
+                    code,_,err=await asyncio.to_thread(_run,[cli,'start',NAPCAT_CONTAINER],60)
+                    if code:raise RuntimeError('网关启动失败：'+err[:160])
+            else:
+                image=await self.ensure_image(cli,NAPCAT_IMAGE)
+                if not image['ok']:raise RuntimeError(image['message'])
+                seed=await self.seed_napcat_config(webui_token,ws_url,access_token)
+                if not seed.get('ok'):raise RuntimeError(seed.get('message','配置写入失败'))
+                cmd=[cli,'run','-d','--name',NAPCAT_CONTAINER,'--restart','unless-stopped',
+                     '-p',f'127.0.0.1:{NAPCAT_WEBUI_PORT}:{NAPCAT_WEBUI_PORT}',
+                     '-p',f'127.0.0.1:{NAPCAT_HTTP_PORT}:{NAPCAT_HTTP_PORT}',
+                     '-v',f'{NAPCAT_CONFIG_VOLUME}:/app/napcat/config',
+                     '-v',f'{NAPCAT_DATA_VOLUME}:/app/.config/QQ']
+                if extra_hosts and not IS_MAC and not IS_WIN:cmd+=['--add-host','host.docker.internal:host-gateway']
+                cmd.append(NAPCAT_IMAGE)
+                code,_,err=await asyncio.to_thread(_run,cmd,180)
+                if code:raise RuntimeError('网关创建失败：'+err[:160])
+            for index in range(60):
+                if await asyncio.to_thread(port_open,NAPCAT_WEBUI_PORT):
+                    self._set_task(running=False,stage='waiting_login',progress=100,message='网关已就绪，可快速登录或扫码',needsUser=False)
                     return
-                self._set_task(progress=min(85 + i // 3, 97),
-                               message=f"正在等待 NapCat 就绪…（已等待 {(i + 1) * 2} 秒）")
-
-            self._set_task(running=False, stage="timeout", progress=100, needsUser=True,
-                           message="NapCat 启动超时。可执行 docker logs napcat 查看日志")
-        except Exception as e:
-            log.exception("部署 NapCat 失败")
-            self._set_task(running=False, stage="error", error=str(e),
-                           message=f"部署失败：{e}")
+                await asyncio.sleep(.5)
+            self._set_task(running=False,stage='timeout',message='网关端口尚未就绪，请查看日志',needsUser=True)
+        except Exception as exc:
+            self._set_task(running=False,stage='error',error=str(exc),message=str(exc))
 
     async def stop_napcat(self) -> dict:
         st = self.detect()
@@ -830,5 +775,5 @@ class DockerManager:
         if not st.installed:
             return {"ok": False, "log": "Docker 未安装"}
         code, out, err = await asyncio.to_thread(
-            _run, [st.cli_path, "logs", "--tail", str(lines), NAPCAT_CONTAINER], 30)
-        return {"ok": code == 0, "log": out or err or "(无日志)"}
+            _run, [st.cli_path, "logs", "--tail", str(max(1,min(2000,int(lines)))), NAPCAT_CONTAINER], 30)
+        return {"ok": code == 0, "log": "\n".join(part for part in (out,err) if part) or "(无日志)"}

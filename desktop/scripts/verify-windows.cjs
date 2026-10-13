@@ -9,15 +9,21 @@ function peMachine(filename) {
 }
 function verify(root, backendOnly=false) {
  const desktop=path.join(root,'desktop'), version=JSON.parse(fs.readFileSync(path.join(desktop,'package.json'),'utf8')).version;
- const backend=path.join(desktop,'resources','backend','wxbot-server.exe');
+ const backend=path.join(desktop,'resources','backend','wxbot-server','wxbot-server.exe');
  assert.strictEqual(peMachine(backend),0x8664,'Backend is not native x64');
  assert(!fs.existsSync(path.join(desktop,'resources','backend','wxbot-server')),'Mac/Linux sidecar mixed into Windows bundle');
  if(backendOnly)return 'WINDOWS_PE PASS: backend=x64';
  const unpacked=path.join(desktop,'dist','win-unpacked');
  assert.strictEqual(peMachine(path.join(unpacked,'微信AI助手.exe')),0x8664,'Electron is not x64');
- const bundled=path.join(unpacked,'resources','backend','wxbot-server.exe');
+ const bundled=path.join(unpacked,'resources','backend','wxbot-server','wxbot-server.exe');
  assert.strictEqual(peMachine(bundled),0x8664);
  assert(fs.readFileSync(bundled).equals(fs.readFileSync(backend)),'Bundled backend differs');
+ const tree=(base)=>{const names=[];function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else names.push(path.relative(base,p));}}walk(base);return names.sort();};
+ const source=path.dirname(backend),dest=path.dirname(bundled);
+ assert.deepStrictEqual(tree(source),tree(dest),'Onedir support files differ');
+ for(const f of tree(source))assert(fs.readFileSync(path.join(source,f)).equals(fs.readFileSync(path.join(dest,f))),'Bundled resource differs: '+f);
+ assert(fs.existsSync(path.join(dest,'_internal','jieba','dict.txt')),'Jieba dictionary missing');
+ assert(fs.existsSync(path.join(dest,'_internal','tzdata','zoneinfo','Asia','Shanghai')),'IANA timezone missing');
  const asar=require(path.join(desktop,'node_modules','@electron','asar'));
  const pkg=JSON.parse(asar.extractFile(path.join(unpacked,'resources','app.asar'),'package.json').toString('utf8'));
  assert.strictEqual(pkg.version,version);
@@ -25,7 +31,7 @@ function verify(root, backendOnly=false) {
   const file=path.join(desktop,'dist',`WxBot-${version}-Windows-x64-${name}.exe`);
   assert([0x14c,0x8664].includes(peMachine(file)),'Invalid Windows bootstrap executable');
  }
- return `WINDOWS_PACKAGE PASS: version=${version}; Electron=x64; backend=x64; NSIS=PE; portable=PE; ASAR=MATCH`;
+ return `WINDOWS_PACKAGE PASS: version=${version}; Electron=x64; backend=x64/onedir; resources=MATCH; NSIS=PE; portable=PE; ASAR=MATCH`;
 }
 if(require.main===module)console.log(verify(path.resolve(__dirname,'..','..'),process.argv.includes('--backend-only')));
 module.exports={peMachine,verify};
