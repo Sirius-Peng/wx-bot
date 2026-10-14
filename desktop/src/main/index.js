@@ -110,16 +110,22 @@ function buildAppMenu() {
         },
         {
           label: '关于',
-          click: () => {
-            dialog.showMessageBox({
-              type: 'info',
-              title: '关于',
-              message: '微信 AI 助手（桌面版）',
-              detail:
-                `版本 ${app.getVersion()}\n` +
-                `平台 ${P.platform} / ${process.arch}\n` +
-                `数据目录 ${P.userDataDir()}`,
-            });
+          click: async () => {
+            const parent = windowMgr.win;
+            if (!parent || parent.isDestroyed()) return;
+            try {
+              await dialog.showMessageBox(parent, {
+                type: 'info',
+                title: '关于',
+                message: '微信 AI 助手（桌面版）',
+                detail:
+                  `版本 ${app.getVersion()}\n` +
+                  `平台 ${P.platform} / ${process.arch}\n` +
+                  `数据目录 ${P.userDataDir()}`,
+              });
+            } finally {
+              windowMgr.restoreInputFocus(parent);
+            }
           },
         },
       ],

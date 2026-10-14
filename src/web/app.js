@@ -225,6 +225,7 @@ async function loadStorage() {
     const text = migration.status === 'migrated' ? `旧数据已迁移：${migration.imported_files} 个文件；原目录和迁移备份均保留。` : '当前使用独立本地数据目录。';
     $('#storage-status').textContent = text + (s.custom_path ? ' 你已指定自定义目录，请保留此目录。' : '') + (migration.other_backups ? ` 另有 ${migration.other_backups} 份旧数据已备份，未混入当前记忆。` : '');
     $('#btn-open-storage').hidden = !window.wxbotDesktop;
+    renderImportStatus(s.import || {status:'none'});
   } catch (e) { $('#storage-status').textContent = '数据位置读取失败：' + e.message; }
 }
 
@@ -238,6 +239,83 @@ async function backupStorage() {
     toast('本地备份已保存', 'ok');
   } catch (e) { $('#storage-status').textContent = '备份失败，原数据保持不变：' + e.message; }
   finally { button.disabled = false; }
+}
+
+/* Explicit full-directory import is staged; only a backend restart publishes it. */
+const IMPORT = {preview:null, epoch:0, busy:false, queued:false};
+function invalidateImportPreview() {
+  IMPORT.epoch++;IMPORT.preview=null;
+  $('#import-preview').hidden=true;$('#import-confirm').checked=false;
+  $('#btn-import-prepare').disabled=true;
+}
+function renderImportStatus(report) {
+  IMPORT.queued = ['queued','applying'].includes(report.status);
+  $('#btn-import-choose').hidden = !window.wxbotDesktop?.data;
+  $('#btn-import-cancel').hidden = !IMPORT.queued;
+  $('#btn-import-restart').hidden = !IMPORT.queued || !window.wxbotDesktop;
+  $('#import-source').disabled = IMPORT.queued;
+  $('#btn-import-preview').disabled = IMPORT.queued || IMPORT.busy;
+  $('#btn-import-choose').disabled = IMPORT.queued || IMPORT.busy;
+  if (IMPORT.queued) {
+    invalidateImportPreview();
+    $('#import-status').textContent = report.message + (window.wxbotDesktop ? '' : ' 请退出并重新启动后端进程；“重启机器人”不等于重启后台。');
+  } else if (report.status === 'imported' || report.status === 'failed') {
+    $('#import-status').textContent = report.message + (report.backup ? ` 导入前备份：${report.backup}` : '');
+  }
+}
+async function chooseImportDirectory() {
+  if (IMPORT.busy || IMPORT.queued) return;
+  const result = await window.wxbotDesktop?.data.chooseLegacyDir();
+  if (!result || result.canceled) return;
+  $('#import-source').value = result.path;invalidateImportPreview();
+  await previewImportDirectory();
+}
+async function previewImportDirectory() {
+  if (IMPORT.busy || IMPORT.queued) return;
+  invalidateImportPreview();
+  const epoch = IMPORT.epoch, source = $('#import-source').value.trim();
+  IMPORT.busy=true;$('#btn-import-preview').disabled=true;$('#btn-import-choose').disabled=true;
+  $('#import-status').textContent='正在读取旧目录并校验文件，请稍候…';
+  try {
+    const result = await api('/api/data/import/preview',{method:'POST',body:JSON.stringify({source})});
+    if (epoch !== IMPORT.epoch) return;
+    IMPORT.preview=result;$('#import-preview').hidden=false;
+    const included = [['persona','人格及设置'],['memory','长期记忆'],['messages','聊天记录'],['wechat','微信状态'],['contexts','近期上下文']].filter(([key])=>result.includes[key]).map(([,label])=>label);
+    $('#import-summary').textContent=`${result.source}：${result.files} 个文件、${result.directories} 个目录、${(result.bytes/1024/1024).toFixed(2)} MiB。包含：${included.join('、')}。`;
+    $('#import-status').textContent=result.message;
+  } catch(e) { if (epoch===IMPORT.epoch) $('#import-status').textContent='预览失败：'+e.message; }
+  finally {IMPORT.busy=false;$('#btn-import-preview').disabled=IMPORT.queued;$('#btn-import-choose').disabled=IMPORT.queued;}
+}
+async function prepareImportDirectory() {
+  if (IMPORT.busy || IMPORT.queued || !IMPORT.preview || !$('#import-confirm').checked) return;
+  if (typeof DIRTY_SECTIONS !== 'undefined' && DIRTY_SECTIONS.size && !await confirmAction('有尚未保存的设置草稿。整套导入并重启后，这些草稿将被丢弃。继续？')) return;
+  IMPORT.busy=true;$('#btn-import-prepare').disabled=true;
+  $('#import-source').disabled=true;$('#btn-import-preview').disabled=true;$('#btn-import-choose').disabled=true;
+  $('#import-status').textContent='正在创建并校验旧数据快照；当前配置尚未替换…';
+  try {
+    const result=await api('/api/data/import/prepare',{method:'POST',body:JSON.stringify({token:IMPORT.preview.token,confirm_replace:true})});
+    renderImportStatus(result.import);
+  } catch(e) {invalidateImportPreview();$('#import-status').textContent='准备失败，当前数据未改变：'+e.message;}
+  finally {IMPORT.busy=false;$('#import-source').disabled=IMPORT.queued;$('#btn-import-preview').disabled=IMPORT.queued;$('#btn-import-choose').disabled=IMPORT.queued;}
+}
+async function cancelImportDirectory() {
+  if (IMPORT.busy) return;
+  IMPORT.busy=true;$('#btn-import-cancel').disabled=true;
+  try {
+    const result=await api('/api/data/import/cancel',{method:'POST'});
+    renderImportStatus({status:'none'});$('#import-status').textContent=result.message;
+  } catch(e) {$('#import-status').textContent='取消失败：'+e.message;}
+  finally {IMPORT.busy=false;$('#btn-import-cancel').disabled=false;$('#btn-import-preview').disabled=IMPORT.queued;$('#btn-import-choose').disabled=IMPORT.queued;}
+}
+async function restartForImport() {
+  if (IMPORT.busy || !window.wxbotDesktop || !IMPORT.queued) return;
+  IMPORT.busy=true;$('#btn-import-restart').disabled=true;$('#btn-import-cancel').disabled=true;
+  $('#import-status').textContent='正在停止后台、备份当前数据并导入；完成后界面自动重新加载…';
+  try {
+    const result=await window.wxbotDesktop.backend.restart();
+    if (!result.ok) throw new Error(result.error || '请查看后台日志');
+  } catch(e) {$('#import-status').textContent='后台重启未完成，导入快照已保留：'+e.message;}
+  finally {IMPORT.busy=false;$('#btn-import-restart').disabled=false;$('#btn-import-cancel').disabled=false;}
 }
 
 /* ══════════ 接入设置 ══════════ */
@@ -663,7 +741,7 @@ async function startQQGateway({saveForm=true}={}) {
       return !!st.loggedIn;
     }
     const docker=st.docker||{};
-    if(!docker.installed && !confirm('需要安装 Docker Desktop 来运行 QQ 网关。\n\n请按安装窗口提示完成安装与首次启动，再回到本应用继续。是否开始准备？')){reportQQProgress('尚未开始安装，准备好后可点击本按钮继续');return false;}
+    if(!docker.installed && !await confirmAction('需要安装 Docker Desktop 来运行 QQ 网关。\n\n请按安装窗口提示完成安装与首次启动，再回到本应用继续。是否开始准备？')){reportQQProgress('尚未开始安装，准备好后可点击本按钮继续');return false;}
     if(!docker.running) {
       const prepared=await api('/api/docker/prepare',{method:'POST'});
       if(!prepared.ok)throw new Error(prepared.message||'Docker 准备未完成');
@@ -984,7 +1062,7 @@ async function loadMemory() {
   renderMemoryList(memoryItems);
   $('#identity-list').innerHTML = (data.identities || []).map(it => `<div>${it.accounts.map(a => `${a.platform === 'ilink' ? '微信' : 'QQ'} ${esc(a.owner_id)}`).join(' ↔ ')} <button class="btn btn-ghost btn-sm" data-unlink="${esc(it.id)}">解除关联</button></div>`).join('') || '尚未关联；手动通用记忆始终对两个通道生效。';
   $$('#identity-list [data-unlink]').forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('解除后按原账号分别使用记忆，来源记录会保留。确定解除？')) return;
+    if (!await confirmAction('解除后按原账号分别使用记忆，来源记录会保留。确定解除？')) return;
     await api(`/api/memory/identities/${encodeURIComponent(b.dataset.unlink)}`, {method:'DELETE'});
     await loadMemory();
   }));
@@ -1051,7 +1129,7 @@ function renderMemoryList(items) {
 
   $$('#memory-list [data-del]').forEach(b =>
     b.addEventListener('click', async () => {
-      if (!confirm('确定删除这条记忆？')) return;
+      if (!await confirmAction('确定删除这条记忆？')) return;
       await api(`/api/memory/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
       toast('已删除', 'ok');
       loadMemory();
@@ -1099,6 +1177,13 @@ async function saveMemory() {
 function bind() {
   bindStatistics();
   $('#btn-storage-backup').addEventListener('click',backupStorage);
+  $('#import-source').addEventListener('input',invalidateImportPreview);
+  $('#btn-import-choose').addEventListener('click',chooseImportDirectory);
+  $('#btn-import-preview').addEventListener('click',previewImportDirectory);
+  $('#import-confirm').addEventListener('change',()=>{$('#btn-import-prepare').disabled=IMPORT.busy || IMPORT.queued || !IMPORT.preview || !$('#import-confirm').checked;});
+  $('#btn-import-prepare').addEventListener('click',prepareImportDirectory);
+  $('#btn-import-cancel').addEventListener('click',cancelImportDirectory);
+  $('#btn-import-restart').addEventListener('click',restartForImport);
   $('#btn-copy-storage').addEventListener('click',()=>copyText($('#storage-path').value,$('#btn-copy-storage')));
   $('#btn-open-storage').addEventListener('click',()=>window.wxbotDesktop?.shell.openDataDir());
   $('#mem-history').addEventListener('change', loadMemory);
@@ -1190,7 +1275,7 @@ function bind() {
   });
   $('#mm-content').addEventListener('keydown', e => {
     // Ctrl/Cmd + Enter 直接提交
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveMemory();
+    if (!e.isComposing && e.keyCode !== 229 && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); saveMemory(); }
   });
 
   // 代码块复制按钮
@@ -1207,7 +1292,7 @@ function bind() {
     loadMessages();
   }));
   $('#btn-clear-msgs').addEventListener('click', async () => {
-    if (!confirm('确定清空所有消息记录？')) return;
+    if (!await confirmAction('确定清空所有消息记录？')) return;
     await api('/api/messages', { method: 'DELETE' });
     toast('已清空', 'ok');
     loadMessages();
@@ -1259,8 +1344,8 @@ async function initDesktop() {
     toast('已隐藏到后台，机器人继续运行');
   });
 
-  $('#desk-quit').addEventListener('click', () => {
-    if (confirm('确定要退出应用吗？\n\n退出后后台机器人也会停止，不再回复消息。')) {
+  $('#desk-quit').addEventListener('click', async () => {
+    if (await confirmAction('确定要退出应用吗？\n\n退出后后台机器人也会停止，不再回复消息。')) {
       desk.quit();
     }
   });

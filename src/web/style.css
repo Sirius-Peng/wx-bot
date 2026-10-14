@@ -1041,3 +1041,8 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
 @media(max-width:950px){.stats-columns{grid-template-columns:1fr;}.stats-ranking{max-height:360px;}}
 @media(max-width:650px){.stats-filters .field-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.stats-toolbar{align-items:flex-start;flex-direction:column;}.stats-filters .card-head{align-items:flex-start;gap:12px;}.stats-filters .btn{flex-shrink:0;}}
 @media(prefers-reduced-motion:reduce){.stats-bubbles g circle{transition:none;}}
+
+/* DOM confirmation stays in the renderer: no blocking Windows native confirm. */
+dialog.action-confirm { border: 0; padding: 0; color: var(--text); width: calc(100% - 48px); }
+dialog.action-confirm::backdrop { background: rgba(20,26,34,.42); backdrop-filter: blur(2px); }
+#action-confirm-message { padding: 16px 20px 0; margin: 0; white-space: pre-wrap; line-height: 1.65; }

@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('wxbotDesktop', {
   hide: () => ipcRenderer.invoke('app:hide'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
+  data: { chooseLegacyDir: () => ipcRenderer.invoke('data:chooseLegacyDir') },
+
   backend: {
     status: () => ipcRenderer.invoke('backend:status'),
     restart: () => ipcRenderer.invoke('backend:restart'),

@@ -13,22 +13,25 @@ def audit(root,metadata=None):
         if not ok:errors.append(message)
     pkg=json.loads((root/'desktop/package.json').read_text());version=pkg['version']
     readme=(root/'README.md').read_text();desktop=(root/'desktop/README.md').read_text()
-    manifest_path=root/f'docs/release-v{version}.json'
+    published_match=re.search(r'当前发布：v([0-9.]+)',readme)
+    published=published_match.group(1) if published_match else version
+    check(published==version or f'当前版本：v{version}' in readme,'README source version missing')
+    manifest_path=root/f'docs/release-v{published}.json'
     check(manifest_path.exists(),'missing published release manifest')
     manifest=json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-    check(manifest.get('version')==version,'manifest/package version mismatch')
-    check(manifest.get('tag')=='v'+version,'manifest tag mismatch')
-    check(f'当前发布：v{version}' in readme,'README current version missing')
+    check(manifest.get('version')==published,'manifest/package version mismatch')
+    check(manifest.get('tag')=='v'+published,'manifest tag mismatch')
+    check(f'当前发布：v{published}' in readme,'README current version missing')
     check('v'+version in desktop.splitlines()[0],'desktop header version missing')
     for f in ['CHANGELOG.md','docs/README.md','docs/validation.md']:
         check((root/f).is_file(),'missing documentation: '+f)
-    desired={'WxBot-'+version+'-Windows-x64-Setup.exe','WxBot-'+version+'-Windows-x64-Portable.exe','WxBot-'+version+'-macOS-arm64.dmg','SHA256SUMS.txt'}
+    desired={'WxBot-'+published+'-Windows-x64-Setup.exe','WxBot-'+published+'-Windows-x64-Portable.exe','WxBot-'+published+'-macOS-arm64.dmg','SHA256SUMS.txt'}
     names={a['name'] for a in manifest.get('artifacts',[])}
     check(names==desired,'release asset manifest mismatch')
     for a in manifest.get('artifacts',[]):
         check(bool(re.fullmatch('[0-9a-f]{64}',a.get('sha256',''))),'invalid sha256: '+a['name'])
         check(isinstance(a.get('bytes'),int) and a['bytes']>0,'invalid size: '+a['name'])
-        check(a.get('url')=='https://github.com/Sirius-Peng/wx-bot/releases/download/v'+version+'/'+a['name'],'download URL mismatch: '+a['name'])
+        check(a.get('url')=='https://github.com/Sirius-Peng/wx-bot/releases/download/v'+published+'/'+a['name'],'download URL mismatch: '+a['name'])
         check(a['name'] in readme,'README missing asset: '+a['name'])
     source=(root/'src/config_store.py').read_text()
     for name,value in [('primary_base','https://api.deepseek.com'),('primary_model','deepseek-flash'),('context_timezone','Asia/Shanghai')]:

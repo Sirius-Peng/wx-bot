@@ -1,8 +1,10 @@
-# WxBot 桌面版 · v2.1.3
+# WxBot 桌面版 · v2.1.4
+
+当前源码版本为v2.1.4，新增原生旧目录选择、整套数据导入和后台重启入口，见[导入说明](../docs/data-import.md)；Windows 输入焦点修复采用页面内异步确认，并在原生目录/关于弹窗结束与窗口激活时恢复渲染焦点。以下已发布附件及Windows原生验收记录属于v2.1.3；不把旧附件当成v2.1.4。
 
 文档更新：2026-10-14。Electron 外壳 + Python sidecar，复用 `src/web`；关闭窗口隐藏到托盘，真正退出先清理后台。
 
-[下载当前版本](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
+[下载最近已发布版本 v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
 
 ## 发布产物
 

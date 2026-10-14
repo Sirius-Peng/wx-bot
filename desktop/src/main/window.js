@@ -68,6 +68,11 @@ class WindowManager {
       this.win = null;
     });
 
+    this.win.on('focus', () => {
+      // OS window focus and renderer keyboard focus can diverge on Windows.
+      if (this.win && !this.win.webContents.isDestroyed()) this.win.webContents.focus();
+    });
+
     // 外部链接用系统浏览器打开，不在应用内跳走
     this.win.webContents.setWindowOpenHandler(({ url: target }) => {
       if (/^https?:\/\//.test(target)) shell.openExternal(target);
@@ -86,7 +91,7 @@ class WindowManager {
     if (!this.win) return;
     if (this.win.isMinimized()) this.win.restore();
     this.win.show();
-    this.win.focus();
+    this.restoreInputFocus();
     if (P.platform === 'darwin' && app.dock) app.dock.show();
     this._onShow && this._onShow();
   }
@@ -97,6 +102,14 @@ class WindowManager {
     // macOS 上隐藏窗口后把 Dock 图标也收起来，更像"后台静默运行"
     if (P.platform === 'darwin' && app.dock) app.dock.hide();
     this._onHide && this._onHide();
+  }
+
+  /** Only after an explicit show/native-dialog return; never unhide or poll focus. */
+  restoreInputFocus(parent = this.win) {
+    if (!parent || parent !== this.win || app.isQuitting || parent.isDestroyed() ||
+        !parent.isVisible() || parent.isMinimized() || parent.webContents.isDestroyed()) return;
+    parent.focus();
+    parent.webContents.focus();
   }
 
   toggle() {

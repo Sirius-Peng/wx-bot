@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>微信 AI 助手</title>
-<link rel="stylesheet" href="/static/style.css?v=20261013-stats1">
+<link rel="stylesheet" href="/static/style.css?v=20261014-focus1">
 </head>
 <body>
 
@@ -512,6 +512,21 @@
             <button class="btn btn-primary" id="btn-storage-backup">创建本地备份</button>
           </div>
         </div>
+        <div class="card" id="card-data-import">
+          <div class="card-head"><h3>导入旧版数据</h3><span class="tag">v2.1.4</span></div>
+          <div class="guide-body">
+            <p>从你选择的旧数据目录恢复整套配置、人格、记忆、聊天记录、上下文和目录内的微信状态。请先退出旧版本。</p>
+            <label class="field"><span>旧数据目录（包含 config.json）</span><input type="text" id="import-source" placeholder="旧数据目录的绝对路径"></label>
+            <div class="head-actions"><button class="btn btn-ghost" id="btn-import-choose" hidden>选择旧目录…</button><button class="btn btn-secondary" id="btn-import-preview">预览导入内容</button></div>
+            <p class="hint" id="import-status" role="status" aria-live="polite">支持已配置过的新版；导入前自动备份当前数据，旧目录保持不变。</p>
+            <div id="import-preview" hidden>
+              <p id="import-summary"></p>
+              <p class="hint">采用整套替换，不混合两套记忆。历史日志与备份保留在独立子目录；内部锁和迁移控制文件不作为配置导入。QQ Docker 卷和目录外的微信资料不包含在本次导入中。</p>
+              <label class="field"><span><input type="checkbox" id="import-confirm"> 我确认替换当前配置与记忆，并已退出旧版本</span></label>
+            </div>
+          </div>
+          <div class="card-foot"><button class="btn btn-ghost" id="btn-import-cancel" hidden>取消待导入任务</button><div class="head-actions"><button class="btn btn-secondary" id="btn-import-restart" hidden>重启后台并完成导入</button><button class="btn btn-primary" id="btn-import-prepare" disabled>准备导入</button></div></div>
+        </div>
         <div class="card" data-settings-section="primary">
           <div class="card-head"><h3>主模型</h3></div>
           <div class="field-grid">
@@ -741,10 +756,19 @@
   </div>
 </div>
 
+<dialog class="modal action-confirm" id="action-confirm" aria-labelledby="action-confirm-title" aria-describedby="action-confirm-message">
+  <div class="modal-head"><h3 id="action-confirm-title">请确认</h3></div>
+  <div class="modal-body"><p id="action-confirm-message"></p></div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" id="action-confirm-cancel" autofocus>取消</button>
+    <button class="btn btn-primary" id="action-confirm-accept">确定</button>
+  </div>
+</dialog>
 <div id="toasts" class="toasts"></div>
 
 <script src="/static/guide.js?v=20261013-guide1"></script>
 <script src="/static/statistics.js?v=20261014-stats2"></script>
-<script src="/static/app.js?v=20261013-stats1"></script>
+<script src="/static/confirmation.js?v=20261014-focus1"></script>
+<script src="/static/app.js?v=20261014-focus1"></script>
 </body>
 </html>

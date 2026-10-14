@@ -1,6 +1,6 @@
 {
   "name": "wxbot-desktop",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
   "main": "src/main/index.js",
   "author": "Sirius-Peng",
@@ -18,7 +18,7 @@
     "pack:win": "npm run build:backend:win && electron-builder --win --x64 && npm run verify:win",
     "pack:all": "node scripts/pack-native.cjs",
     "verify:win": "node scripts/verify-windows.cjs",
-    "test:windows": "node ../tests/test_windows_desktop.cjs && node ../tests/test_windows_lifecycle.cjs && node ../tests/test_storage_paths.cjs"
+    "test:windows": "node ../tests/test_windows_desktop.cjs && node ../tests/test_windows_lifecycle.cjs && node ../tests/test_storage_paths.cjs && node ../tests/test_input_focus.cjs"
   },
   "devDependencies": {
     "electron": "^36.9.5",
