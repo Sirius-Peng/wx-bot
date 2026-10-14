@@ -1,0 +1,63 @@
+{
+  "version": "2.1.4",
+  "tag": "v2.1.4",
+  "released_date": "2026-10-14",
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": "78c384836d13eff63efe7ea0a7d33ba28e05552a",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4",
+  "artifacts": [
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "818fc8589c3449cf1cf836b3535bc54e4ccb3f9ff22ab265690bcf4339e2c945",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/SHA256SUMS.txt"
+    },
+    {
+      "name": "WxBot-2.1.4-Windows-x64-Portable.exe",
+      "bytes": 130647336,
+      "sha256": "9db1ecb5a8c589730d892ca190d74505a5138807ab9096a99976f8b8896ee701",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-2.1.4-Windows-x64-Setup.exe",
+      "bytes": 130882265,
+      "sha256": "088a6335a5a44833760d8a19768ba0ff42559f65cfc97adb27376839bec6395f",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Setup.exe"
+    },
+    {
+      "name": "WxBot-2.1.4-macOS-arm64.dmg",
+      "bytes": 170037079,
+      "sha256": "1993633f6e27b3438b87275b023b7dfb55ee09a1a952063f1d0e7422dc789e91",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-macOS-arm64.dmg"
+    }
+  ],
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "validation": {
+    "python_macos": 533,
+    "python_windows": 533,
+    "python_skipped_case_sensitive_fixture": 1,
+    "windows_lifecycle_node": 15,
+    "storage_paths_node": 12,
+    "onboarding_node": 11,
+    "statistics_node": 18,
+    "data_import_frontend_node": 10,
+    "input_focus_node": 23,
+    "final_windows_setup_pe_resources_verified": true,
+    "final_windows_portable_start": true,
+    "v214_earlier_candidate_setup_install_uninstall_reinstall": true,
+    "final_focus_setup_full_install_cycle_retested": false,
+    "macos_arm64_dmg_mount_resources_verified": true,
+    "macos_frozen_import_restart_verified": true,
+    "real_windows_keyboard_ime_tested": false,
+    "real_account_login_tested": false
+  },
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-14"
+}

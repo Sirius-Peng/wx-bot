@@ -2,13 +2,13 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v2.1.4 · 当前发布：v2.1.3 · 更新：2026-10-14。**
+**当前版本：v2.1.4 · 当前发布：v2.1.4 · 更新：2026-10-14。**
 
-v2.1.4新增用户自选旧目录整套导入，并修复 Windows 使用确认框等功能后输入框失焦的问题；下面的GitHub下载表仍指向已经发布的v2.1.3，不代表新版安装包已上传。
+v2.1.4新增用户自选旧目录整套导入，并修复 Windows 使用确认框等功能后输入框失焦的问题。Windows 安装版、便携版和 macOS arm64 包均已更新到本次正式发布。
 
 微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等候、长期记忆、联网搜索和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-[下载 v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
+[下载 v2.1.4](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
 ## v2.1.4：从旧版本恢复人格与记忆
 
@@ -20,18 +20,18 @@ v2.1.4新增用户自选旧目录整套导入，并修复 Windows 使用确认�
 
 删除记忆、清空消息、解除身份关联、导入未保存草稿确认、准备 Docker 和桌面退出统一使用页面内异步确认框，避免原生阻塞确认框使键盘输入失焦。目录选择、关于弹窗结束，以及窗口重新激活时恢复渲染输入焦点；不定时抢夺其他窗口焦点，也不会把隐藏窗口自动拉出来。
 
-Windows 原生回归与修复包启动已验证，浏览器中验证了确认框关闭后记忆、模型名称和 Key 输入仍正常。已有安装应先从托盘退出，再用包含修复的安装包覆盖安装；数据目录保持不变。GitHub Release 下载表尚未更新到这个源码版本。
+Windows 原生回归与修复包启动已验证，浏览器中验证了确认框关闭后记忆、模型名称和 Key 输入仍正常。已有安装应先从托盘退出，再用包含修复的安装包覆盖安装；数据目录保持不变。请使用本次 v2.1.4 Release 的安装包；早先同版本本地候选包不一定包含最终输入修复。
 
 ## 下载与平台
 
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
-| Windows x64 安装版 | [WxBot-2.1.3-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Setup.exe) | 约 124.8 MiB |
-| Windows x64 便携版 | [WxBot-2.1.3-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-Windows-x64-Portable.exe) | 约 124.6 MiB |
-| macOS Apple Silicon | [WxBot-2.1.3-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/WxBot-2.1.3-macOS-arm64.dmg) | 约 151.0 MiB |
-| SHA256 校验值 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.3/SHA256SUMS.txt) | 对应上面三个文件 |
+| Windows x64 安装版 | [WxBot-2.1.4-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Setup.exe) | 约 124.8 MiB |
+| Windows x64 便携版 | [WxBot-2.1.4-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Portable.exe) | 约 124.6 MiB |
+| macOS Apple Silicon | [WxBot-2.1.4-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-macOS-arm64.dmg) | 约 162.2 MiB |
+| SHA256 校验值 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/SHA256SUMS.txt) | 对应上面三个文件 |
 
-安装包自带运行时，使用时无需 Python / Node.js。v2.1.3 未发布 macOS Intel、Windows ARM64/32 位或 Linux 桌面安装包；Linux 可使用源码或 Docker。Intel 构建命令与原生架构要求见[桌面说明](desktop/README.md)。发布包目前未配置代码签名；平台首次打开流程见同页。
+安装包自带运行时，使用时无需 Python / Node.js。v2.1.4 未发布 macOS Intel、Windows ARM64/32 位或 Linux 桌面安装包；Linux 可使用源码或 Docker。Intel 构建命令与原生架构要求见[桌面说明](desktop/README.md)。发布包目前未配置代码签名；平台首次打开流程见同页。
 
 ## 零基础开始
 
@@ -44,7 +44,7 @@ Windows 原生回归与修复包启动已验证，浏览器中验证了确认框
 
 ## 当前功能
 
-| 功能 | v2.1.3 实际行为 |
+| 功能 | v2.1.4 实际行为 |
 |---|---|
 | 微信 | 本项目采用腾讯 iLink 私聊通道，长轮询收件；不提供微信群聊或 GeWe 通道 |
 | QQ | NapCat / OneBot 11，私聊回复、群聊仅 @ 机器人时回复；反向 WebSocket 或 HTTP 上报 |
@@ -160,6 +160,8 @@ node tests/test_windows_lifecycle.cjs
 node tests/test_storage_paths.cjs
 node tests/test_onboarding_frontend.cjs
 node tests/test_statistics_frontend.cjs
+node tests/test_data_import_frontend.cjs
+node tests/test_input_focus.cjs
 python tools/smoke_ilink.py
 python -m src.verify_qq
 python tools/qr_check.py
@@ -168,9 +170,9 @@ python tools/check_docs.py
 
 以上 `python` 应使用已安装项目依赖的虚拟环境。`check_docs.py` 为文档一致性检查，不调用模型或平台；详细验证范围见[测试矩阵](docs/validation.md)。
 
-**v2.1.3 发布验收**：macOS 源码 / Windows 11 x64 原生源码各 **492/492**；Windows 生命周期15项、存储路径12项、引导前端11项、统计前端18项；Setup 安装/卸载/重装、Portable 启动、冻结后端离线投递/记忆恢复及资源一致性通过。发布包未使用真实账号扫码或付费模型评测替代这些检查。
+**v2.1.4 发布验收**：macOS 源码 / Windows 11 x64 原生源码各执行 **533 项测试（1 项大小写文件名夹具跳过）**；Windows 生命周期15项、存储路径12项、引导前端11项、统计前端18项、数据导入前端10项、输入焦点23项通过。最终 Windows 包通过 PE/ASAR/完整资源核验与 Portable 原生启动、后台重启/退出；macOS 重新构建、arm64三项校验、DMG挂载资源比对及冻结导入/重启通过。
 
-同机离线夹具各3次，后端启动中位数 **4259.89ms → 3384.45ms**；本机 HTTP 客户端重复创建平均 **332.08ms → 0.09ms**。结果是该测试环境下的开销，不是所有机器的固定速度，也不是 LLM 生成时间。精确文件大小、摘要、提交及测试快照见[发布清单](docs/release-v2.1.3.json)。
+同日早先 v2.1.4 候选包测试了 Setup 安装/卸载/重装与数据保留，最终焦点修复版未重复完整 Setup 生命周期或 Windows 交互式键盘/IME 验收。浏览器中验证了确认操作后中文记忆、模型名称和 Key 输入正常；不将其当成 Windows 实机键盘测试。精确文件大小、摘要及范围见[发布清单](docs/release-v2.1.4.json)和[测试矩阵](docs/validation.md)。v2.1.3 的历史同机性能数字见[历史清单](docs/release-v2.1.3.json)，不代表本次重新测量。
 
 ## 项目结构
 
@@ -193,4 +195,4 @@ tests/, tools/                 离线回归、平台/打包和文档核验
 docs/, CHANGELOG.md             使用、设计、验证与版本历史
 ```
 
-此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包固定对应 `v2.1.3` 标签；主分支可继续更新文档，不因此产生新的安装包版本。
+此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包固定对应 `v2.1.4` 标签；主分支可继续更新文档，不因此产生新的安装包版本。

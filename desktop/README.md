@@ -1,18 +1,18 @@
 # WxBot 桌面版 · v2.1.4
 
-当前源码版本为v2.1.4，新增原生旧目录选择、整套数据导入和后台重启入口，见[导入说明](../docs/data-import.md)；Windows 输入焦点修复采用页面内异步确认，并在原生目录/关于弹窗结束与窗口激活时恢复渲染焦点。以下已发布附件及Windows原生验收记录属于v2.1.3；不把旧附件当成v2.1.4。
+当前源码版本为v2.1.4，新增原生旧目录选择、整套数据导入和后台重启入口，见[导入说明](../docs/data-import.md)；Windows 输入焦点修复采用页面内异步确认，并在原生目录/关于弹窗结束与窗口激活时恢复渲染焦点。以下附件属于本次 v2.1.4 正式发布；详细验证范围见[当前测试矩阵](../docs/validation.md)。
 
 文档更新：2026-10-14。Electron 外壳 + Python sidecar，复用 `src/web`；关闭窗口隐藏到托盘，真正退出先清理后台。
 
-[下载最近已发布版本 v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
+[下载最近已发布版本 v2.1.4](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
 
 ## 发布产物
 
 | 平台 | 文件 | 当前状态 |
 |---|---|---|
-| Windows x64 | `WxBot-2.1.3-Windows-x64-Setup.exe` | NSIS 安装向导，已发布并实测安装/重装 |
-| Windows x64 | `WxBot-2.1.3-Windows-x64-Portable.exe` | 单文件便携包，已发布并实测启动；运行时仍解包内部目录 |
-| macOS arm64 | `WxBot-2.1.3-macOS-arm64.dmg` | Apple Silicon，已发布并验证三项 arm64 架构及 DMG 校验 |
+| Windows x64 | `WxBot-2.1.4-Windows-x64-Setup.exe` | NSIS 安装向导，已发布并核验 PE/完整资源；完整安装循环为同日早先候选包 |
+| Windows x64 | `WxBot-2.1.4-Windows-x64-Portable.exe` | 单文件便携包，已发布并实测启动；运行时仍解包内部目录 |
+| macOS arm64 | `WxBot-2.1.4-macOS-arm64.dmg` | Apple Silicon，已发布并验证三项 arm64 架构及 DMG 校验 |
 | 校验文件 | `SHA256SUMS.txt` | 三个二进制文件 SHA256 |
 
 本版本没有已发布的 Intel Mac、Windows ARM64/32位、Linux AppImage 或 universal 包。Intel 构建命令只是可执行入口，不等于已经构建/上传或实测该架构。
@@ -88,7 +88,7 @@ node tools/verify_windows_manager.cjs "BACKEND.exe" "MANAGER_REPORT.json"
 python tools/verify_windows_backend.py --binary "BACKEND.exe" --report "BACKEND_REPORT.json"
 ```
 
-这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.3.json)。
+这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.4.json)。
 
 ## 启动、托盘和退出
 
@@ -120,4 +120,4 @@ Electron 自身 profile/cache 与应用长期数据不是同一个目录。普�
 | 首次打开系统拦截 | 包未配置代码签名，按系统对本次下载的验证/打开流程处理；不要把文件存在当成校验成功 |
 | 安装退出后仍有后台 | 检查本版本的退出守卫/认证shutdown与日志；关闭窗口≠退出 |
 
-本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。v2.1.3 的运行时构建依赖和文件摘要记录在发布清单；文档更新不会修改已发布安装包或移动发布标签。
+本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。v2.1.4 的运行时验证和文件摘要记录在发布清单；文档更新不会修改已发布安装包或移动发布标签。
