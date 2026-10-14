@@ -1,4 +1,25 @@
-# v2.1.3 验证矩阵
+# v2.1.4 验证矩阵
+
+发布日期：2026-10-14（Asia/Shanghai）；运行时代码提交 `78c384836d13eff63efe7ea0a7d33ba28e05552a`；[Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4)、[文件清单](release-v2.1.4.json)。后续发布文档提交不改变该运行时代码。
+
+| 层次 | 结果 | 验证范围 |
+|---|---|---|
+| macOS源码Python / Windows11 x64原生Python | 各533项，1项跳过 | 现有492项及旧目录导入、UTF-8控制文件；默认大小写不敏感文件系统跳过大小写冲突夹具 |
+| 生命周期 / 存储路径 / 首启 / 统计 Node | 15 / 12 / 11 / 18项通过 | 延续原有回归，不以旧测试日志替代新源码运行 |
+| 旧目录导入前端 | 10项通过 | 预览、确认、选择器、取消、晚到响应、重启重试 |
+| 输入焦点 | 23项通过 | 去除原生confirm、独立确认决策、IME事件保护、过期close事件、焦点生命周期、目录选择finally |
+| 最终Windows包 | 通过 | 原生x64 PE、ASAR/main/window/preload及全部Web资源匹配、onedir词典/时区与完整树 |
+| 最终Portable原生启动与管理器 | 通过 | 实际Electron/冻结后端启动、认证、引导/统计/导入/确认资源、重启与退出 |
+| macOS重建 | 通过 | 同一运行时代码重新冻结；Electron/Framework/Python arm64，ASAR/Web/后端匹配 |
+| macOS DMG / 冻结导入 | 通过 | 压缩卷校验、只读挂载与App资源一致，旧人格/记忆/路径/未知文件/空目录/备份及重启恢复 |
+
+最终焦点修复版 Setup 未重复完整安装/卸载/重装循环；该生命周期验证来自同日早先 v2.1.4 候选包。Windows交互式键盘/IME和真实微信/QQ账号扫码未实测。浏览器实际输入确认操作后仍正常，Node覆盖IME事件分支；这两项不等同于Windows实机输入质量验收。
+
+复现：`python -m unittest discover -s tests`、`node tests/test_data_import_frontend.cjs`、`node tests/test_input_focus.cjs`、`python tools/check_docs.py`；Mac冻结导入为 `python tools/smoke_data_import.py --backend desktop/resources/backend/wxbot-server`。资源核验与原生Windows入口仍见[桌面说明](../desktop/README.md)。
+
+---
+
+# 历史：v2.1.3 验证矩阵
 
 发布日期：2026-10-14（Asia/Shanghai）。运行时提交 `aba974b5c31f7fa9958830d226848eca5a7c225a`；[公开Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3)。文档提交可以晚于该运行时提交。
 
