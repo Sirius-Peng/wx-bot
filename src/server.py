@@ -20,6 +20,8 @@ import logging
 import os
 import socket
 import sys
+import time
+import uuid
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,6 +44,7 @@ logging.basicConfig(
 log = logging.getLogger("wxbot")
 
 from .core.storage import resolve_data_dir, initialize_storage, create_backup
+from .core.data_import import inspect_import, prepare_import, cancel_import, import_status
 
 DATA_DIR = resolve_data_dir()
 STORAGE_REPORT = initialize_storage(DATA_DIR)
@@ -78,6 +81,7 @@ admin_auth = AdminAuth(DATA_DIR, HOST)
 onboarding_store = OnboardingStore(DATA_DIR / "onboarding.json")
 _model_test_lock = asyncio.Lock()
 _backup_lock = asyncio.Lock()
+_import_previews = {}
 
 
 @asynccontextmanager
@@ -522,7 +526,67 @@ async def api_data_status():
             'migration':{'status':STORAGE_REPORT.get('status','unknown'),
                          'imported_files':STORAGE_REPORT.get('imported_files',0),
                          'other_backups':len(STORAGE_REPORT.get('other_backups',[]))},
+            'import':import_status(DATA_DIR),
             'retained_on_uninstall':True if not (os.environ.get('WXBOT_DATA_DIR') or os.environ.get('WXBOT_USER_DATA_DIR')) or os.environ.get('WXBOT_DEFAULT_DATA_DIR')=='1' else None}
+
+
+def _local_import(request):
+    try:
+        local = bool(request.client and ipaddress.ip_address(request.client.host).is_loopback)
+    except ValueError:
+        local = False
+    if not local: raise HTTPException(403, '旧目录导入仅支持从运行后台的本机管理界面操作')
+
+
+@app.post('/api/data/import/preview')
+async def api_data_import_preview(request: Request):
+    _local_import(request)
+    if _backup_lock.locked(): raise HTTPException(409, '已有数据任务正在执行，请稍候')
+    async with _backup_lock:
+        try:
+            body = await request.json()
+            result = await asyncio.to_thread(inspect_import, body.get('source'), DATA_DIR)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise HTTPException(400, str(exc) if isinstance(exc, ValueError) else '请选择旧数据目录')
+        except OSError:
+            raise HTTPException(400, '旧目录读取失败，请检查路径、空间和权限')
+        now = time.monotonic()
+        expired = [k for k,v in _import_previews.items() if now-v['at'] > 900]
+        for k in expired: _import_previews.pop(k, None)
+        if len(_import_previews) >= 16: _import_previews.pop(next(iter(_import_previews)))
+        token = uuid.uuid4().hex
+        _import_previews[token] = {**result, 'at': now}
+        return {**result, 'ok': True, 'token': token}
+
+
+@app.post('/api/data/import/prepare')
+async def api_data_import_prepare(request: Request):
+    _local_import(request)
+    try: body = await request.json()
+    except ValueError: raise HTTPException(400, '请先预览并确认导入')
+    if not isinstance(body, dict) or body.get('confirm_replace') is not True:
+        raise HTTPException(400, '请确认替换当前数据后再导入')
+    token = body.get('token')
+    preview = _import_previews.get(token) if isinstance(token, str) else None
+    if not preview or time.monotonic()-preview['at'] > 900:
+        raise HTTPException(409, '导入预览已过期，请重新预览')
+    if _backup_lock.locked(): raise HTTPException(409, '已有数据任务正在执行，请稍候')
+    async with _backup_lock:
+        try:
+            report = await asyncio.to_thread(prepare_import, preview['source'], DATA_DIR, preview['fingerprint'])
+        except ValueError as exc: raise HTTPException(409, str(exc))
+        except (OSError, RuntimeError): raise HTTPException(500, '旧数据准备未完成，当前数据未改变；请检查空间、权限后重试')
+        _import_previews.pop(token, None)
+    return {'ok': True, 'requires_backend_restart': True, 'import': report, 'message': report['message']}
+
+
+@app.post('/api/data/import/cancel')
+async def api_data_import_cancel(request: Request):
+    _local_import(request)
+    if _backup_lock.locked(): raise HTTPException(409, '已有数据任务正在执行，请稍候')
+    async with _backup_lock:
+        try: return await asyncio.to_thread(cancel_import, DATA_DIR)
+        except ValueError as exc: raise HTTPException(409, str(exc))
 
 
 @app.post('/api/data/backup')
@@ -541,7 +605,7 @@ async def api_data_backup():
 @app.get('/api/data/backup/{name}')
 async def api_data_backup_download(name:str):
     import re
-    if not re.fullmatch(r'wxbot-(?:backup|migration)-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.zip',name):raise HTTPException(404,'备份不存在')
+    if not re.fullmatch(r'wxbot-(?:backup|migration|import|preimport)-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.zip',name):raise HTTPException(404,'备份不存在')
     file=DATA_DIR/'.backups'/name
     if not file.is_file() or file.is_symlink() or (DATA_DIR/'.backups').is_symlink():raise HTTPException(404,'备份不存在')
     return FileResponse(file,media_type='application/zip',filename=name,headers={'Cache-Control':'no-store'})

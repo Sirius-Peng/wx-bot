@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const { ipcMain, shell, app } = require('electron');
+const { ipcMain, shell, app, dialog } = require('electron');
 const P = require('./paths');
 
 /**
@@ -64,6 +64,27 @@ function registerIpc({ windowMgr, backend, trayMgr, quit }) {
   }));
 
   // ── 打开本地目录（方便用户备份/排查）──────────────────────
+  ipcMain.handle('data:chooseLegacyDir', async (event) => {
+    // Only the app's top-level local management page may open this chooser.
+    if (!windowMgr.win || event.sender !== windowMgr.win.webContents ||
+        event.senderFrame !== event.sender.mainFrame) return { canceled: true };
+    try {
+      const url = new URL(event.senderFrame.url);
+      if (url.origin !== backend.url || url.pathname !== '/') return { canceled: true };
+    } catch (_) { return { canceled: true }; }
+    const parent = windowMgr.win;
+    try {
+      const result = await dialog.showOpenDialog(parent, {
+        title: '选择旧版数据目录（包含 config.json）',
+        buttonLabel: '选择此数据目录',
+        properties: ['openDirectory'],
+      });
+      return { canceled: result.canceled, path: result.canceled ? '' : result.filePaths[0] };
+    } finally {
+      windowMgr.restoreInputFocus(parent);
+    }
+  });
+
   ipcMain.handle('shell:openDataDir', () => {
     shell.openPath(P.userDataDir());
     return { ok: true };

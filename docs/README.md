@@ -1,6 +1,6 @@
-# v2.1.3 文档索引
+# v2.1.4 文档索引
 
-文档同步日期：2026-10-14。当前发布为 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3)；正文描述本项目实现，历史日志结论保留原核查日期。
+文档同步日期：2026-10-14。当前源码版本为v2.1.4；最近发布为 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3)；正文描述本项目实现，历史日志结论保留原核查日期。
 
 ## 按任务查找
 
@@ -14,6 +14,7 @@
 | 长期记忆、身份关联、历史/过期事实、摘要 | [上下文与记忆](memory-design.md) |
 | 联网搜索、工具参数、时间与时区 | [搜索与时间](web-search-time.md) |
 | 高频词/话题、气泡图、计数和扫描限额 | [对话统计](conversation-statistics.md) |
+| 自选旧目录、整套导入、预览、重启与恢复 | [旧目录导入（v2.1.4）](data-import.md) |
 | 数据目录、非覆盖迁移、备份/恢复、Docker卷 | [用户数据](user-data-persistence.md) |
 | 原生构建、资源布局、托盘、退出、故障检查 | [桌面开发](../desktop/README.md) |
 | Windows v2.1.3改进与原生验收 | [Windows专项](windows-v2.1.3.md) |

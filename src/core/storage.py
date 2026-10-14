@@ -109,12 +109,16 @@ def verify_backup(file):
     with zipfile.ZipFile(file) as z:
         m=json.loads(z.read(MANIFEST));expected=m['files']
         if set(z.namelist()) != set(expected)|{MANIFEST}:raise ValueError('Backup members do not match manifest')
+        if len(z.namelist()) != len(expected)+1:raise ValueError('Duplicate backup members')
         for name,digest in expected.items():
-            if hashlib.sha256(z.read(name)).hexdigest()!=digest:raise ValueError('Backup hash verification failed')
+            h=hashlib.sha256()
+            with z.open(name) as f:
+                for chunk in iter(lambda:f.read(1024*1024),b''):h.update(chunk)
+            if h.hexdigest()!=digest:raise ValueError('Backup hash verification failed')
     return m
 
 
-def _snapshot(root, destination, kind='backup', extras=None):
+def _snapshot(root, destination, kind='backup', extras=None, payload=None, directories=None):
     if destination.is_symlink():raise ValueError('Backup directory must not be a symbolic link')
     destination.mkdir(parents=True,exist_ok=True,mode=0o700)
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
@@ -129,14 +133,14 @@ def _snapshot(root, destination, kind='backup', extras=None):
                 if not extra.is_relative_to(root.resolve()) and extra.is_dir():
                     sets.append((extra,'external/'+label+'/'));origins[label]=str(extra)
             for source,prefix in sets:
-                for p,relative in _payload_files(source):
+                for p,relative in (payload or _payload_files)(source):
                     before=p.stat();digest=hashlib.sha256();name=prefix+relative
                     with p.open('rb') as f,z.open(name,'w',force_zip64=True) as out:
                         for chunk in iter(lambda:f.read(1024*1024),b''):out.write(chunk);digest.update(chunk)
                     after=p.stat()
                     if (before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns):raise RuntimeError('Data changed during snapshot; retry')
                     hashes[name]=digest.hexdigest()
-            z.writestr(MANIFEST,json.dumps({'version':1,'created_at':stamp,'origins':origins,'files':hashes},ensure_ascii=False))
+            z.writestr(MANIFEST,json.dumps({'version':1,'created_at':stamp,'origins':origins,'files':hashes,**({'directories':directories} if directories is not None else {})},ensure_ascii=False))
         os.chmod(tmp,0o600);verify_backup(tmp);os.replace(tmp,final)
         return final
     finally:Path(tmp).unlink(missing_ok=True)
@@ -193,8 +197,10 @@ def initialize_storage(data_dir=None, sources=None, migrate=None):
         setting=os.environ.get('WXBOT_MIGRATE_LEGACY')
         migrate=setting=='1' if setting is not None else not (os.environ.get('WXBOT_DATA_DIR') or os.environ.get('WXBOT_USER_DATA_DIR'))
     with _lock(root):
-        if (root/PENDING).is_file():return _finish_pending(root,json.loads((root/PENDING).read_text()))
-        if (root/MARKER).is_file():return json.loads((root/MARKER).read_text())
+        from .data_import import apply_pending_import
+        apply_pending_import(root)
+        if (root/PENDING).is_file():return _finish_pending(root,json.loads((root/PENDING).read_text(encoding='utf-8')))
+        if (root/MARKER).is_file():return json.loads((root/MARKER).read_text(encoding='utf-8'))
         if not migrate:return {'version':1,'status':'custom','imported_files':0}
         candidates=[]
         for p in (sources if sources is not None else legacy_data_dirs()):
@@ -213,7 +219,7 @@ def initialize_storage(data_dir=None, sources=None, migrate=None):
 def migrated_state_path(data_dir, absolute_path):
     """Remap only an old path inside the selected migrated dataset; keep custom paths."""
     root=Path(data_dir).resolve();p=Path(absolute_path).expanduser().resolve()
-    try:report=json.loads((root/MARKER).read_text())
+    try:report=json.loads((root/MARKER).read_text(encoding='utf-8'))
     except (OSError,ValueError):return p
     if report.get('status')=='migrated' and report.get('source'):
         old=Path(report['source']).resolve()
