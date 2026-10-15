@@ -68,7 +68,7 @@ def audit(root,metadata=None):
     check('九个配置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
     check("'--onedir'" in (root/'desktop/scripts/build-backend.ps1').read_text(encoding='utf-8-sig') and 'onedir' in desktop,'Windows layout mismatch')
     check('--onefile' in (root/'desktop/scripts/build-backend.sh').read_text() and 'onefile' in desktop,'macOS layout mismatch')
-    paths=[root/'README.md',root/'CHANGELOG.md',root/'desktop/README.md',*sorted((root/'docs').glob('*.md'))]
+    paths=[root/'README.md',root/'CHANGELOG.md',root/'CONTRIBUTORS.md',root/'CONTRIBUTING.md',root/'desktop/README.md',*sorted((root/'docs').glob('*.md'))]
     local_links=0
     for p in paths:
         if not p.exists():continue
@@ -78,6 +78,11 @@ def audit(root,metadata=None):
             if u.scheme or target.startswith('#'):continue
             dest=(p.parent/unquote(u.path)).resolve();local_links+=1
             check(dest.is_file() or dest.is_dir(),f'broken local link: {p.relative_to(root)} -> {target}')
+    author=json.loads((root/'desktop/package.json').read_text()).get('author')
+    check(isinstance(author,dict) and author.get('name')=='Sirius-Peng' and author.get('url')=='https://github.com/Sirius-Peng','package author profile mismatch')
+    check(isinstance(author,dict) and author.get('email')=='54427718+Sirius-Peng@users.noreply.github.com','package author noreply mismatch')
+    check((root/'.mailmap').is_file() and (root/'CONTRIBUTORS.md').is_file() and (root/'CONTRIBUTING.md').is_file(),'missing contributor metadata')
+    check((root/'.github/CODEOWNERS').is_file(),'missing code owners')
     if metadata is not None:
         description=metadata.get('description','');topics={t['name'] if isinstance(t,dict) else t for t in metadata.get('repositoryTopics',[])}
         check('微信私聊' in description and 'QQ' in description,'repository About channels mismatch')

@@ -3,7 +3,11 @@
   "version": "2.1.5",
   "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
   "main": "src/main/index.js",
-  "author": "Sirius-Peng",
+  "author": {
+    "name": "Sirius-Peng",
+    "email": "54427718+Sirius-Peng@users.noreply.github.com",
+    "url": "https://github.com/Sirius-Peng"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -23,5 +27,19 @@
   "devDependencies": {
     "electron": "^36.9.5",
     "electron-builder": "^25.1.8"
+  },
+  "contributors": [
+    {
+      "name": "Sirius-Peng",
+      "url": "https://github.com/Sirius-Peng"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sirius-Peng/wx-bot.git"
+  },
+  "homepage": "https://github.com/Sirius-Peng/wx-bot#readme",
+  "bugs": {
+    "url": "https://github.com/Sirius-Peng/wx-bot/issues"
   }
 }

@@ -199,3 +199,11 @@ docs/, CHANGELOG.md             使用、设计、验证与版本历史
 ```
 
 此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包分别固定对应其发布标签：本次macOS为`v2.1.5`，Windows历史包为`v2.1.4`；主分支文档更新不会改动旧包或移动标签。
+
+## 作者与贡献者
+
+<a href="https://github.com/Sirius-Peng"><img src="https://avatars.githubusercontent.com/u/54427718?v=4" width="64" height="64" alt="Sirius-Peng" /></a>
+
+**[Sirius-Peng（Yuhan Peng）](https://github.com/Sirius-Peng)** — 项目作者与维护者。
+
+[贡献者说明](CONTRIBUTORS.md) · [参与贡献](CONTRIBUTING.md) · [GitHub贡献者统计](https://github.com/Sirius-Peng/wx-bot/graphs/contributors)

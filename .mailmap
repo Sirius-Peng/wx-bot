@@ -1,0 +1,4 @@
+# Canonical identity for Git log/shortlog; does not rewrite existing commit objects.
+# GitHub account attribution additionally depends on the commit email being linked.
+Sirius-Peng <54427718+Sirius-Peng@users.noreply.github.com> nh_y <junsi3105657035@outlook.com>
+Sirius-Peng <54427718+Sirius-Peng@users.noreply.github.com> <54427718+Sirius-Peng@users.noreply.github.com>
