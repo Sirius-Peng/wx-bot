@@ -173,6 +173,8 @@ python tools/check_docs.py
 
 以上 `python` 应使用已安装项目依赖的虚拟环境。`check_docs.py` 为文档一致性检查，不调用模型或平台；详细验证范围见[测试矩阵](docs/validation.md)。
 
+运行与打包统一使用根目录 `requirements.txt`，无需额外数据库依赖清单。Docker构建上下文仅包含运行源码和依赖清单，不传入本地安装包、虚拟环境、Git历史或用户数据。人格合成语料由内置示例按需导出：`python tools/export_persona.py`，默认输出到已忽略的 `personas/phrolova/generated/`；详见[人格评估与导出](personas/phrolova/EVALUATION.md)。
+
 **v2.1.5发布验收**：本机macOS执行 **617项Python测试（1项大小写夹具跳过）**，9组Node回归通过，其中主动联系前端11项。冻结后端通过单端联系人、可选双端关联、分区保存与旧目录导入/重启检查；14个关键模块字节码、全部6份Web资源及267项只读DMG挂载内容与源码/构建App一致，三项二进制均为arm64。
 
 本次未构建或原生测试Windows v2.1.5；Windows历史v2.1.4的533项原生回归、Portable启动及Setup候选包生命周期记录仍保留，不用旧结果替代本次验收。未使用真实账号或付费模型替代模拟接口。精确文件大小、摘要及边界见[当前发布清单](docs/release-v2.1.5.json)、[历史v2.1.4清单](docs/release-v2.1.4.json)和[测试矩阵](docs/validation.md)。

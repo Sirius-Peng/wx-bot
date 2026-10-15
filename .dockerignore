@@ -1,0 +1,9 @@
+# Dockerfile only copies the runtime and the single dependency manifest.
+# Keep local installers, environments, Git history and user data out of context.
+**
+!Dockerfile
+!requirements.txt
+!src/
+!src/**
+**/__pycache__/
+**/*.py[cod]

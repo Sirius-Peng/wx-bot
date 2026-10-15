@@ -12,6 +12,7 @@ from src.personas.phrolova import EXAMPLES,CORE_PROMPT
 from src.core.types import WxMessage
 from src.store_memory import MemoryStore
 from src.runtime import BotRuntime
+from tools.export_persona import training_rows
 
 class PersonaTests(unittest.TestCase):
  def test_new_defaults(self):
@@ -43,11 +44,11 @@ class PersonaTests(unittest.TestCase):
  def test_rover_not_selected_for_neutral(self):
   s=few_shot_messages('phrolova','我是漂泊者，我们在失约之后见面。','neutral');self.assertFalse(any(x['content']=='我是漂泊者，我们在失约之后见面。' for x in s))
  def test_data_distribution_and_provenance(self):
-  rows=[json.loads(s) for s in (ROOT/'personas/phrolova/corpus.jsonl').read_text().splitlines()];self.assertEqual(rows,EXAMPLES)
+  rows=EXAMPLES
   self.assertEqual(Counter(r['group'] for r in rows),{'daily':10,'intimacy':30,'plot':40,'anchor':15,'combat':5})
   self.assertEqual(len({r['id'] for r in rows}),100);self.assertTrue(all(not r['is_official_quote'] and r['provenance']=='synthetic_adaptation' for r in rows))
  def test_training_format(self):
-  rows=[json.loads(s) for s in (ROOT/'personas/phrolova/train.jsonl').read_text().splitlines()];self.assertEqual(len(rows),100)
+  rows=list(training_rows());self.assertEqual(len(rows),100)
   self.assertTrue(all([m['role'] for m in r['messages']]==['system','user','assistant'] for r in rows))
  def test_eval_heldout(self):
   rows=[json.loads(s) for s in (ROOT/'personas/phrolova/eval.jsonl').read_text().splitlines()];self.assertEqual(len(rows),24)

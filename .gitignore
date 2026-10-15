@@ -7,6 +7,8 @@
 data/*
 !data/.gitkeep
 *.jsonl
+# Reproducible synthetic exports; source lives in src/personas/phrolova.py.
+personas/phrolova/generated/
 config.json
 
 # ── 运行环境 ─────────────────────────────────────────────────

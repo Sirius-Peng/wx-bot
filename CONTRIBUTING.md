@@ -31,3 +31,7 @@ python tools/check_docs.py
 ```
 
 署名/仓库资料检查：`python -m unittest discover -s tests -p test_repository_attribution.py`。Windows与macOS安装包使用对应原生构建环境；发布平台与测试范围以[验证矩阵](docs/validation.md)为准。
+
+## 仓库内容
+
+运行依赖只维护根目录 `requirements.txt`。不要提交构建产物、缓存、用户资料或重复生成的人格语料；需要训练格式时运行 `python tools/export_persona.py`。人格示例修改后运行 `tests/test_persona.py` 与 `tests/test_repository_hygiene.py` 的回归。测试、诊断工具、独立人格验证集与历史发布清单均有实际用途，继续保留。
