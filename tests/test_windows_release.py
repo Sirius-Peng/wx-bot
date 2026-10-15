@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT=Path(os.environ.get('WXBOT_TEST_ROOT',Path(__file__).resolve().parents[1]))
 class WindowsReleaseTests(unittest.TestCase):
  def test_version_alignment(self):
-  p=json.loads((ROOT/'desktop/package.json').read_text());lock=json.loads((ROOT/'desktop/package-lock.json').read_text());self.assertEqual(p['version'],'2.1.4');self.assertEqual(p['version'],lock['version']);self.assertEqual(p['version'],lock['packages']['']['version'])
+  p=json.loads((ROOT/'desktop/package.json').read_text());lock=json.loads((ROOT/'desktop/package-lock.json').read_text());self.assertEqual(p['version'],'2.1.5');self.assertEqual(p['version'],lock['version']);self.assertEqual(p['version'],lock['packages']['']['version'])
  def test_windows_onedir_for_startup(self):
   s=(ROOT/'desktop/scripts/build-backend.ps1').read_text(encoding='utf-8-sig');self.assertIn("'--onedir'",s);self.assertNotIn("'--onefile'",s);self.assertIn('wxbot-server\\wxbot-server.exe',s)
  def test_verifier_covers_dictionary_and_timezone(self):

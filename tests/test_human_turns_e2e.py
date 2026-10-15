@@ -144,8 +144,8 @@ class NaturalTurnTests(unittest.IsolatedAsyncioTestCase):
         def check(m):
             if changed:raise ConversationChanged('fixture')
         a.check_reply_current=check;sender=Sender();o=orch(a,sender=sender)
-        async def load(refs):entered.set();await asyncio.Event().wait()
-        with patch.object(o.images,'load',side_effect=load):
+        async def load(refs,**kwargs):entered.set();await asyncio.Event().wait()
+        with patch.object(o.images,'load_partial',side_effect=load):
             task=asyncio.create_task(o.handle(message('[图片]',images=[{'url':'fixture'}])));await entered.wait();changed=True
             with self.assertRaises(ConversationChanged):await asyncio.wait_for(task,.2)
         self.assertEqual(sender.sent,[]);await o.close()

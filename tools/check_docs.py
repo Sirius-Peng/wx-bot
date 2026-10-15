@@ -5,6 +5,19 @@ from pathlib import Path
 from urllib.parse import unquote,urlsplit
 
 
+PLATFORM_FILES = {
+    'windows-x64-setup': 'WxBot-{version}-Windows-x64-Setup.exe',
+    'windows-x64-portable': 'WxBot-{version}-Windows-x64-Portable.exe',
+    'macos-arm64-dmg': 'WxBot-{version}-macOS-arm64.dmg',
+}
+
+
+def expected_assets(version, platforms):
+    if not isinstance(platforms, list) or not platforms or any(not isinstance(p, str) or p not in PLATFORM_FILES for p in platforms) or len(set(platforms)) != len(platforms):
+        raise ValueError('manifest must explicitly list supported published platforms')
+    return {'SHA256SUMS.txt'} | {PLATFORM_FILES[p].format(version=version) for p in platforms}
+
+
 def audit(root,metadata=None):
     errors=[];checks=0
     def check(ok,message):
@@ -25,7 +38,11 @@ def audit(root,metadata=None):
     check('v'+version in desktop.splitlines()[0],'desktop header version missing')
     for f in ['CHANGELOG.md','docs/README.md','docs/validation.md']:
         check((root/f).is_file(),'missing documentation: '+f)
-    desired={'WxBot-'+published+'-Windows-x64-Setup.exe','WxBot-'+published+'-Windows-x64-Portable.exe','WxBot-'+published+'-macOS-arm64.dmg','SHA256SUMS.txt'}
+    try:
+        desired = expected_assets(published, manifest.get('published_platforms'))
+    except ValueError:
+        desired = set()
+        check(False, 'missing or unsupported published platforms')
     names={a['name'] for a in manifest.get('artifacts',[])}
     check(names==desired,'release asset manifest mismatch')
     for a in manifest.get('artifacts',[]):
@@ -47,8 +64,8 @@ def audit(root,metadata=None):
     for id,label in [('overview','概览'),('connect','接入设置'),('memory','人格知识库'),('messages','消息记录'),('statistics','对话统计'),('settings','模型与行为'),('guide','上手引导')]:
         check('id="page-'+id+'"' in html and label in readme,'page docs mismatch: '+id)
     sections=re.findall(r'data-settings-section="([^"]+)"',html)
-    check(len(set(sections)-{'channels'})==8,'settings section count changed; update NapCat docs')
-    check('八个配置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
+    check(len(set(sections)-{'channels'})==9,'settings section count changed; update NapCat docs')
+    check('九个配置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
     check("'--onedir'" in (root/'desktop/scripts/build-backend.ps1').read_text(encoding='utf-8-sig') and 'onedir' in desktop,'Windows layout mismatch')
     check('--onefile' in (root/'desktop/scripts/build-backend.sh').read_text() and 'onefile' in desktop,'macOS layout mismatch')
     paths=[root/'README.md',root/'CHANGELOG.md',root/'desktop/README.md',*sorted((root/'docs').glob('*.md'))]

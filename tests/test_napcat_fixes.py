@@ -283,7 +283,7 @@ class UIContractTests(unittest.TestCase):
         for name in ('primary','fallback','judge','vision'):
             for field in ('base','model','key'):self.assertEqual(parser.fields[name+'-'+field],(name,'page-settings'))
         for field,name in [('bot-name','persona'),('bot-persona','persona'),('typing-indicator','reply'),('memory-interval','memory')]:self.assertEqual(parser.fields[field],(name,'page-settings'))
-        self.assertEqual(set(parser.buttons),{'primary','fallback','judge','vision','search','persona','reply','memory','channels'})
+        self.assertEqual(set(parser.buttons),{'primary','fallback','judge','vision','search','persona','reply','memory','proactive','channels'})
     def test_no_global_form_save_remains(self):
         js=(Path(__file__).resolve().parents[1]/'src/web/app.js').read_text(encoding='utf-8')
         self.assertNotIn("api('/api/config', { method: 'PUT'",js)
