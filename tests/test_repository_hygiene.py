@@ -93,9 +93,18 @@ class RepositoryHygieneTests(unittest.TestCase):
 
     def test_docker_context_allowlist_matches_copy_inputs(self):
         patterns = [line for line in (ROOT / ".dockerignore").read_text().splitlines() if line and not line.startswith("#")]
-        self.assertEqual(patterns, ["**", "!Dockerfile", "!requirements.txt", "!src/", "!src/**", "**/__pycache__/", "**/*.py[cod]"])
+        self.assertEqual(patterns, ["**", "!Dockerfile", "!requirements.txt", "!src/", "!src/**", "**/__pycache__/", "**/*.py[cod]", "**/.DS_Store", "**/Thumbs.db"])
         copies = [line for line in (ROOT / "Dockerfile").read_text().splitlines() if line.startswith("COPY ")]
         self.assertEqual(copies, ["COPY requirements.txt .", "COPY src/ ./src/"])
+
+    def test_desktop_icons_use_one_external_resource_copy(self):
+        config = (ROOT / "desktop/electron-builder.yml").read_text()
+        self.assertNotIn("  - assets/**/*", config)
+        self.assertEqual(config.count("  - from: assets\n    to: assets"), 1)
+        paths = (ROOT / "desktop/src/main/paths.js").read_text()
+        self.assertIn("if (isPackaged()) return path.join(process.resourcesPath, 'assets');", paths)
+        for filename in ["icon.png", "icon.icns", "icon.ico", "tray.png", "trayTemplate.png", "trayTemplate@2x.png"]:
+            self.assertTrue((ROOT / "desktop/assets" / filename).is_file())
 
 
 if __name__ == "__main__":

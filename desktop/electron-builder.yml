@@ -18,7 +18,6 @@ directories:
 # 打进 asar 的文件
 files:
   - src/**/*
-  - assets/**/*
   - package.json
   - '!**/*.map'
 
@@ -30,7 +29,7 @@ extraResources:
   # Python 后端：macOS onefile / Windows onedir（由对应原生脚本产出）
   - from: resources/backend
     to: backend
-  # 图标资源
+  # 图标由 paths.assetsDir() 从外部资源目录读取，不重复放入 ASAR。
   - from: assets
     to: assets
 

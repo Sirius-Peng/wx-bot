@@ -33,6 +33,8 @@ Python: Web/API / iLink / OneBot / LLM / 人格 / 记忆 / 统计
 
 Windows 优先新 onedir 路径，仍兼容旧平铺 `resources/backend/wxbot-server.exe`。不要只复制 onedir 内的 exe；词典、时区和 Python 支持文件同样需要。网页同时作为独立 `resources/web` 和后端冻结资源提供。
 
+图标只复制至外部 `resources/assets`，由 `paths.assetsDir()` 统一定位；ASAR不再重复保存同一套图标。仓库中的各平台图标仍保留供开发与原生构建使用。
+
 主要模块：`src/main/index.js` 编排；`window.js` 窗口；`tray.js` 托盘；`backend.js` 启动/健康/重启/日志；`lifecycle.js` 退出守卫与错误页；`ipc.js` 白名单；`paths.js` 后端与数据路径；`src/preload/index.js` 提供 `wxbotDesktop` 桥接。渲染页面不启用 Node 集成。
 
 ## 开发
