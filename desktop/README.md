@@ -1,21 +1,18 @@
 # WxBot 桌面版 · v2.1.5
 
-当前源码版本为v2.1.5（构建验收中），新增原生旧目录选择、整套数据导入和后台重启入口，见[导入说明](../docs/data-import.md)；Windows 输入焦点修复采用页面内异步确认，并在原生目录/关于弹窗结束与窗口激活时恢复渲染焦点。以下附件属于本次 v2.1.4 正式发布；详细验证范围见[当前测试矩阵](../docs/validation.md)。
+当前源码版本为v2.1.5，新增主动联系（单端无需关联、双端可选共享计划）、内容型联网总结和混合媒体改进；继续保留旧目录整套导入和Windows输入焦点修复。文档更新：2026-10-15。
 
-文档更新：2026-10-14。Electron 外壳 + Python sidecar，复用 `src/web`；关闭窗口隐藏到托盘，真正退出先清理后台。
-
-[下载最近已发布版本 v2.1.4](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [Windows 专项验证](../docs/windows-v2.1.3.md)
+本次先发布macOS arm64；Windows构建机离线，Windows最新安装包仍为v2.1.4，旧包不含v2.1.5新增功能。[下载v2.1.5](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5) · [Windows v2.1.4](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [测试矩阵](../docs/validation.md)
 
 ## 发布产物
 
 | 平台 | 文件 | 当前状态 |
 |---|---|---|
-| Windows x64 | `WxBot-2.1.4-Windows-x64-Setup.exe` | NSIS 安装向导，已发布并核验 PE/完整资源；完整安装循环为同日早先候选包 |
-| Windows x64 | `WxBot-2.1.4-Windows-x64-Portable.exe` | 单文件便携包，已发布并实测启动；运行时仍解包内部目录 |
-| macOS arm64 | `WxBot-2.1.4-macOS-arm64.dmg` | Apple Silicon，已发布并验证三项 arm64 架构及 DMG 校验 |
-| 校验文件 | `SHA256SUMS.txt` | 三个二进制文件 SHA256 |
+| macOS arm64 | `WxBot-2.1.5-macOS-arm64.dmg` | 本次发布；三项arm64、冻结API、源码字节码及只读挂载267项一致 |
+| v2.1.5校验文件 | `SHA256SUMS.txt` | 只对应本次DMG |
+| Windows x64 | `WxBot-2.1.4-Windows-x64-Setup.exe` / `WxBot-2.1.4-Windows-x64-Portable.exe` | 历史v2.1.4下载保留，不属于本次v2.1.5附件 |
 
-本版本没有已发布的 Intel Mac、Windows ARM64/32位、Linux AppImage 或 universal 包。Intel 构建命令只是可执行入口，不等于已经构建/上传或实测该架构。
+本次没有Intel Mac、Windows或Linux AppImage/universal新包。原生构建入口不等于该平台已构建发布；Windows v2.1.4历史验证范围见对应[清单](../docs/release-v2.1.4.json)。
 
 ## 架构和资源布局
 
@@ -88,7 +85,7 @@ node tools/verify_windows_manager.cjs "BACKEND.exe" "MANAGER_REPORT.json"
 python tools/verify_windows_backend.py --binary "BACKEND.exe" --report "BACKEND_REPORT.json"
 ```
 
-这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.4.json)。
+这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.5.json)。
 
 ## 启动、托盘和退出
 

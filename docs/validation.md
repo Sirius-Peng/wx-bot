@@ -1,4 +1,25 @@
-# v2.1.4 验证矩阵
+# v2.1.5 验证矩阵
+
+发布日期：2026-10-15（Asia/Shanghai）；运行时代码提交 `c8635ccd69f0ed64bbf270bacc5a595b65aae616`；[Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5)、[文件清单](release-v2.1.5.json)。后续文档提交不改变包内运行时代码。
+
+本次先发布macOS arm64。Windows构建机离线，经确认先发布可用平台；未构建或原生验收Windows v2.1.5，Windows安装下载仍为历史v2.1.4，不把Node协议合同测试当成新的Windows原生验收。
+
+| 层次 | 结果 | 验证范围 |
+|---|---|---|
+| macOS源码Python | 617项，1项跳过 | 单端/跨端主动联系、搜索总结/复核、多图/视频、原有记忆/投递/导入及平台合同；大小写不敏感文件系统跳过冲突夹具 |
+| Node回归 | 9组全部通过 | 主动联系前端11项、输入焦点23项、引导11项、统计18项、导入10项及路径/生命周期合同 |
+| macOS原生冻结后端 | 通过 | 双端未关联联系人各自启用、可选关联合并、独立设置保存、状态无凭据泄露、机器人保持停止、无模型调用 |
+| 冻结旧目录导入与重启 | 通过 | 旧人格、记忆、微信路径、未知文件、空目录与备份，源资料不变 |
+| 包内源码与架构 | 通过 | 14个关键Python模块字节码逐一匹配；全部6份Web资源、ASAR及sidecar匹配，Electron/Framework/Python均arm64 |
+| DMG | 通过 | hdiutil校验有效，只读挂载267项与构建App一致，Applications安装链接正确 |
+
+以上测试使用独立临时目录与模拟接口，不使用真实账号或付费模型。识图/搜索的实际供应商质量、平台最终送达/已读与Windows交互式键盘/IME未在本次实测。
+
+复现：`python -m unittest discover -s tests`、`node tests/test_proactive_frontend.cjs`、`python tools/check_docs.py`。冻结主动联系API：`python tools/smoke_proactive.py --backend desktop/resources/backend/wxbot-server`；冻结旧目录导入：`python tools/smoke_data_import.py --backend desktop/resources/backend/wxbot-server`。
+
+---
+
+# 历史：v2.1.4 验证矩阵
 
 发布日期：2026-10-14（Asia/Shanghai）；运行时代码提交 `78c384836d13eff63efe7ea0a7d33ba28e05552a`；[Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4)、[文件清单](release-v2.1.4.json)。后续发布文档提交不改变该运行时代码。
 

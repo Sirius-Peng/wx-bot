@@ -1,0 +1,51 @@
+{
+  "version": "2.1.5",
+  "tag": "v2.1.5",
+  "released_date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": "c8635ccd69f0ed64bbf270bacc5a595b65aae616",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5",
+  "artifacts": [
+    {
+      "name": "WxBot-2.1.5-macOS-arm64.dmg",
+      "bytes": 170073932,
+      "sha256": "a227a30a40b5a69d21721d8f45713f5cfb2fc075192d6f2ad8618e73ec5f7428",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/WxBot-2.1.5-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 94,
+      "sha256": "61419bed589eb9035c4a2b4b53ace3b27d3db2f01e784fb1d1c7a23a91a3815a",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/SHA256SUMS.txt"
+    }
+  ],
+  "published_platforms": [
+    "macos-arm64-dmg"
+  ],
+  "windows_latest": {
+    "version": "2.1.4",
+    "url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4",
+    "v215_built": false,
+    "reason": "Windows build host offline; publish available macOS platform first as requested."
+  },
+  "validation": {
+    "python_macos": 617,
+    "python_skipped_case_sensitive_fixture": 1,
+    "node_suites": 9,
+    "proactive_frontend_node": 11,
+    "macos_frozen_proactive_api": true,
+    "macos_frozen_import_restart": true,
+    "macos_frozen_modules_source_match": 14,
+    "macos_web_files_source_match": 6,
+    "macos_dmg_readonly_tree_entries": 267,
+    "macos_dmg_arch": "arm64",
+    "windows_v215_native_tests_run": false,
+    "real_account_login_tested": false,
+    "paid_model_search_quality_tested": false
+  },
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-15"
+}

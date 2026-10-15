@@ -1,6 +1,6 @@
 # 联网搜索与会话时间
 
-> 当前状态：已随 [v2.1.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.3) 发布；基础功能已发布；2026-10-15 的内容提炼/复核改进目前仅在开发源码，尚未进入现有 v2.1.4 安装包。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
+> 当前状态：基础功能自v2.1.3提供，搜索内容提炼与复核改进已随[v2.1.5 macOS arm64](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5)发布；Windows现有v2.1.4包尚不包含本次改进。使用与测试范围见[文档索引](README.md)及[验证矩阵](validation.md)。
 
 ## 使用
 

@@ -2,40 +2,37 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v2.1.5 · 当前发布：v2.1.4 · 更新：2026-10-15。**
+**当前版本：v2.1.5 · 当前发布：v2.1.5 · 更新：2026-10-15。**
 
-v2.1.4新增用户自选旧目录整套导入，并修复 Windows 使用确认框等功能后输入框失焦的问题。Windows 安装版、便携版和 macOS arm64 包均已更新到本次正式发布。
+微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等待、长期记忆、联网搜索、主动联系和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等候、长期记忆、联网搜索和对话气泡统计。配置与记忆默认保存在安装目录以外。
+[下载 v2.1.5](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
-[下载 v2.1.4](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.4) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
+## v2.1.5 本次更新
 
-## v2.1.4：从旧版本恢复人格与记忆
-
-进入「模型与行为 → 导入旧版数据」，选择包含 `config.json` 的旧数据目录（桌面版提供原生目录选择器；浏览器版填写后端本机绝对路径）。预览文件数量，确认整套替换，再准备导入并重启后台。
-
-支持新版已经配置过的情况。导入前自动校验旧数据快照；重启且旧后台退出后，备份当前数据再恢复旧配置、人格、长期记忆、聊天记录、上下文、目录内微信状态及其他普通文件/空目录。原目录不修改；日志和历史备份单独保留。导入失败恢复当前数据，中断可续跑。QQ Docker 卷和目录外微信状态另行备份。详细步骤和恢复方法见[旧目录导入](docs/data-import.md)。
-
-## v2.1.4：Windows 输入焦点修复
-
-删除记忆、清空消息、解除身份关联、导入未保存草稿确认、准备 Docker 和桌面退出统一使用页面内异步确认框，避免原生阻塞确认框使键盘输入失焦。目录选择、关于弹窗结束，以及窗口重新激活时恢复渲染输入焦点；不定时抢夺其他窗口焦点，也不会把隐藏窗口自动拉出来。
-
-Windows 原生回归与修复包启动已验证，浏览器中验证了确认框关闭后记忆、模型名称和 Key 输入仍正常。已有安装应先从托盘退出，再用包含修复的安装包覆盖安装；数据目录保持不变。请使用本次 v2.1.4 Release 的安装包；早先同版本本地候选包不一定包含最终输入修复。
+- **联网先总结再回答**：保留搜索服务的正文总结与多段引用，整合事实、合并重复报道并复核；默认只附一条核心来源，不再甩出一串标题和链接。见[搜索与时间](docs/web-search-time.md)。
+- **多图与视频混发更自然**：单张图片异常不拖垮其他图片，批量识图被拒时逐张读取后整合；视频附件单独标记，不误报成识图配置错误，新媒体赶在错误提示前到达时重新合并。当前未提供视频画面/音轨时不会假装已经看过。见[识图与等待](docs/image-turn-taking.md)。
+- **主动联系**：仅微信或仅QQ均可直接使用，无需关联；可选同人关联后共享随机计划、冷却、每日额度及等待回复状态，每次只选一个渠道。默认3～8小时随机间隔、每天最多2条、23:00～08:00免打扰。先在「模型与行为 → 主动联系」开启并选择联系人，默认关闭；未回复不连续催促。见[主动联系](docs/proactive-messages.md)。
+- **跨端连续性**：已关联同人的近期私聊和主动发言可在另一端参考，未关联账号和群聊仍隔离；继续保留旧目录整套导入、独立本地数据与Windows输入焦点修复。
 
 ## 下载与平台
 
+本次按确认**先发布 macOS arm64**；Windows构建机离线，v2.1.5尚无Windows安装包，不用旧文件冒充新版本。
+
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
-| Windows x64 安装版 | [WxBot-2.1.4-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Setup.exe) | 约 124.8 MiB |
-| Windows x64 便携版 | [WxBot-2.1.4-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Portable.exe) | 约 124.6 MiB |
-| macOS Apple Silicon | [WxBot-2.1.4-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-macOS-arm64.dmg) | 约 162.2 MiB |
-| SHA256 校验值 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/SHA256SUMS.txt) | 对应上面三个文件 |
+| macOS Apple Silicon | [WxBot-2.1.5-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/WxBot-2.1.5-macOS-arm64.dmg) | 约 162.2 MiB |
+| v2.1.5 SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/SHA256SUMS.txt) | 只对应本次DMG |
 
-安装包自带运行时，使用时无需 Python / Node.js。v2.1.4 未发布 macOS Intel、Windows ARM64/32 位或 Linux 桌面安装包；Linux 可使用源码或 Docker。Intel 构建命令与原生架构要求见[桌面说明](desktop/README.md)。发布包目前未配置代码签名；平台首次打开流程见同页。
+**Windows最新安装包仍为v2.1.4**：[安装版 WxBot-2.1.4-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Setup.exe) · [便携版 WxBot-2.1.4-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Portable.exe) · [v2.1.4校验值](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/SHA256SUMS.txt)。旧包不含上面的v2.1.5新功能；历史附件保持不变。
 
-## v2.1.5 更新（构建验收中）
+安装包自带运行时，无需 Python / Node.js。v2.1.5没有macOS Intel、Windows ARM64/32位或Linux桌面包；Linux可用源码/Docker，其他架构构建入口见[桌面说明](desktop/README.md)。发布包未配置代码签名，首次打开流程见同页。
 
-- [主动联系](docs/proactive-messages.md)：仅微信或仅QQ均可直接使用，无需关联；同人的双端关联后共享随机计划、冷却和每日额度；每次只选一个渠道，等待用户回复，不双端催促。模型与行为新增独立配置及联系人选择。
+## 升级与旧数据
+
+macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「模型与行为 → 本地数据与备份」创建备份。Windows仍可使用含焦点修复的v2.1.4包覆盖安装。
+
+v2.1.4起支持「模型与行为 → 导入旧版数据」：选择包含 `config.json` 的旧目录，预览并确认整套替换，准备导入后重启后台。导入前自动备份当前资料，旧目录不修改；保留配置、人格、记忆、上下文、聊天记录及普通文件，QQ Docker卷另行备份。详见[导入与恢复](docs/data-import.md)。
 
 ## 零基础开始
 
@@ -48,7 +45,7 @@ Windows 原生回归与修复包启动已验证，浏览器中验证了确认框
 
 ## 当前功能
 
-| 功能 | v2.1.5 源码行为 |
+| 功能 | v2.1.5 实际行为（Windows旧包以v2.1.4为准） |
 |---|---|
 | 微信 | 本项目采用腾讯 iLink 私聊通道，长轮询收件；不提供微信群聊或 GeWe 通道 |
 | QQ | NapCat / OneBot 11，私聊回复、群聊仅 @ 机器人时回复；反向 WebSocket 或 HTTP 上报 |

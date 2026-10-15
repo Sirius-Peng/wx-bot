@@ -20,6 +20,7 @@
 - `memory.json` 及版本备份：长期记忆、身份关联、事实证据/有效期；不合并不同账号数据。
 - `context-ilink.json` / `context-onebot.json`：独立平台近期上下文与摘要。
 - `messages.jsonl`：消息记录。
+- `proactive.json`（v2.1.5）：主动联系的联系人开关、计划、近期互动、共享等待状态及必要微信会话凭据，同样位于独立数据目录并随整套备份/导入保留。
 - `ilink/`：微信账号、上下文票据、游标、待处理消息、回复草稿/发件队列等状态。
 - `qq-bursts.json`、`onboarding.json`、`admin-token` 等本地运行/引导状态。
 - 新的后端日志写在此目录下 `logs/`；旧日志不参与活动数据覆盖，但旧数据内日志保留在迁移 ZIP 中。
