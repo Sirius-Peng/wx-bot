@@ -10,10 +10,11 @@ import asyncio
 from contextlib import nullcontext
 import logging
 import re
+import time
 from typing import Optional
 
-from .core.conversation import ConversationChanged, members
-from .core.media import ImageLoader, MediaError, MAX_IMAGES
+from .core.conversation import ConversationChanged, members, has_video
+from .core.media import ImageLoader, MediaError
 from .core.context import ContextManager
 from .core.llm import LLMGateway, JudgeLLM, ProviderCfg, is_transient_llm_error
 from .core.sender import HumanLikeSender, DeliveryError
@@ -140,8 +141,9 @@ class Orchestrator:
         image_inputs=None
         if replay is None and msg.images:
             try:
-                if len(msg.images)>MAX_IMAGES:raise MediaError('Too many images')
                 image_inputs=await self._current_work(msg,self._load_images(msg))
+                image_error=not any(image_inputs)
+                if not all(image_inputs):log.warning('Media partially unavailable message=%s loaded=%s total=%s',msg.msg_id,sum(bool(x) for x in image_inputs),len(msg.images))
             except MediaError:
                 image_error=True;log.warning('Image load failed for message %s',msg.msg_id)
         if replay is None and hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
@@ -156,7 +158,8 @@ class Orchestrator:
         # 流式生成，完整收集后一次发送，避免一个回复被拆成多个聊天气泡
         try:
             if image_error:
-                reply = "图片读取没有成功，请重新发送；一次最多发6张图片。"
+                await self._media_failure_grace(msg)
+                reply = "这几张图我这次没看清。把最想让我看的那张单独发来，好吗？"
                 await self.sender.send(msg.chat_id,reply,at=reply_at)
             elif replay is not None:
                 reply = replay
@@ -175,8 +178,10 @@ class Orchestrator:
                 if hasattr(self.adapter,'mark_generation_pending'):self.adapter.mark_generation_pending(error)
                 log.warning('Model unavailable; keep incoming message for retry error_type=%s',type(error).__name__)
                 raise
-            log.exception("LLM failed, sending fallback")
-            reply = ("图片识别请求没有成功，请在「模型与行为」配置支持图片输入的识图模型后再试。"
+            log.error('LLM generation failed error_type=%s status=%s image_count=%s video=%s',
+                      type(error).__name__,getattr(error,'status_code',None),len(msg.images),has_video(msg))
+            if msg.images:await self._media_failure_grace(msg)
+            reply = ("这几张图我这次没看清。你最想让我看哪一处？也可以把那张单独发来。"
                      if msg.images else "稍等一下，我这边有点忙不过来，你再说一遍？")
             await self.sender.send(msg.chat_id, reply, at=reply_at)
 
@@ -192,10 +197,28 @@ class Orchestrator:
 
     async def _load_images(self,msg):
         async def work():
-            refs=(await self.adapter.resolve_images(msg.images) if hasattr(self.adapter,'resolve_images') else msg.images)
-            return await self.images.load(refs)
+            resolver=None
+            if hasattr(self.adapter,'resolve_images'):
+                async def resolver(ref):
+                    refs=await self.adapter.resolve_images([ref])
+                    if not refs:raise MediaError('Image reference missing')
+                    return refs[0]
+            return await self.images.load_partial(msg.images,resolver=resolver)
         try:return await asyncio.wait_for(work(),timeout=45)
         except (TimeoutError,MediaError) as exc:raise MediaError('Image could not be loaded') from exc
+
+    async def _media_failure_grace(self,msg):
+        """Media uploads arrive separately; regroup before committing a failure.
+        This applies even at the normal max-wait boundary, not to good replies."""
+        check=(getattr(self.adapter,'check_failed_reply_current',None) or
+               getattr(self.adapter,'check_reply_current',None))
+        if check is None:return
+        deadline=time.monotonic()+1.2
+        while True:
+            check(msg)
+            remaining=deadline-time.monotonic()
+            if remaining<=0:return
+            await asyncio.sleep(min(.05,remaining))
 
     async def _current_work(self,msg,work):
         task=asyncio.ensure_future(work)

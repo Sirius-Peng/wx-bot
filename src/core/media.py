@@ -1,6 +1,6 @@
 """Bounded image fetch/decrypt/normalization; image bytes never enter chat logs."""
 from __future__ import annotations
-import asyncio,base64,io,ipaddress,socket,warnings
+import asyncio,base64,io,ipaddress,socket,warnings,logging
 from urllib.parse import urlsplit,urljoin,urlencode
 import httpx
 from PIL import Image,ImageOps,UnidentifiedImageError
@@ -11,6 +11,7 @@ MAX_DOWNLOAD=20*1024*1024
 MAX_PIXELS=20_000_000
 MAX_IMAGES=6
 CDN='https://novac2c.cdn.weixin.qq.com/c2c'
+log=logging.getLogger(__name__)
 class MediaError(ValueError):pass
 
 def aes_key(ref):
@@ -108,3 +109,28 @@ class ImageLoader:
                     if not task.done():task.cancel()
                 await asyncio.gather(*tasks,return_exceptions=True)
         except (httpx.HTTPError,ValueError,TimeoutError) as exc:raise MediaError('Image could not be loaded') from exc
+
+    async def load_partial(self,images,resolver=None):
+        """Keep original indices; one corrupt/late image cannot erase its siblings."""
+        semaphore=asyncio.Semaphore(2)
+        async def one(ref):
+            async with semaphore:
+                phase='resolve'
+                try:
+                    if resolver:ref=await resolver(ref)
+                    phase='download'
+                    data=await self.fetch(ref)
+                    phase='decode'
+                    url=await asyncio.to_thread(image_data_url,data)
+                    return {'type':'image_url','image_url':{'url':url,'detail':'auto'}}
+                except Exception as error:
+                    log.warning('Media input skipped phase=%s error_type=%s status=%s',phase,type(error).__name__,getattr(getattr(error,'response',None),'status_code',None))
+                    return None  # Transport/config details belong in the host log.
+        tasks=[asyncio.create_task(one(ref)) for ref in images[:MAX_IMAGES]]
+        try:
+            await asyncio.wait(tasks,timeout=35) if tasks else None
+            return [(task.result() if task.done() and not task.cancelled() else None) for task in tasks]+[None]*max(0,len(images)-MAX_IMAGES)
+        finally:
+            for task in tasks:
+                if not task.done():task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)

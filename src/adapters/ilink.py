@@ -323,6 +323,7 @@ class ILinkAdapter(BaseAdapter):
                     msg = self._normalize(raw)
                     if msg is not None:
                         self.remember_context(msg)
+                        self.note_activity(msg)
             if resp.get("get_updates_buf"):
                 self._get_updates_buf = resp["get_updates_buf"]
             self._save_cursor()  # 游标和全部未处理消息一并提交，不覆盖在途消息。
@@ -396,14 +397,19 @@ class ILinkAdapter(BaseAdapter):
             raise
         return selected
 
-    def check_reply_current(self,msg):
+    def check_reply_current(self,msg,*,after_failure=False):
         if not self.message_merge_window:return
         raw=next((r for r in self._pending if str(r.get('message_id') or r.get('client_id') or self._raw_key(r))==msg.msg_id
                   and r.get('from_user_id')==msg.sender_id),None)
-        if raw and raw.get('_wxbot_batch_keys') and not raw.get('_wxbot_batch_force'):
+        if raw and raw.get('_wxbot_batch_keys') and (after_failure or not raw.get('_wxbot_batch_force')):
             known=set(raw['_wxbot_batch_known'])
             if any(self._raw_key(r) not in known for r in self._peer_pending(raw)):
                 raise ConversationChanged('New conversation input')
+
+    def check_failed_reply_current(self,msg):
+        # A max-wait batch may finish a useful answer, but an error placeholder
+        # must never jump ahead of newer media that can make the turn succeed.
+        self.check_reply_current(msg,after_failure=True)
 
     async def _handle_raw(self, raw: dict) -> bool:
         selected=await self._batch_raw(raw)
@@ -515,7 +521,8 @@ class ILinkAdapter(BaseAdapter):
                     voice=it.get('voice_item') or {};text=str(voice.get('text') or voice.get('transcript') or '[语音]');texts.append(text);parts.append({'type':'text','text':text})
                     if not images:msg_type='voice'
                 elif t in (ITEM_FILE,ITEM_VIDEO):
-                    text='[文件]' if t==ITEM_FILE else '[视频]';texts.append(text);parts.append({'type':'text','text':text})
+                    text='[文件]' if t==ITEM_FILE else '[视频]';texts.append(text);parts.append({'type':'video' if t==ITEM_VIDEO else 'text','text':text})
+                    if not images:msg_type='video' if t==ITEM_VIDEO else 'file'
             text=''.join(texts)
 
             from_user = raw.get("from_user_id") or ""
@@ -549,12 +556,19 @@ class ILinkAdapter(BaseAdapter):
 
     async def send_text(self, chat_id: str, text: str, at: list[str] | None = None) -> str:
         """持久化完整回复，并以固定 client_id 提交；失败不当作已回复。"""
-        bound = self._reply_context.get()
-        key = self._reply_key(bound) if bound is not None else "manual:" + uuid.uuid4().hex
+        return await self._send_text(chat_id, text)
+
+    async def send_proactive(self, chat_id: str, text: str, attempt_id: str, context_token: str) -> str:
+        return await self._send_text(chat_id, text, proactive=(attempt_id, context_token))
+
+    async def _send_text(self, chat_id: str, text: str, proactive=None) -> str:
+        bound = None if proactive else self._reply_context.get()
+        key = ("proactive:" + proactive[0] if proactive else
+               self._reply_key(bound) if bound is not None else "manual:" + uuid.uuid4().hex)
         draft = self._outbox.get(key)
         if draft is None:
             if bound is not None:self.check_reply_current(bound)
-            ctx_token = (bound.context_token if bound is not None else None) or self._ctx_tokens.get(chat_id)
+            ctx_token = (proactive[1] if proactive else (bound.context_token if bound is not None else None)) or self._ctx_tokens.get(chat_id)
             if not ctx_token:
                 self._delivery.update(last_status="missing_context", failed=self._delivery["failed"] + 1)
                 raise RuntimeError("sendmessage: missing context_token")

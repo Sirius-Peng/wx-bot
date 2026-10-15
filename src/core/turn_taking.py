@@ -35,7 +35,8 @@ def plan_wait(items,base,max_wait,human=True,pause_timeout=120):
     if done:start=items[done[-1]][1]
     reason='normal';delay=base
     if UNFINISHED.search(text):delay=base*2;reason='unfinished'
-    elif latest.images and not text.replace('[图片]','').strip():delay=base*2;reason='image_caption'
+    elif (latest.images or latest.msg_type=='video' or any(p.get('type')=='video' for p in latest.content_parts)) and not text.replace('[图片]','').replace('[视频]','').strip():
+        delay=base*2;reason='image_caption' if latest.images else 'video_caption'
     elif len(text)<8 and not re.search(r'[。！？!?]$',text):delay=base*1.4;reason='short_fragment'
     elif re.search(r'[。！？!?]$',text) or len(text)>50:delay=base*.9;reason='complete_sentence'
     if len(items)>1:

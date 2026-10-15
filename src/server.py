@@ -374,6 +374,25 @@ async def api_login_check(captcha: str = "") -> dict:
 #  人格知识库
 # ═══════════════════════════════════════════════════════════════════
 
+@app.get('/api/proactive')
+async def api_proactive_status() -> dict:
+    return runtime.proactive.status()
+
+
+@app.patch('/api/proactive/contact')
+async def api_proactive_contact(request: Request) -> dict:
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) != {'id', 'enabled'} or not isinstance(body['id'], str) or not isinstance(body['enabled'], bool):
+        raise HTTPException(400, '联系人设置格式错误')
+    if body['id'] not in runtime.proactive.accounts:
+        raise HTTPException(404, '请先在微信或QQ中与机器人私聊')
+    try:
+        runtime.proactive.set_contact(body['id'], body['enabled'])
+    except ValueError:
+        raise HTTPException(409, '主动联系记录需要恢复')
+    return {'ok': True, **runtime.proactive.status()}
+
+
 @app.get("/api/memory")
 async def api_memory_list(scope: str = "", owner_id: str = "",
                           category: str = "", keyword: str = "", include_history: bool = False) -> dict:
@@ -618,6 +637,7 @@ CONFIG_SECTIONS={
  'vision':('llm',{'vision_base','vision_key','vision_model'}),
  'search':('llm',{'search_enabled','search_key','search_model','context_timezone'}),
  'persona':('bot',{'name','persona','persona_profile','persona_relationship'}),
+ 'proactive':('bot',{'proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end'}),
  'reply':('bot',{'group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
  'memory':('bot',{'memory_enabled','memory_inject','memory_extract_interval'}),
  'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror'})}
@@ -676,6 +696,10 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     def keep_masked(new_val: str, old_val: str) -> str:
         return old_val if (not new_val or "•" in new_val) else new_val
 
+    inc_bot = incoming.get('bot') or {}
+    from .core.proactive import PROACTIVE_FIELDS
+    for field in PROACTIVE_FIELDS:
+        if field not in inc_bot: setattr(cfg.bot, field, getattr(old.bot, field))
     inc_llm = incoming.get("llm") or {}
     inc_ad = incoming.get("adapter") or {}
     for f in ("primary_key", "fallback_key", "judge_key", "vision_key", "search_key"):

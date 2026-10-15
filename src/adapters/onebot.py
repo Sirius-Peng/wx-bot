@@ -138,6 +138,8 @@ class OneBotAdapter(BaseAdapter):
 
     def check_reply_current(self,msg):self._bursts.check(msg)
 
+    def check_failed_reply_current(self,msg):self._bursts.check(msg,after_failure=True)
+
     async def resolve_images(self,refs):
         semaphore=asyncio.Semaphore(2)
         async def resolve(ref):
@@ -200,6 +202,7 @@ class OneBotAdapter(BaseAdapter):
         if post_type == "message":
             msg = self._normalize(event)
             if msg and self._handler:
+                self.note_activity(msg)
                 if self._bursts.window or self._bursts.pending:
                     self._bursts.submit(msg);return
                 try:
@@ -276,7 +279,7 @@ class OneBotAdapter(BaseAdapter):
                 bot_id=self_id,
                 content=content,
                 raw_content=str(e.get("raw_message") or ""),
-                msg_type="image" if images else "text", images=images, content_parts=self._extract_parts(e.get("message")),
+                msg_type="image" if images else ("video" if any(s.get('type')=='video' for s in self._segments(e.get('message'))) else "text"), images=images, content_parts=self._extract_parts(e.get("message")),
                 timestamp=int(e.get("time") or time.time()) * 1000,
                 is_at_me=is_at_me,
                 group_id=group_id or None,
@@ -320,13 +323,13 @@ class OneBotAdapter(BaseAdapter):
             if kind=='text':parts.append({'type':'text','text':str(data.get('text') or '')})
             elif kind=='image':parts.append({'type':'image','index':image_index});image_index+=1
             elif kind in ('face','record','video','file'):
-                parts.append({'type':'text','text':{'face':'[表情]','record':'[语音]','video':'[视频]','file':'[文件]'}[kind]})
+                parts.append({'type':'video' if kind=='video' else 'text','text':{'face':'[表情]','record':'[语音]','video':'[视频]','file':'[文件]'}[kind]})
         return parts
 
     @staticmethod
     def _extract_content(message: Any, self_id: str) -> tuple[str, bool]:
         parts=OneBotAdapter._extract_parts(message)
-        text=''.join(part.get('text','') if part['type']=='text' else '[图片]' for part in parts)
+        text=''.join('[图片]' if part['type']=='image' else part.get('text','') for part in parts)
         at=any(seg.get('type')=='at' and str((seg.get('data') or {}).get('qq'))==self_id for seg in OneBotAdapter._segments(message))
         return text.strip(),at
 

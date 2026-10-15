@@ -427,7 +427,7 @@
 
         <div class="card">
           <div class="card-head"><h3>微信 ↔ QQ 身份关联</h3></div>
-          <p class="hint">两个通道共用同一记忆库。把同一个人的账号关联后，偏好、经历和事实更新会跨平台共享。使用消息发送者 ID，不是机器人自己的账号；不同用户与群聊仍独立。</p>
+          <p class="hint">两个通道共用同一记忆库。把同一个人的账号关联后，偏好、经历、事实更新和主动联系计划会跨平台共享。使用消息发送者 ID，不是机器人自己的账号；不同用户与群聊仍独立。</p>
           <div class="field-grid">
             <label class="field"><span>微信发送者 ID</span><input type="text" id="identity-wechat" placeholder="从消息记录查看发送者 ID"></label>
             <label class="field"><span>QQ 号</span><input type="text" id="identity-qq" placeholder="同一个人的 QQ 号"></label>
@@ -636,6 +636,22 @@
           <label class="switch-row"><div><strong>处理时显示“正在输入”</strong><span>微信与支持 NapCat 扩展的 QQ 私聊生效；等待用户输入时不显示，接口不支持时正常回复</span></div><input type="checkbox" id="typing-indicator"></label>
           <div class="field-grid"><label class="field"><span>明确要求等待的超时（秒）</span><input type="number" id="message-pause-timeout" min="5" max="600" step="1"><em>默认120秒；仅明确说“等我说完”时生效，不影响其他人的回复。</em></label></div>
           <div class="card-foot"><span class="save-state" data-save-status="reply">未修改</span><button class="btn btn-primary" data-save-section="reply">保存回复设置</button></div>
+        </div>
+        <div class="card" data-settings-section="proactive">
+          <div class="card-head"><h3>主动联系 · 按联系人统一规划</h3></div>
+          <label class="switch-row"><div><strong>不定时主动发消息</strong><span>开启后，还需选择下方联系人；只在机器人运行时私聊，不向群聊推送。</span></div><input type="checkbox" id="proactive-enabled"></label>
+          <p class="hint" style="padding:0 20px">只用微信或 QQ 也能直接使用，无需关联身份。若同一个人同时使用两端，可在「人格知识库 → 微信 ↔ QQ 身份关联」关联账号；关联后共享最近联系时间、每日额度与等待回复状态，每次只选一个渠道发送。</p>
+          <div class="field-grid">
+            <label class="field"><span>随机间隔最短（小时）</span><input type="number" id="proactive-min-hours" min="0.25" max="168" step="0.25"><em>从最近一次收发消息后计算，默认3～8小时。</em></label>
+            <label class="field"><span>随机间隔最长（小时）</span><input type="number" id="proactive-max-hours" min="0.25" max="168" step="0.25"><em>不是固定闹钟；夜间、正在聊天或没有合适内容时会延后。</em></label>
+            <label class="field"><span>每人每天最多（条）</span><input type="number" id="proactive-daily-limit" min="1" max="10" step="1"><em>按联系人计算；已关联的双端合并，使用「联网搜索与时间」的时区。</em></label>
+            <label class="field"><span>免打扰开始（整点）</span><input type="number" id="proactive-quiet-start" min="0" max="23" step="1"><em>默认23点到次日8点；开始与结束相同表示关闭夜间免打扰。</em></label>
+            <label class="field"><span>免打扰结束（整点）</span><input type="number" id="proactive-quiet-end" min="0" max="23" step="1"></label>
+          </div>
+          <div class="card-foot"><span class="save-state" data-save-status="proactive">未修改</span><button class="btn btn-primary" data-save-section="proactive">保存主动联系设置</button></div>
+          <div class="card-head"><h3>允许主动联系的人</h3><button class="btn btn-ghost btn-sm" id="btn-proactive-refresh">刷新联系人</button></div>
+          <p class="hint" style="padding:0 20px">先私聊一次才会出现；联系人开关即时保存。说“不要主动给我发消息”会暂停此联系人（已关联则双端一起暂停），再开启联系人可恢复。微信使用最近24小时内收到的会话凭据，接口失败不切换另一端重复发送。</p>
+          <div id="proactive-contacts" style="padding:0 20px 20px" aria-live="polite">加载中……</div>
         </div>
         <div class="card" data-settings-section="memory">
           <div class="card-head"><h3>人格知识库</h3></div>

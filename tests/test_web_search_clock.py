@@ -117,6 +117,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         g=LLMGateway(ProviderCfg('primary','https://api.deepseek.com','dummy','deepseek-flash'),web_search=search)
         client=NS(chat=NS(completions=NS(create=AsyncMock(side_effect=replies))))
         g._client=lambda cfg:client
+        # Tool-loop wire contracts are isolated from the separately tested review pass.
+        g._review_search_answer=AsyncMock(side_effect=lambda cfg,work,draft,sources,chat_id:g._with_sources(draft,sources))
         return g,search,client.chat.completions.create
     async def test_auto_chat_single_call(self):
         g,s,c=self.gateway([response('你好')]);self.assertEqual([v async for v in g.stream([{'role':'user','content':'你好'}])],['你好']);s.search.assert_not_called();self.assertEqual(c.call_count,1)

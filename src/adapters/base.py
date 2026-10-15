@@ -18,6 +18,19 @@ class BaseAdapter(ABC):
 
     platform: str = "base"
 
+    def on_activity(self, handler) -> None:
+        """Observe private ingress before debounce, so proactive work yields immediately."""
+        self._activity_handler = handler
+
+    def note_activity(self, msg: WxMessage) -> None:
+        handler = getattr(self, '_activity_handler', None)
+        if handler is not None:
+            try:
+                handler(msg)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning('Activity observation paused error_type=%s', type(exc).__name__)
+
     @abstractmethod
     async def start(self) -> None:
         """启动适配器：建立连接 / 注册回调 / 校验凭据。"""

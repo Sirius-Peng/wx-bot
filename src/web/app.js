@@ -328,6 +328,7 @@ const SECTION_FIELDS = {
   vision: ['llm', ['vision_base','vision_model','vision_key']],
   search: ['llm', ['search_enabled','search_key','search_model','context_timezone']],
   persona: ['bot', ['name','persona','persona_profile','persona_relationship']],
+  proactive: ['bot', ['proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end']],
   reply: ['bot', ['group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
   memory: ['bot', ['memory_enabled','memory_inject','memory_extract_interval']],
   channels: ['adapter', ['wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror']]
@@ -397,6 +398,11 @@ async function loadConfig() {
   $('#humanized-wait').checked = c.bot.humanized_wait !== false;
   $('#typing-indicator').checked = c.bot.typing_indicator !== false;
   $('#message-pause-timeout').value = c.bot.message_pause_timeout ?? 120;
+  $('#proactive-enabled').checked = c.bot.proactive_enabled === true;
+  for (const [id, field, fallback] of [['min-hours','min_hours',3],['max-hours','max_hours',8],['daily-limit','daily_limit',2],['quiet-start','quiet_start',23],['quiet-end','quiet_end',8]]) {
+    $('#proactive-'+id).value = c.bot['proactive_'+field] ?? fallback;
+  }
+  loadProactive();
 
   // 官方通道的登录态存在后端文件里，单独取一次
   if (CHANNELS.wechat) {
@@ -538,11 +544,44 @@ function collectConfig() {
   c.bot.humanized_wait = $('#humanized-wait').checked;
   c.bot.typing_indicator = $('#typing-indicator').checked;
   c.bot.message_pause_timeout = Math.min(600, Math.max(5, Number($('#message-pause-timeout').value) || 120));
+  c.bot.proactive_enabled = $('#proactive-enabled').checked;
+  for (const [id, field] of [['min-hours','min_hours'],['max-hours','max_hours'],['daily-limit','daily_limit'],['quiet-start','quiet_start'],['quiet-end','quiet_end']]) {
+    c.bot['proactive_'+field] = Number($('#proactive-'+id).value);
+  }
   c.bot.memory_enabled = $('#memory-enabled').checked;
   c.bot.memory_inject = $('#memory-inject').checked;
   c.bot.memory_extract_interval =
     Math.min(50, Math.max(1, Number($('#memory-interval').value) || 3));
   return c;
+}
+
+async function loadProactive() {
+  const container = $('#proactive-contacts');
+  if (!container) return;
+  try {
+    const data = await api('/api/proactive');
+    container.replaceChildren();
+    if (data.state_error) { container.textContent = '主动联系记录读取异常，已暂停发送，请保留 proactive.json 并检查后台日志。'; return; }
+    if (!data.contacts.length) { container.textContent = '还没有私聊联系人。请先通过微信或 QQ 发一条消息，再点击刷新联系人。'; return; }
+    for (const person of data.contacts) {
+      const label = document.createElement('label'); label.className = 'switch-row';
+      const info = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = person.accounts.map(a=>`${a.name || a.owner_id}（${a.channel} · ${a.owner_id}）`).join(' ↔ ');
+      const status = document.createElement('span');
+      status.textContent = person.muted ? '对方已要求暂停主动联系' : !person.enabled ? '尚未允许' : !data.enabled ? '联系人已允许；总开关关闭' : person.awaiting_reply ? (person.last_status === 'accepted' ? '已联系，等待对方回复；不会连续追加' : '发送结果待确认；不会重复提交') : person.next_at ? `计划不早于 ${new Date(person.next_at*1000).toLocaleString()}；聊天或免打扰时延后` : '已允许，启动机器人后统一规划';
+      info.append(title, status);
+      const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = person.enabled && !person.muted;
+      toggle.setAttribute('aria-label', `允许主动联系 ${title.textContent}`);
+      toggle.addEventListener('change', async()=>{
+        toggle.disabled = true;
+        try { await api('/api/proactive/contact',{method:'PATCH',body:JSON.stringify({id:person.id,enabled:toggle.checked})}); toast('联系人设置已保存','ok'); await loadProactive(); }
+        catch(e) { toggle.checked = person.enabled && !person.muted; toast('保存失败：'+e.message,'err'); }
+        finally { toggle.disabled = false; }
+      });
+      label.append(info,toggle); container.append(label);
+    }
+  } catch(e) { container.textContent = '联系人加载失败：'+e.message; }
 }
 
 async function saveSection(section, quiet = false) {
@@ -1298,10 +1337,12 @@ function bind() {
     loadMessages();
   });
 
+  $('#btn-proactive-refresh').addEventListener('click', loadProactive);
+
   // 设置
   $$('[data-save-section]').forEach(btn=>btn.addEventListener('click',()=>saveSection(btn.dataset.saveSection)));
   $$('[data-settings-section]').forEach(card=>{
-    for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
+    for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.id && e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
   });
   $('#btn-phrolova-preset').addEventListener('click', async () => {
     try {

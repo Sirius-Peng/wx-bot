@@ -100,6 +100,14 @@ class BotConfig:
     message_merge_window: float = 2.0
     message_merge_max_wait: float = 10.0
 
+    # Shared across QQ/WeChat; private contacts are explicitly selected in the UI.
+    proactive_enabled: bool = False
+    proactive_min_hours: float = 3.0
+    proactive_max_hours: float = 8.0
+    proactive_daily_limit: int = 2
+    proactive_quiet_start: int = 23
+    proactive_quiet_end: int = 8
+
     memory_enabled: bool = True       # 是否随对话积累记忆
     memory_inject: bool = True        # 是否把记忆注入到回答上下文
     memory_extract_interval: int = 3  # 每多少轮对话抽取一次（省 token）
@@ -180,6 +188,16 @@ class ConfigStore:
             except (TypeError,ValueError):value=default
             b[key]=min(hi,max(lo,value))
         b['message_merge_max_wait']=max(b['message_merge_window'],b['message_merge_max_wait'])
+        b['proactive_enabled'] = b.get('proactive_enabled') is True
+        for key, default, lo, hi in [('proactive_min_hours', 3, .25, 168), ('proactive_max_hours', 8, .25, 168),
+                                     ('proactive_daily_limit', 2, 1, 10), ('proactive_quiet_start', 23, 0, 23), ('proactive_quiet_end', 8, 0, 23)]:
+            try:
+                value = float(b.get(key, default))
+                if isinstance(b.get(key), bool) or not math.isfinite(value): value = default
+            except (TypeError, ValueError): value = default
+            value = min(hi, max(lo, value))
+            b[key] = int(value) if key in ('proactive_daily_limit', 'proactive_quiet_start', 'proactive_quiet_end') else value
+        b['proactive_max_hours'] = max(b['proactive_min_hours'], b['proactive_max_hours'])
         cfg.bot = BotConfig(**{k: v for k, v in b.items()
                                if k in BotConfig.__dataclass_fields__})
 

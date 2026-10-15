@@ -31,6 +31,10 @@ def message_parts(msg):
     parts += [{'type':'image','index':i} for i in range(used,len(msg.images))]
     return parts
 
+def has_video(msg):
+    return msg.msg_type=='video' or any(p.get('type')=='video' or
+        (p.get('type')=='text' and p.get('text')=='[视频]') for p in message_parts(msg))
+
 def merge_messages(messages):
     first=messages[0]
     token=next((m.context_token for m in reversed(messages) if m.context_token),None)
@@ -101,9 +105,9 @@ class MessageBuffer:
         else:self.typing_hints.pop(key,None)
         return True
 
-    def check(self,msg):
+    def check(self,msg,*,after_failure=False):
         active=self.active.get(self.key(msg))
-        if active and not active['force']:
+        if active and (after_failure or not active['force']):
             hint=self.typing_hints.get(self.key(msg),{})
             if hint.get('until',0)>time.time() and hint.get('at',0)>active.get('typing_at',0):
                 raise ConversationChanged('Peer is continuing input')
