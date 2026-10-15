@@ -2,35 +2,35 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v2.1.5 · 当前发布：v2.1.5 · 更新：2026-10-15。**
+**当前版本：v2.1.6 · 当前发布：v2.1.6 · 更新：2026-10-15。**
 
 微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等待、长期记忆、联网搜索、主动联系和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-[下载 v2.1.5](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
+[下载 v2.1.6](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
-## v2.1.5 本次更新
+## v2.1.6 本次更新
 
-- **联网先总结再回答**：保留搜索服务的正文总结与多段引用，整合事实、合并重复报道并复核；默认只附一条核心来源，不再甩出一串标题和链接。见[搜索与时间](docs/web-search-time.md)。
-- **多图与视频混发更自然**：单张图片异常不拖垮其他图片，批量识图被拒时逐张读取后整合；视频附件单独标记，不误报成识图配置错误，新媒体赶在错误提示前到达时重新合并。当前未提供视频画面/音轨时不会假装已经看过。见[识图与等待](docs/image-turn-taking.md)。
-- **主动联系**：仅微信或仅QQ均可直接使用，无需关联；可选同人关联后共享随机计划、冷却、每日额度及等待回复状态，每次只选一个渠道。默认3～8小时随机间隔、每天最多2条、23:00～08:00免打扰。先在「模型与行为 → 主动联系」开启并选择联系人，默认关闭；未回复不连续催促。见[主动联系](docs/proactive-messages.md)。
-- **跨端连续性**：已关联同人的近期私聊和主动发言可在另一端参考，未关联账号和群聊仍隔离；继续保留旧目录整套导入、独立本地数据与Windows输入焦点修复。
+- **Windows同步更新**：重新构建x64安装版与便携版，包含主动联系、内容型联网总结、混合图片/视频消息处理等此前v2.1.5的更新。见[主动联系](docs/proactive-messages.md)、[搜索与时间](docs/web-search-time.md)、[识图与等待](docs/image-turn-taking.md)。
+- **资源精简**：桌面图标仅保留一份外部资源副本，ASAR不再重复打包；Docker构建上下文排除本地环境、安装包、用户数据与系统缓存。
+- **人格语料按需导出**：内置100条示例与人格保持不变，去掉仓库中的重复生成文件；运行 `python tools/export_persona.py` 即可无损导出。
+- **作者与资料更新**：修正包作者、仓库贡献者与贡献指南，统一维护依赖清单；继续保留独立用户数据、旧目录导入和输入焦点修复。
 
 ## 下载与平台
 
-本次按确认**先发布 macOS arm64**；Windows构建机离线，v2.1.5尚无Windows安装包，不用旧文件冒充新版本。
+本次发布 **Windows x64安装版、便携版及macOS arm64 DMG**，均由对应原生平台构建。
 
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
-| macOS Apple Silicon | [WxBot-2.1.5-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/WxBot-2.1.5-macOS-arm64.dmg) | 约 162.2 MiB |
-| v2.1.5 SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.5/SHA256SUMS.txt) | 只对应本次DMG |
+| Windows x64安装版 | [WxBot-2.1.6-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-Windows-x64-Setup.exe) | 约 124.8 MiB |
+| Windows x64便携版 | [WxBot-2.1.6-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-Windows-x64-Portable.exe) | 约 124.6 MiB |
+| macOS Apple Silicon | [WxBot-2.1.6-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-macOS-arm64.dmg) | 约 162.1 MiB |
+| SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/SHA256SUMS.txt) | 对应本次三个安装包 |
 
-**Windows最新安装包仍为v2.1.4**：[安装版 WxBot-2.1.4-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Setup.exe) · [便携版 WxBot-2.1.4-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/WxBot-2.1.4-Windows-x64-Portable.exe) · [v2.1.4校验值](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.4/SHA256SUMS.txt)。旧包不含上面的v2.1.5新功能；历史附件保持不变。
-
-安装包自带运行时，无需 Python / Node.js。v2.1.5没有macOS Intel、Windows ARM64/32位或Linux桌面包；Linux可用源码/Docker，其他架构构建入口见[桌面说明](desktop/README.md)。发布包未配置代码签名，首次打开流程见同页。
+安装包自带运行时，无需Python / Node.js。本次没有macOS Intel、Windows ARM64/32位或Linux桌面包；Linux可用源码/Docker，其他架构构建入口见[桌面说明](desktop/README.md)。发布包未配置代码签名，首次打开流程见同页。历史Release与附件保持不变。
 
 ## 升级与旧数据
 
-macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「模型与行为 → 本地数据与备份」创建备份。Windows仍可使用含焦点修复的v2.1.4包覆盖安装。
+macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「模型与行为 → 本地数据与备份」创建备份。Windows先退出旧应用，再使用v2.1.6安装版覆盖安装；便携版退出后替换旧程序。两种方式均继续使用独立用户数据目录。
 
 v2.1.4起支持「模型与行为 → 导入旧版数据」：选择包含 `config.json` 的旧目录，预览并确认整套替换，准备导入后重启后台。导入前自动备份当前资料，旧目录不修改；保留配置、人格、记忆、上下文、聊天记录及普通文件，QQ Docker卷另行备份。详见[导入与恢复](docs/data-import.md)。
 
@@ -45,7 +45,7 @@ v2.1.4起支持「模型与行为 → 导入旧版数据」：选择包含 `conf
 
 ## 当前功能
 
-| 功能 | v2.1.5 实际行为（Windows旧包以v2.1.4为准） |
+| 功能 | v2.1.6 实际行为 |
 |---|---|
 | 微信 | 本项目采用腾讯 iLink 私聊通道，长轮询收件；不提供微信群聊或 GeWe 通道 |
 | QQ | NapCat / OneBot 11，私聊回复、群聊仅 @ 机器人时回复；反向 WebSocket 或 HTTP 上报 |
@@ -175,9 +175,7 @@ python tools/check_docs.py
 
 运行与打包统一使用根目录 `requirements.txt`，无需额外数据库依赖清单。Docker构建上下文仅包含运行源码和依赖清单，不传入本地安装包、虚拟环境、Git历史或用户数据。人格合成语料由内置示例按需导出：`python tools/export_persona.py`，默认输出到已忽略的 `personas/phrolova/generated/`；详见[人格评估与导出](personas/phrolova/EVALUATION.md)。
 
-**v2.1.5发布验收**：本机macOS执行 **617项Python测试（1项大小写夹具跳过）**，9组Node回归通过，其中主动联系前端11项。冻结后端通过单端联系人、可选双端关联、分区保存与旧目录导入/重启检查；14个关键模块字节码、全部6份Web资源及267项只读DMG挂载内容与源码/构建App一致，三项二进制均为arm64。
-
-本次未构建或原生测试Windows v2.1.5；Windows历史v2.1.4的533项原生回归、Portable启动及Setup候选包生命周期记录仍保留，不用旧结果替代本次验收。未使用真实账号或付费模型替代模拟接口。精确文件大小、摘要及边界见[当前发布清单](docs/release-v2.1.5.json)、[历史v2.1.4清单](docs/release-v2.1.4.json)和[测试矩阵](docs/validation.md)。
+**v2.1.6发布验收**：macOS和Windows原生源码各运行635项Python回归，9组Node回归通过；冻结后端的主动联系、本地资料导入与重启、包内源码和资源一致性另行检查。两端构建与平台验证结果见[当前发布清单](docs/release-v2.1.6.json)及[测试矩阵](docs/validation.md)，不以历史包结果替代本次验收。
 
 ## 项目结构
 
@@ -200,7 +198,7 @@ tests/, tools/                 离线回归、平台/打包和文档核验
 docs/, CHANGELOG.md             使用、设计、验证与版本历史
 ```
 
-此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包分别固定对应其发布标签：本次macOS为`v2.1.5`，Windows历史包为`v2.1.4`；主分支文档更新不会改动旧包或移动标签。
+此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包分别固定对应其发布标签：本次macOS和Windows包均为`v2.1.6`；主分支文档更新不会改动旧包或移动标签。
 
 ## 作者与贡献者
 

@@ -1,6 +1,13 @@
 # 变更记录
 
-当前源码版本：v2.1.5；最近运行时发布：[v2.1.5](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5)。日期使用 Asia/Shanghai。
+当前源码版本：v2.1.6；最近运行时发布：[v2.1.6](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6)。日期使用 Asia/Shanghai。
+
+## v2.1.6 · 2026-10-15
+
+- Windows构建机恢复在线，重新构建x64 Setup / Portable，macOS arm64 DMG同步更新；Windows补齐v2.1.5主动联系、联网总结与混合媒体更新。
+- 桌面ASAR不再重复保存图标，外部资源与各平台原始图标保持不变；更新作者、贡献者及包元数据。
+- 移除重复人格训练文件与废弃依赖清单，新增无损按需导出；Docker构建上下文排除本地资料、环境、安装包和系统缓存。
+- 更新原生平台验收记录、下载表与SHA256清单；历史Release、标签和用户配置/人格/记忆不变。
 
 ## 仓库维护 · 2026-10-15（不产生新安装包版本）
 

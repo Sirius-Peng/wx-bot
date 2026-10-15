@@ -1,4 +1,29 @@
-# v2.1.5 验证矩阵
+# v2.1.6 验证矩阵
+
+发布日期：2026-10-15（Asia/Shanghai）；构建运行时源码提交 `1eb316fd86039a85599f582da3491f66c592d05c`；[Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6)、[文件清单](release-v2.1.6.json)。发布文档与文件摘要可以晚于构建提交；包内运行源码另行比对。
+
+本次由对应平台原生构建Windows x64 Setup / Portable与macOS arm64 DMG。Windows恢复同步发布，不沿用或重命名历史安装包。
+
+| 层次 | 结果 | 验证范围 |
+|---|---|---|
+| macOS源码Python | 635项，1项跳过 | 临时目录、模拟HTTP/SDK、原有功能、作者资料、语料导出与资源精简 |
+| Windows原生源码Python | 635项，1项跳过 | 独立Python虚拟环境，中文/空格路径，实际Windows文件锁与路径语义 |
+| Node回归 | 两端各9组通过 | 前端确认/焦点、引导、统计、导入、主动联系与桌面生命周期合同 |
+| macOS冻结后端 | 通过 | 主动联系联系人/可选关联、分区保存；旧资料导入、备份、重启和源资料不变 |
+| macOS资源与架构 | 通过 | 14个关键模块字节码、6份Web资源、ASAR主进程源码；全部arm64，6份图标仅保留外部副本 |
+| macOS DMG | 通过 | hdiutil验证，只读挂载267项与构建App逐项一致，Applications链接正确 |
+| Windows冻结后端 | 通过 | 鉴权、统计/Jieba/时区、备份、记忆持久化、主动联系和旧目录导入/重启 |
+| Windows资源与进程 | 通过 | x64 PE、完整onedir树、ASAR版本/作者/主进程、Web资源与14个关键模块；管理器启动/端口回退/重启/退出 |
+| Windows便携版 | 通过 | 实际Electron程序启动内置后端，认证及打包页面资源；仅测试进程树清理 |
+| 公开附件 | 发布时校验 | 三个原生安装包与SHA256SUMS，附件大小、摘要及下载内容匹配 |
+
+所有过程使用隔离资料目录和模拟接口。Setup本次核验PE与构建资源，未执行完整安装/卸载循环；便携版HTTP启动检查不替代交互式键盘/IME或真实扫码验收。未调用真实账号或付费模型验证供应商识图/搜索质量。
+
+复现入口：`python -m unittest discover -s tests`、全部`tests/*.cjs`、`python tools/check_docs.py`；冻结后端运行 `tools/smoke_proactive.py`、`tools/smoke_data_import.py`，Windows另有`tools/verify_windows_backend.py`和`tools/verify_windows_manager.cjs`。语料导出和构建上下文规则亦有独立回归。
+
+---
+
+# 历史：v2.1.5 验证矩阵
 
 发布日期：2026-10-15（Asia/Shanghai）；运行时代码提交 `c8635ccd69f0ed64bbf270bacc5a595b65aae616`；[Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.5)、[文件清单](release-v2.1.5.json)。后续文档提交不改变包内运行时代码。
 

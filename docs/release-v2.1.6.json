@@ -1,0 +1,73 @@
+{
+  "version": "2.1.6",
+  "tag": "v2.1.6",
+  "released_date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": "1eb316fd86039a85599f582da3491f66c592d05c",
+  "runtime_commit_note": "Build-source checkpoint; release tag also includes post-build documentation/manifests. Runtime files are verified unchanged.",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6",
+  "artifacts": [
+    {
+      "name": "WxBot-2.1.6-Windows-x64-Setup.exe",
+      "bytes": 130840442,
+      "sha256": "655be4da0939ff2f1f6a3edcb2820bf8bc04eecaaf7a2f2b69d02ce5f5c0eedf",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-Windows-x64-Setup.exe"
+    },
+    {
+      "name": "WxBot-2.1.6-Windows-x64-Portable.exe",
+      "bytes": 130605487,
+      "sha256": "4b59a1c3147c20d022ac77582a97b2813eb63539a5eae7dae10fe6ce864e86e2",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-2.1.6-macOS-arm64.dmg",
+      "bytes": 169928574,
+      "sha256": "257503155159b2f8e93318c32f1a1e35aa288dd6e4664a340fa1b80a7d20b7a7",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/WxBot-2.1.6-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "489916972b971b2f146d96b65e04279f0ae287bb68d2bd0d6131b71b83c10a1c",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.6/SHA256SUMS.txt"
+    }
+  ],
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "validation": {
+    "python_macos": 635,
+    "python_windows_native": 635,
+    "python_skipped_each_platform": 1,
+    "node_suites_each_platform": 9,
+    "macos_frozen_proactive_api": true,
+    "macos_frozen_import_restart": true,
+    "macos_frozen_modules_source_match": 14,
+    "macos_web_files_source_match": 6,
+    "macos_dmg_readonly_tree_entries": 267,
+    "macos_dmg_arch": "arm64",
+    "windows_build_environment": "isolated Python venv; native x64 onedir",
+    "windows_backend_smoke_runs": 2,
+    "windows_backend_manager_restart_exit": true,
+    "windows_frozen_proactive_api": true,
+    "windows_frozen_import_restart": true,
+    "windows_frozen_modules_source_match": 14,
+    "windows_asar_source_and_author_match": true,
+    "windows_web_files_source_match": 6,
+    "windows_portable_native_process_http_start": true,
+    "duplicate_asar_icon_files": 0,
+    "external_icons_each_platform": 6,
+    "windows_setup_pe_verified": true,
+    "windows_setup_install_uninstall_cycle_run": false,
+    "real_account_login_tested": false,
+    "interactive_windows_ime_tested": false,
+    "paid_model_search_quality_tested": false
+  },
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-15"
+}
