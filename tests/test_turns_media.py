@@ -57,8 +57,8 @@ class TurnTests(unittest.IsolatedAsyncioTestCase):
         done=plan_wait([(msg('等我说完'),10),(msg('说完了','2'),12)],2,10);self.assertLess(done.delay,.4);self.assertFalse(done.hold)
     async def test_quoted_pause_does_not_hold(self):self.assertFalse(plan_wait([(msg('他说等一下是什么意思'),10)],2,10).hold)
     async def test_incomplete_sentence_waits_longer(self):self.assertGreater(plan_wait([(msg('然后'),10)],2,10).delay,plan_wait([(msg('就是这样。'),10)],2,10).delay)
-    async def test_picture_waits_for_caption(self):self.assertGreater(plan_wait([(msg('[图片]',images=[{}]),10)],2,10).delay,3)
-    async def test_max_wait_is_bounded(self):self.assertEqual(ready(plan_wait([(msg('然后'),10)],2,10),20,10,1),(True,True))
+    async def test_picture_waits_for_caption(self):self.assertEqual(plan_wait([(msg('[图片]',images=[{}]),10)],4,10).delay,6)
+    async def test_max_wait_is_soft(self):self.assertEqual(ready(plan_wait([(msg('然后'),10)],2,10),20,19,51),(False,False))
     async def test_batch_preserves_originals_and_latest_token(self):
         a=msg('第一条');a.context_token='old';b=msg('第二条','2');b.context_token='new';m=merge_messages([a,b]);self.assertEqual(m.context_token,'new');self.assertEqual([x.content for x in members(m)],['第一条','第二条'])
     async def test_quiet_window_resets_and_returns_one_batch(self):

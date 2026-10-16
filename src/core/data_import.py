@@ -287,6 +287,33 @@ def _publish(root, archive, manifest, id=None, source=None):
             _write(root, output, content)
 
 
+def _forget_markers(root):
+    markers = []
+    for name, field in (('memory-forgotten.json', 'markers'), ('memory.json', 'suppressions')):
+        path = root/name
+        if path.exists():
+            raw = json.loads(path.read_text(encoding='utf-8'))
+            value = raw.get(field, [])
+            if not isinstance(value, list): raise ValueError('遗忘屏蔽记录格式无效')
+            markers.extend(value)
+    return {m['id']:m for m in markers if isinstance(m, dict) and m.get('id')}
+
+
+def _merge_forgetting(root, retained):
+    combined = {**_forget_markers(root), **{m['id']:m for m in retained}}
+    if combined:
+        _atomic_json(root/'memory-forgotten.json', {'version':1, 'markers':list(combined.values())})
+        # Imported lossy summaries have no trustworthy map from prose to the
+        # user's original evidence. They must not resurrect forgotten content.
+        for path in root.glob('context-*.json'):
+            raw = json.loads(path.read_text(encoding='utf-8'))
+            raw['summaries'] = {}
+            raw['summary_sources'] = {}
+            _atomic_json(path, raw)
+            from ..store_memory import MemoryStore
+            MemoryStore(path=path).sync_suppressions(list(combined.values()))
+
+
 def apply_pending_import(root):
     """Caller holds storage lock; executes before any stateful component is loaded."""
     root = Path(root).resolve()
@@ -304,7 +331,7 @@ def apply_pending_import(root):
     if 'backup' not in pending:
         files, dirs, _ = _walk(root, current=True)
         backup = _snapshot(root, root/'.backups', 'preimport', payload=lambda _: iter(files), directories=dirs)
-        pending.update(backup=backup.name, status='applying')
+        pending.update(backup=backup.name, status='applying', forget_markers=list(_forget_markers(root).values()))
         _atomic_json(control, pending)  # Crash recovery always reuses the original backup.
     backup, original = _archive(root, pending['backup'], 'preimport')
     try:
@@ -312,6 +339,7 @@ def apply_pending_import(root):
             _destination(root, _target_name(name, pending['id']))
         _clear_active(root)
         _publish(root, archive, manifest, pending['id'], pending.get('aliases') or [pending['source']])
+        _merge_forgetting(root, pending.get('forget_markers', []))
     except Exception:
         import shutil
         for base in (root/'logs'/('imported-'+pending['id']), root/'.backups'/('legacy-'+pending['id'])):

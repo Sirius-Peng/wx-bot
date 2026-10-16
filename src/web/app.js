@@ -66,9 +66,10 @@ const PAGE_META = {
   guide: ['上手引导', '按步骤连接模型、QQ 与微信'],
   overview: ['概览', '查看机器人运行状态与今日数据'],
   connect:  ['接入设置', '配置通道并完成登录'],
-  memory:   ['人格知识库', '机器人随对话积累的对用户的理解'],
+  memory:   ['人格知识库', '对用户的了解：经历慢慢沉淀，人格始终优先'],
   messages: ['消息记录', '查看收发消息与触发判定结果'],
   statistics: ['对话统计', '以气泡图和排行查看高频词与常聊话题'],
+  'memory-graph': ['记忆拓扑', '从对话来源到长期记忆，直观看见关联'],
   settings: ['模型与行为', '配置大模型与机器人性格'],
 };
 
@@ -85,6 +86,8 @@ function switchPage(name) {
   if (name === 'memory') loadMemory();
   if (name === 'messages') loadMessages();
   if (name === 'statistics') loadStatistics();
+  if (name === 'memory-graph') loadMemoryGraph();
+  else leaveMemoryGraph();
   if (name === 'settings' || name === 'connect') loadConfig();
   if (name === 'guide') refreshOnboarding().catch(e=>guideMessage(e.message));
   else GUIDE.wechatSession++;
@@ -148,8 +151,8 @@ async function refreshStatus() {
   $('#hero-pulse').classList.toggle('on', running);
   $('#hero-title').textContent = running ? '机器人正在运行' : '机器人未运行';
   const rule = s.qq_running
-    ? '私聊必回，QQ 群里 @ 它才回'
-    : '私聊消息会自动回复';
+    ? '私聊先听完再自然接话，QQ 群里 @ 它才回'
+    : '先听完整段表达，再自然接话';
   $('#hero-desc').textContent = running
     ? `正在接收消息：${rule}`
     : (s.last_error || '完成接入设置后点击「启动机器人」即可开始工作');
@@ -159,6 +162,7 @@ async function refreshStatus() {
     if(d.typing?.last_status==='on')$('#hero-desc').textContent += '；微信正在输入';
     $('#hero-desc').textContent += `；微信排队 ${d.pending_inbound}，待重试 ${d.pending_replies}，${label}（提交 ${d.last_send_ms}ms）`;
   }
+  if (running && s.conversation) $('#hero-desc').textContent += '；' + conversationStatusText(s.conversation);
   if (running && s.last_error) $('#hero-desc').textContent += `；${s.last_error}`;
 
 
@@ -181,6 +185,17 @@ async function refreshStatus() {
   $('#st-silent').textContent = stats.silent || 0;
   $('#st-chats').textContent = (stats.group_count || 0) + (stats.private_count || 0);
   $('#st-chats-foot').textContent = `群 ${stats.group_count || 0} · 私聊 ${stats.private_count || 0}`;
+}
+
+function conversationStatusText(status) {
+  const parts = [];
+  if (status.waiting) parts.push(`等待说完 ${status.waiting}`);
+  if (status.deferred) parts.push(`稍后再判断 ${status.deferred}`);
+  if (status.replying) parts.push(`正在回应 ${status.replying}`);
+  if (status.silent) parts.push(`主动静默 ${status.silent}（已保留上下文）`);
+  if (status.uncertain) parts.push(`投递结果待确认 ${status.uncertain}（不重复提交）`);
+  if (status.state_error) parts.push('会话状态读取异常，请检查日志');
+  return parts.join(' · ') || '等待新消息';
 }
 
 /* ══════════ 概览：最近动态 ══════════ */
@@ -329,7 +344,7 @@ const SECTION_FIELDS = {
   search: ['llm', ['search_enabled','search_key','search_model','context_timezone']],
   persona: ['bot', ['name','persona','persona_profile','persona_relationship']],
   proactive: ['bot', ['proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end']],
-  reply: ['bot', ['group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
+  reply: ['bot', ['reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
   memory: ['bot', ['memory_enabled','memory_inject','memory_extract_interval']],
   channels: ['adapter', ['wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror']]
 };
@@ -393,7 +408,9 @@ async function loadConfig() {
   $('#memory-enabled').checked = c.bot.memory_enabled !== false;
   $('#memory-inject').checked = c.bot.memory_inject !== false;
   $('#memory-interval').value = c.bot.memory_extract_interval || 3;
-  $('#message-merge-window').value = c.bot.message_merge_window ?? 2;
+  $('#reply-mode').value = c.bot.reply_mode || 'natural';
+  $('#late-reply-enabled').checked = c.bot.late_reply_enabled !== false;
+  $('#message-merge-window').value = c.bot.message_merge_window ?? 4;
   $('#message-merge-max-wait').value = c.bot.message_merge_max_wait ?? 10;
   $('#humanized-wait').checked = c.bot.humanized_wait !== false;
   $('#typing-indicator').checked = c.bot.typing_indicator !== false;
@@ -539,6 +556,8 @@ function collectConfig() {
   c.bot.persona_profile = $('#persona-profile').value;
   c.bot.persona_relationship = $('#persona-relationship').value;
   c.bot.group_reply_at_sender = $('#group-at-sender').checked;
+  c.bot.reply_mode = $('#reply-mode').value;
+  c.bot.late_reply_enabled = $('#late-reply-enabled').checked;
   c.bot.message_merge_window = Math.min(10, Math.max(0, Number($('#message-merge-window').value)));
   c.bot.message_merge_max_wait = Math.max(c.bot.message_merge_window, Math.min(60, Math.max(1, Number($('#message-merge-max-wait').value) || 10)));
   c.bot.humanized_wait = $('#humanized-wait').checked;
@@ -551,7 +570,7 @@ function collectConfig() {
   c.bot.memory_enabled = $('#memory-enabled').checked;
   c.bot.memory_inject = $('#memory-inject').checked;
   c.bot.memory_extract_interval =
-    Math.min(50, Math.max(1, Number($('#memory-interval').value) || 3));
+    Math.min(50, Math.max(3, Number($('#memory-interval').value) || 3));
   return c;
 }
 
@@ -1099,6 +1118,7 @@ async function loadMemory() {
   memoryItems = data.items || [];
   renderMemoryStats({...data.stats, categories:data.categories});
   renderMemoryList(memoryItems);
+  await loadForgotten();
   $('#identity-list').innerHTML = (data.identities || []).map(it => `<div>${it.accounts.map(a => `${a.platform === 'ilink' ? '微信' : 'QQ'} ${esc(a.owner_id)}`).join(' ↔ ')} <button class="btn btn-ghost btn-sm" data-unlink="${esc(it.id)}">解除关联</button></div>`).join('') || '尚未关联；手动通用记忆始终对两个通道生效。';
   $$('#identity-list [data-unlink]').forEach(b => b.addEventListener('click', async () => {
     if (!await confirmAction('解除后按原账号分别使用记忆，来源记录会保留。确定解除？')) return;
@@ -1114,15 +1134,33 @@ async function loadMemory() {
   }
 }
 
+async function loadForgotten() {
+  const box = $('#memory-forgotten');
+  try {
+    const data = await api('/api/memory/forgotten');
+    box.innerHTML = (data.items || []).map(item => `<div class="memory-item"><div class="mem-main"><div class="mem-content">${esc(item.content || item.fact_key || '此范围内已清空的了解')}</div><div class="mem-meta">遗忘于 ${esc(fmtMemoryTime(item.created_at))}</div></div><button class="btn btn-ghost btn-sm" data-relearn="${esc(item.id)}">允许今后重新学习</button></div>`).join('') || '<div class="hint" style="padding:0 20px 16px">尚无明确遗忘标记。</div>';
+    $$('#memory-forgotten [data-relearn]').forEach(button => button.addEventListener('click', async () => {
+      if (!await confirmAction('允许今后的新对话重新学习这部分内容？不会恢复旧记忆。')) return;
+      button.disabled = true;
+      try {
+        await api(`/api/memory/forgotten/${encodeURIComponent(button.dataset.relearn)}`, {method:'DELETE'});
+        toast('已允许今后重新学习，旧记忆保持删除', 'ok');
+        await loadForgotten();
+      } catch (e) { toast('保存失败：' + e.message, 'err'); }
+      finally { button.disabled = false; }
+    }));
+  } catch (e) { box.textContent = '读取遗忘标记失败：' + e.message; }
+}
+
 function renderMemoryStats(s) {
   $('#mem-total').textContent = s.total || 0;
-  $('#mem-total').title = `另有 ${s.historical || 0} 条历史或过期信息`;
+  $('#mem-total').title = `另有 ${s.historical || 0} 条历史或过期信息；形成中 ${s.phases?.candidate || 0}，已熟悉 ${s.phases?.stable || 0}，已淡化 ${s.phases?.dormant || 0}，已固定 ${s.phases?.pinned || 0}`;
   $('#mem-owners').textContent = `${s.owners || 0} 个对象`;
   $('#mem-conf').textContent = s.avgConfidence ? Math.round(s.avgConfidence * 100) + '%' : '—';
   $('#mem-enabled').textContent = s.enabled ? '已开启' : '已关闭';
   const learning = s.learning || {};
-  const labels = { idle: '等待对话', queued: '等待抽取', extracting: '正在抽取', learned: '已保存', empty: '本批次没有长期信息', retry_wait: '抽取失败，等待重试', save_failed: '写盘失败', disabled: '自动积累已关闭', unconfigured: '抽取模型未配置' };
-  const detail = `${labels[learning.state] || '等待对话'} · 待处理 ${learning.pending_turns || 0} 条 · 已完成 ${learning.completed || 0} 批 · 模型 ${learning.model || '—'}`;
+  const labels = { idle: '等待对话', queued: '等待空闲整理', collecting: '积累经历中', consolidating: '后台整理中', extracting: '后台整理中', learned: '候选已整理', empty: '本批次没有长期信息', retry_wait: '抽取失败，等待重试', save_failed: '写盘失败', disabled: '自动积累已关闭', unconfigured: '抽取模型未配置' };
+  const detail = `${labels[learning.state] || '等待对话'} · 待整理 ${learning.pending_turns || 0} 轮 · 已完成 ${learning.completed || 0} 批 · 模型 ${learning.model || '—'}`;
   $('#memory-learning-status').textContent = detail + (learning.last_error ? ` · ${learning.last_error}` : '');
   const cats = s.byCategory || {};
   const n = Object.keys(cats).length;
@@ -1133,12 +1171,24 @@ function renderMemoryStats(s) {
     : '—';
 }
 
+function fmtMemoryTime(value) {
+  const date = new Date(typeof value === 'number' ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? '未知' : date.toLocaleString('zh-CN');
+}
+function memoryEvidenceMarkup(item) {
+  const sources = Array.isArray(item.evidence_sources) ? item.evidence_sources : [];
+  const count = item.evidence_count ?? sources.length;
+  const episodes = item.independent_episodes ?? new Set(sources.map(s => s.episode_id).filter(Boolean)).size;
+  const detail = sources.slice(-3).map(s => `${fmtMemoryTime(s.observed_at)}：${s.text || ''}`).join('；') || item.evidence || '';
+  return `<span title="${esc(detail)}">用户依据 ${Number(count) || 0} 次 · 独立对话 ${Number(episodes) || 0} 次</span>`;
+}
+
 function renderMemoryList(items) {
   const box = $('#memory-list');
   if (!items.length) {
     box.innerHTML = `<div class="empty">
       ${ICON_EMPTY}
-      <span>还没有记忆<br>机器人运行后会自动从对话中积累，也可以点「手动添加」补录</span>
+      <span>还没有记忆<br>经过长期互动会慢慢形成了解，也可以点「手动添加」立即固定</span>
     </div>`;
     return;
   }
@@ -1154,21 +1204,34 @@ function renderMemoryList(items) {
             <span class="bar"><i style="width:${Math.round((it.confidence || 0) * 100)}%"></i></span>
             ${Math.round((it.confidence || 0) * 100)}%
           </span>
-          <span>${esc(it.stateLabel || '当前')}</span>
+          <span>${esc(it.phaseLabel || '形成中')}</span>
+          ${it.status && it.status !== 'active' ? `<span>${esc(it.stateLabel || '历史版本')}</span>` : ''}
           <span>来源 ${esc(it.platform === 'ilink' ? '微信' : it.platform === 'onebot' ? 'QQ' : '手动/旧版')} · ${esc(it.owner_id || '通用')}</span>
-          ${it.evidence ? `<span title="${esc(it.evidence)}">有原话依据</span>` : ''}
+          ${memoryEvidenceMarkup(it)}
           <span>使用 ${it.hits || 0} 次</span>
-          <span>更新于 ${esc(it.updatedAt || '')}</span>
+          <span>用户证据 ${esc(it.last_user_evidence_at ? fmtMemoryTime(it.last_user_evidence_at) : (it.updatedAt || '未知'))}</span>
+          <span>当前强度 ${Math.round((it.strength ?? it.confidence ?? 0) * 100)}%</span>
         </div>
       </div>
       <div class="mem-actions">
+        <button class="btn btn-ghost btn-sm" data-pin="${esc(it.id)}" data-pinned="${it.pinned ? 'true' : 'false'}">${it.pinned ? '解除固定' : '固定'}</button>
         <button class="btn btn-ghost btn-sm" data-del="${esc(it.id)}">删除</button>
       </div>
     </div>`).join('');
 
+  $$('#memory-list [data-pin]').forEach(b => b.addEventListener('click', async () => {
+    const pinned = b.dataset.pinned !== 'true';
+    b.disabled = true;
+    try {
+      await api(`/api/memory/${encodeURIComponent(b.dataset.pin)}`, {method:'PATCH', body:JSON.stringify({pinned})});
+      toast(pinned ? '已固定，直到手动修改或删除' : '已解除固定，恢复渐进生命周期', 'ok');
+      await loadMemory();
+    } catch (e) { toast('保存失败：' + e.message, 'err'); }
+    finally { b.disabled = false; }
+  }));
   $$('#memory-list [data-del]').forEach(b =>
     b.addEventListener('click', async () => {
-      if (!await confirmAction('确定删除这条记忆？')) return;
+      if (!await confirmAction('确定遗忘这条内容？已忘内容会停止用于上下文、摘要和待回复，旧数据导入也不会自动重新学回。聊天记录的物理删除需另行操作。')) return;
       await api(`/api/memory/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' });
       toast('已删除', 'ok');
       loadMemory();
@@ -1215,6 +1278,7 @@ async function saveMemory() {
 
 function bind() {
   bindStatistics();
+  bindMemoryGraph();
   $('#btn-storage-backup').addEventListener('click',backupStorage);
   $('#import-source').addEventListener('input',invalidateImportPreview);
   $('#btn-import-choose').addEventListener('click',chooseImportDirectory);
@@ -1243,6 +1307,7 @@ function bind() {
     await loadRecent();
     if (STATE.page === 'messages') await loadMessages();
     if (STATE.page === 'statistics') await loadStatistics();
+    if (STATE.page === 'memory-graph') await loadMemoryGraph();
     if (STATE.page === 'memory') await loadMemory();
     toast('已刷新');
   });
@@ -1337,6 +1402,7 @@ function bind() {
     loadMessages();
   });
 
+  $('#btn-forgotten-refresh').addEventListener('click', loadForgotten);
   $('#btn-proactive-refresh').addEventListener('click', loadProactive);
 
   // 设置

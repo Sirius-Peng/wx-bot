@@ -23,9 +23,9 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
         self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)/'memory.json';self.m=PersonaMemory(self.path)
     async def asyncTearDown(self): await self.m.learner.close();self.tmp.cleanup()
     def add(self, content, platform='ilink', uid='wx_alice', key='occupation', category='fact', keywords=None, expires=0):
-        return self.m._merge_or_create('user',uid,category,content,keywords or [],'chat',platform=platform,fact_key=key,expires_at=expires)
-    async def test_schema_version_is_two(self):
-        self.m.add_manual('user','u','fact','事实');self.assertEqual(json.loads(self.path.read_text())['version'],2)
+        now=time.time();return self.m._merge_or_create('user',uid,category,content,keywords or [],'chat',platform=platform,fact_key=key,expires_at=expires,sources=[{'id':content+':first','episode_id':'first','observed_at':now-86401,'text':content},{'id':content+':second','episode_id':'second','observed_at':now,'text':content}])
+    async def test_schema_version_is_three(self):
+        self.m.add_manual('user','u','fact','事实');self.assertEqual(json.loads(self.path.read_text())['version'],3)
     async def test_current_job_supersedes_not_erases_old_job(self):
         old=self.add('用户是后端工程师');new=self.add('用户现在是教师')
         self.assertEqual(old.status,'superseded');self.assertEqual(old.superseded_by,new.id);self.assertGreater(old.valid_until,0)
@@ -41,11 +41,11 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
     async def test_generic_preference_slot_does_not_merge_different_preferences(self):
         self.add('喜欢猫',category='preference',key='preference');self.add('喜欢咖啡',category='preference',key='preference');self.assertEqual(self.m.stats()['total'],2)
     async def test_duplicate_reinforces_same_item(self):
-        a=self.add('用户是工程师');b=self.add('用户是工程师');self.assertIs(a,b);self.assertEqual(len(self.m._items),1);self.assertGreater(a.confidence,.7)
+        a=self.add('用户是工程师');b=self.add('用户是工程师');self.assertIs(a,b);self.assertEqual(len(self.m._items),1);self.assertEqual(a.confidence,.85);self.assertEqual(len(a.evidence_sources),2)
     async def test_irrelevant_facts_not_injected(self):
         self.add('用户是工程师');self.assertEqual(self.m.build_context('wx_alice','chat','今天天气晴朗','ilink'),'')
-    async def test_core_name_is_available_without_keyword(self):
-        a=self.add('称呼用户为小雨',key='preferred_name',category='style');self.assertIn(a,self.m.recall('wx_alice','chat','早安',platform='ilink'))
+    async def test_style_not_injected_without_relevance(self):
+        a=self.add('称呼用户为小雨',key='preferred_name',category='style');self.assertNotIn(a,self.m.recall('wx_alice','chat','早安',platform='ilink'))
     async def test_different_users_isolated(self):
         self.add('用户是工程师');self.assertEqual(self.m.recall('bob','chat','职业',platform='ilink'),[])
     async def test_same_number_across_platforms_not_auto_linked(self):
@@ -79,7 +79,7 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
             async def stream_send(self,c,stream,**kw):self.reply=''.join([x async for x in stream]);return self.reply
         store=MemoryStore();chat=Chat();sender=Sender();o=Orchestrator(Adapter(),store,chat,None,ContextManager(store),TriggerRouter(),sender,memory=self.m)
         await o.handle(message('onebot','123','你还记得我的职业吗'))
-        self.assertTrue(any('用户是工程师' in x['content'] for x in chat.messages if x['role']=='system'));self.assertIn('工程师',sender.reply);await o.close()
+        self.assertTrue(any('用户是工程师' in x['content'] for x in chat.messages if x['role']!='system'));self.assertIn('工程师',sender.reply);await o.close()
     async def test_link_persists_restart(self):
         self.add('用户是工程师');self.m.link_accounts('wx_alice','123');loaded=PersonaMemory(self.path)
         self.assertEqual(loaded.identity_key('ilink','wx_alice'),loaded.identity_key('onebot','123'));self.assertEqual(len(loaded.recall('123','p_123','职业',platform='onebot')),1)
@@ -90,7 +90,7 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(a,self.m.recall('wx_alice','g_1','规则',platform='ilink'))
     async def test_global_manual_memory_shared_by_both_platforms(self):
         self.m.add_manual('user','global','style','回复保持简洁')
-        for platform in ('ilink','onebot'):self.assertIn('简洁',self.m.build_context('any','any','早安',platform))
+        for platform in ('ilink','onebot'):self.assertIn('简洁',self.m.build_context('any','any','简洁',platform))
     async def test_blank_or_global_account_rejected(self):
         for wx,qq in [('', '123'),('wx',''),('global','123'),('wx','*')]:
             with self.assertRaises(ValueError):self.m.link_accounts(wx,qq)
@@ -116,13 +116,16 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(self.path.with_name('memory.v1-backup.json').read_text()),raw);assert_private_file(self,self.path.with_name('memory.v1-backup.json'))
     async def test_extraction_stores_platform_and_verbatim_evidence(self):
         self.m.llm=Model([{'category':'fact','content':'用户是工程师','keywords':['职业'],'fact_key':'occupation','evidence':'我是工程师'}])
-        await self.m.learner.enqueue(message(),'');await self.m.learner.wait_idle();item=next(iter(self.m._items.values()));self.assertEqual(item.platform,'ilink');self.assertEqual(item.evidence,'我是工程师')
-    async def test_automatic_queue_cross_platform_correction_is_shared(self):
-        self.m.llm=Model([{'category':'fact','content':'用户是工程师','keywords':['职业'],'fact_key':'occupation','evidence':'我是工程师'}])
-        await self.m.learner.enqueue(message(),'');await self.m.learner.wait_idle();self.m.link_accounts('wx_alice','123')
+        await self.m.observe('chat','private','wx_alice','Alice',[{'user':'我是工程师'}],platform='ilink');item=next(iter(self.m._items.values()));self.assertEqual(item.platform,'ilink');self.assertEqual(item.evidence,'我是工程师')
+    async def test_cross_platform_correction_immediately_disables_old_but_new_value_is_candidate(self):
+        old=self.add('用户是工程师');self.m.link_accounts('wx_alice','123')
         self.m.llm=Model([{'category':'fact','content':'用户现在是教师','keywords':['职业'],'fact_key':'occupation','evidence':'我现在是教师'}])
-        await self.m.learner.enqueue(message('onebot','123','我现在是教师','2'),'');await self.m.learner.wait_idle()
-        recalled=self.m.recall('wx_alice','chat','现在职业',platform='ilink');self.assertEqual(len(recalled),1);self.assertEqual(recalled[0].platform,'onebot');self.assertIn('教师',recalled[0].content);self.assertEqual(self.m.stats()['historical'],1)
+        self.m.observe_correction(message('onebot','123','我现在是教师','2'))
+        self.assertEqual(self.m.recall('wx_alice','chat','现在职业',platform='ilink'),[])
+        await self.m.observe('p_123','private','123','Alice',[{'user':'我现在是教师'}],platform='onebot')
+        self.assertEqual(old.status,'superseded')
+        self.assertEqual(self.m.recall('wx_alice','chat','现在职业',platform='ilink'),[])
+        self.assertEqual(next(i for i in self.m._items.values() if i.id != old.id).phase,'candidate')
     async def test_fabricated_evidence_rejected(self):
         self.m.llm=Model([{'category':'fact','content':'用户是医生','keywords':[],'evidence':'我是医生'}])
         with self.assertRaises(MemoryExtractionError):await self.m.observe('chat','private','u','Alice',[{'user':'我是工程师'}],platform='ilink')
@@ -131,7 +134,7 @@ class MemoryV2Tests(unittest.IsolatedAsyncioTestCase):
         self.m.link_accounts('wx_alice','123')
         self.m._merge_or_create('user','123','fact','用户现在是教师',['职业'],'p_123',platform='onebot',fact_key='occupation',observed_at=200)
         old=self.m._merge_or_create('user','wx_alice','fact','用户之前是工程师',['职业'],'wx',platform='ilink',fact_key='occupation',observed_at=100)
-        self.assertEqual(old.status,'superseded');self.assertIn('教师',self.m.build_context('wx_alice','chat','现在职业','ilink'))
+        self.assertEqual(old.status,'superseded');self.assertIn('教师',self.m.build_context('wx_alice','chat','以前职业','ilink'))
     async def test_unrelated_user_delete_does_not_drop_inflight_learning(self):
         other=self.add('用户喜欢猫',uid='bob',key='',category='preference');entered=asyncio.Event();gate=asyncio.Event()
         class Slow:

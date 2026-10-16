@@ -1,8 +1,8 @@
-# WxBot 桌面版 · v2.1.6
+# WxBot 桌面版 · v2.1.7
 
-当前源码版本为v2.1.6，新增主动联系（单端无需关联、双端可选共享计划）、内容型联网总结和混合媒体改进；继续保留旧目录整套导入和Windows输入焦点修复。文档更新：2026-10-15。
+当前源码版本为v2.1.7，新增人格优先渐进记忆、私聊自然接话与稍后重判、连续输入协调及只读记忆拓扑；继续保留主动联系、识图、旧目录导入、独立用户数据和Windows输入焦点修复。文档更新：2026-10-16。
 
-本次原生构建Windows x64安装/便携版与macOS arm64 DMG。[下载v2.1.6](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [测试矩阵](../docs/validation.md)
+v2.1.7 正在原生构建Windows x64安装/便携版与macOS arm64 DMG；下表仍为已发布v2.1.6，不能代表新版本验收完成。[下载v2.1.6](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [测试矩阵](../docs/validation.md)
 
 ## 发布产物
 

@@ -94,10 +94,12 @@ class BotConfig:
     group_reply_at_sender: bool = True
 
     # ── 人格知识库 ────────────────────────────────────────────
+    reply_mode: str = "natural"      # natural: 克制接话；always: 每轮必回
+    late_reply_enabled: bool = True   # 普通分享可在1～3分钟内重判一次
     humanized_wait: bool = True
     typing_indicator: bool = True
     message_pause_timeout: float = 120.0
-    message_merge_window: float = 2.0
+    message_merge_window: float = 4.0
     message_merge_max_wait: float = 10.0
 
     # Shared across QQ/WeChat; private contacts are explicitly selected in the UI.
@@ -183,10 +185,13 @@ class ConfigStore:
             b["persona_profile"] = "custom"
         if not isinstance(b.get("persona_relationship", "neutral"), str) or b.get("persona_relationship", "neutral") not in RELATIONSHIP_IDS:
             b["persona_relationship"] = "neutral"
-        for key,default,lo,hi in [('message_merge_window',2.0,0.0,10.0),('message_merge_max_wait',10.0,0.1,60.0),('message_pause_timeout',120.0,5.0,600.0)]:
+        for key,default,lo,hi in [('message_merge_window',4.0,0.0,10.0),('message_merge_max_wait',10.0,0.1,60.0),('message_pause_timeout',120.0,5.0,600.0)]:
             try:value=float(b.get(key,default));value=value if math.isfinite(value) else default
             except (TypeError,ValueError):value=default
             b[key]=min(hi,max(lo,value))
+        b['reply_mode'] = b.get('reply_mode', 'natural') if b.get('reply_mode', 'natural') in ('natural', 'always') else 'natural'
+        b['late_reply_enabled'] = b.get('late_reply_enabled', True) is True
+        b['memory_extract_interval'] = max(3, min(50, int(b.get('memory_extract_interval', 3)))) if isinstance(b.get('memory_extract_interval', 3), (int, float)) and not isinstance(b.get('memory_extract_interval', 3), bool) and math.isfinite(b.get('memory_extract_interval', 3)) else 3
         b['message_merge_max_wait']=max(b['message_merge_window'],b['message_merge_max_wait'])
         b['proactive_enabled'] = b.get('proactive_enabled') is True
         for key, default, lo, hi in [('proactive_min_hours', 3, .25, 168), ('proactive_max_hours', 8, .25, 168),

@@ -104,7 +104,9 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         orch=self.rt._build_orchestrator(Adapter())
         orch.memory.add_manual('user','u','fact','独有记忆',['记忆'])
         llm=Model(); orch.llm=llm; orch.sender=Sender(); orch.memory.llm=llm
-        await orch.handle(message())
+        for i,text in enumerate(('我是后端工程师','我的项目以服务端开发为主','长期维护了不少后端服务')):
+            incoming=message(str(i+1));incoming.content=text
+            await orch.handle(incoming)
         await orch.wait_for_memory()
         self.assertFalse(any('独有记忆' in m['content'] for m in llm.messages))
         self.assertEqual(llm.calls,1)

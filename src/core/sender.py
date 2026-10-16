@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import asyncio
-import random
 import re
 import time
-from collections import defaultdict
 
 # ── 风控红线 ──────────────────────────────────────────────
 GLOBAL_RPM = 20        # 单账号全局上限：20 条/分钟
-CHAT_RPM = 2           # 单会话上限：2 条/分钟（最关键的红线）
+CHAT_RPM = 12          # QQ 私聊：正常对话不再等待 30 秒
+GROUP_RPM = 2          # QQ 群聊保持原有限制
 MAX_SEG_LEN = 800      # 仅供旧分段工具使用；默认回复不按此长度拆分
 
 # 保留确有用途的代码、列表、引用、标题和表格格式。
@@ -20,26 +19,55 @@ STRUCTURED_LINE = re.compile(r"^(?:\s*(?:[-*+•]\s+|\d+[.)]\s+|\d+、|[一二�
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
+async def _current_wait(awaitable, check_current=None):
+    """Interrupt even a blocked lock/token wait when an unsent turn is obsolete."""
+    if check_current is None:
+        return await awaitable
+    task = asyncio.ensure_future(awaitable)
+    try:
+        while not task.done():
+            check_current()
+            await asyncio.wait({task}, timeout=.05)
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 class TokenBucket:
-    """令牌桶限流器。"""
+    """令牌桶限流器，等待令牌或锁期间均可取消旧轮次。"""
 
     def __init__(self, rate_per_min: float, capacity: float | None = None):
-        self.rate = rate_per_min / 60.0          # 每秒补充速率
+        self.rate = rate_per_min / 60.0
         self.capacity = capacity or max(1.0, rate_per_min / 6)
         self.tokens = self.capacity
         self.updated = time.monotonic()
         self._lock = asyncio.Lock()
 
-    async def acquire(self) -> None:
-        async with self._lock:
+    async def acquire(self, check_current=None) -> None:
+        await _current_wait(self._lock.acquire(), check_current)
+        try:
             while True:
+                if check_current is not None:check_current()
                 now = time.monotonic()
                 self.tokens = min(self.capacity, self.tokens + (now - self.updated) * self.rate)
                 self.updated = now
                 if self.tokens >= 1:
                     self.tokens -= 1
                     return
-                await asyncio.sleep((1 - self.tokens) / self.rate)
+                await _current_wait(asyncio.sleep((1 - self.tokens) / self.rate), check_current)
+        finally:
+            self._lock.release()
+
+
+class _ChatBuckets(dict):
+    """Choose the QQ group limit by transport chat ID, never by sender identity."""
+    def __init__(self, factory):
+        super().__init__();self.factory=factory
+
+    def __missing__(self, key):
+        bucket=self.factory(key);self[key]=bucket;return bucket
 
 
 def split_by_semantics(text: str, max_len: int = MAX_SEG_LEN) -> list[str]:
@@ -121,34 +149,54 @@ class HumanLikeSender:
         # 官方机器人通道用独立的有界限流；不继承旧个人号的30秒等待。
         ilink = getattr(adapter, "platform", "") == "ilink"
         global_rpm = global_rpm if global_rpm is not None else (60 if ilink else GLOBAL_RPM)
-        chat_rpm = chat_rpm if chat_rpm is not None else (30 if ilink else CHAT_RPM)
         self.global_bucket = TokenBucket(global_rpm, capacity=2 if ilink else None)
-        self.chat_buckets: dict[str, TokenBucket] = defaultdict(
-            lambda: TokenBucket(chat_rpm, capacity=2 if ilink else None))
+        def bucket(chat_id):
+            group = not ilink and str(chat_id).startswith('g_')
+            rpm = chat_rpm if chat_rpm is not None else (30 if ilink else GROUP_RPM if group else CHAT_RPM)
+            return TokenBucket(rpm, capacity=2 if ilink or not group else None)
+        self.chat_buckets: dict[str, TokenBucket] = _ChatBuckets(bucket)
+        self._backoff_until: dict[str, float] = {}
 
     @staticmethod
     def human_delay(text: str) -> float:
         """兼容旧延迟钩子；默认即时提交，不人为模拟打字。"""
         return 0.0
 
-    async def send(self, chat_id: str, text: str, at: list[str] | None = None) -> list[str]:
+    async def send(self, chat_id: str, text: str, at: list[str] | None = None,
+                   *, check_current=None, on_submit=None, on_submit_text=None) -> list[str]:
         """限流后一次发送完整文本；不按句子、换行或 800 字阈值拆消息。"""
         reply = normalize_reply_text(text)
         if not reply.strip():
             return []
-        await self.global_bucket.acquire()
-        await self.chat_buckets[chat_id].acquire()
-        await asyncio.sleep(self.human_delay(reply))
+        if check_current is not None:check_current()
+        delay = self._backoff_until.get(chat_id, 0) - time.monotonic()
+        if delay > 0:await _current_wait(asyncio.sleep(delay), check_current)
+        # The wrapper also supports existing third-party buckets with acquire().
+        await _current_wait(self.global_bucket.acquire(), check_current)
+        await _current_wait(self.chat_buckets[chat_id].acquire(), check_current)
+        await _current_wait(asyncio.sleep(self.human_delay(reply)), check_current)
+        if check_current is not None:check_current()
+        if on_submit_text is not None:on_submit_text(reply)
+        if on_submit is not None:on_submit()
         try:
             msg_id = await self.adapter.send_text(chat_id, reply, at=at)
         except ConversationChanged:
             raise
         except Exception as exc:
+            response = getattr(exc, 'response', None)
+            code = getattr(exc, 'status_code', None) or getattr(response, 'status_code', None) or getattr(exc, 'retcode', None)
+            if str(code) == '429':
+                retry = getattr(exc, 'retry_after', None)
+                if retry is None and response is not None:retry = getattr(response, 'headers', {}).get('retry-after')
+                try:seconds = min(120, max(1, float(retry or 5)))
+                except (TypeError, ValueError):seconds = 5
+                self._backoff_until[chat_id] = time.monotonic() + seconds
             raise DeliveryError("完整回复尚未被接口接受") from exc
         return [msg_id]
 
     async def stream_send(self, chat_id: str, stream, first_threshold: int = 20,
-                          next_threshold: int = 80, at: list[str] | None = None) -> str:
+                          next_threshold: int = 80, at: list[str] | None = None,
+                          *, check_current=None, on_submit=None, on_submit_text=None) -> str:
         """接收完整模型流，再一次发送；归档文本与用户收到的内容一致。
 
         first_threshold / next_threshold 仅保留旧调用兼容，不再触发提前发送。
@@ -158,5 +206,5 @@ class HumanLikeSender:
         reply = normalize_reply_text("".join(chunks))
         if not reply.strip():
             raise ValueError("模型返回空回复")
-        await self.send(chat_id, reply, at=at)
+        await self.send(chat_id, reply, at=at, check_current=check_current, on_submit=on_submit, on_submit_text=on_submit_text)
         return reply

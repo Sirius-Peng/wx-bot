@@ -157,11 +157,13 @@ class NaturalTurnTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(b.note_typing('p_123','123'));await asyncio.sleep(.09);self.assertEqual(calls,[])
             b.note_typing('p_123','123',False);await eventually(lambda:bool(calls));self.assertEqual(len(calls),1)
         finally:await b.close()
-    async def test_peer_typing_admission_is_bounded_by_max_wait(self):
+    async def test_peer_typing_is_not_overridden_by_soft_max_wait(self):
         calls=[]
         async def callback(m):calls.append(m)
         b=MessageBuffer(callback);b.configure(.02,.06,human=False);b.start();b.submit(message());b.note_typing('p_123','123')
-        try:await eventually(lambda:bool(calls),.3);self.assertEqual(len(calls),1)
+        try:
+            await asyncio.sleep(.12);self.assertEqual(calls,[])
+            b.note_typing('p_123','123',False);await eventually(lambda:bool(calls));self.assertEqual(len(calls),1)
         finally:await b.close()
     async def test_input_status_for_another_user_does_not_block(self):
         b=MessageBuffer(None);b.submit(message());self.assertFalse(b.note_typing('p_456','456'));self.assertEqual(b.typing_hints,{})

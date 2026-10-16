@@ -54,7 +54,7 @@ def audit(root,metadata=None):
     for name,value in [('primary_base','https://api.deepseek.com'),('primary_model','deepseek-flash'),('context_timezone','Asia/Shanghai')]:
         check(bool(re.search(r'\b'+name+r': str = "'+re.escape(value)+r'"',source)),'default source changed: '+name)
         check(value in readme,'README missing model/time default: '+name)
-    for name,value in [('message_merge_window',2.0),('message_merge_max_wait',10.0),('message_pause_timeout',120.0)]:
+    for name,value in [('message_merge_window',4.0),('message_merge_max_wait',10.0),('message_pause_timeout',120.0)]:
         check(bool(re.search(r'\b'+name+r': float = '+str(value),source)),'default waiting configuration changed: '+name)
     for name in ['Windows','macOS','Linux','user-data','XDG_DATA_HOME','LOCALAPPDATA']:
         check(name in readme and name in desktop,'platform data paths incomplete: '+name)

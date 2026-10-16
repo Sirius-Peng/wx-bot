@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import shutil
 import json
 import logging
 import os
@@ -13,7 +14,6 @@ import time
 import uuid
 
 log = logging.getLogger(__name__)
-EXPLICIT = re.compile(r"记住|记得|以后叫我|称呼我|我的名字|我叫|我是|我喜欢|我不喜欢|我住|生日")
 
 
 def error_summary(exc: BaseException) -> str:
@@ -25,7 +25,10 @@ def error_summary(exc: BaseException) -> str:
 
 class MemoryLearningQueue:
     MAX_ACTIVE = 2
-    IDLE_SECONDS = 2.0
+    IDLE_SECONDS = 120.0
+    COOLDOWN_SECONDS = 300.0
+    EPISODE_GAP = 1800.0
+    MIN_TURNS = 3
 
     def __init__(self, memory, path: Path):
         self.memory = memory
@@ -33,6 +36,9 @@ class MemoryLearningQueue:
         self.pending: dict[str, dict] = {}
         self.seen: list[str] = []
         self.contexts: list[str] = []
+        self.episodes: dict[str, dict] = {}
+        self.last_reflection: dict[str, float] = {}
+        self.recent_sources: dict[str, dict] = {}
         self.info = {"state": "idle", "attempts": 0, "completed": 0, "added": 0,
                      "empty": 0, "failures": 0, "last_error": "",
                      "last_success_at": 0.0, "last_elapsed_ms": 0.0}
@@ -43,9 +49,18 @@ class MemoryLearningQueue:
         self._closed = False
         if self.path.exists():
             raw = json.loads(self.path.read_text(encoding="utf-8"))
+            version = raw.get('version', 1)
+            if version < 2:
+                backup = self.path.with_name(self.path.stem + f'.v{version}-backup.json')
+                if not backup.exists():
+                    shutil.copy2(self.path, backup)
+                    os.chmod(backup, 0o600)
             self.pending = raw.get("pending") or {}
             self.seen = raw.get("seen") or []
             self.contexts = raw.get("contexts") or []
+            self.episodes = raw.get("episodes") or {}
+            self.last_reflection = raw.get("last_reflection") or {}
+            self.recent_sources = raw.get("recent_sources") or {}
             self.info.update(raw.get("info") or {})
             self.info["state"] = "queued" if self.pending else "idle"
 
@@ -54,11 +69,13 @@ class MemoryLearningQueue:
         fd, temp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as file:
-                json.dump({"version": 1, "pending": self.pending, "seen": self.seen[-5000:],
-                           "contexts": self.contexts[-5000:], "info": self.info}, file,
+                json.dump({"version": 2, "pending": self.pending, "seen": self.seen[-5000:],
+                           "contexts": self.contexts[-5000:], "episodes":self.episodes,
+                           "last_reflection":self.last_reflection, "recent_sources":self.recent_sources, "info": self.info}, file,
                           ensure_ascii=False)
                 file.flush()
                 os.fsync(file.fileno())
+            os.chmod(temp, 0o600)
             os.replace(temp, self.path)
         finally:
             Path(temp).unlink(missing_ok=True)
@@ -89,7 +106,8 @@ class MemoryLearningQueue:
                 "model": getattr(primary, "model", ""), "active": len(self._jobs),
                 "pending_batches": len(self.pending),
                 "pending_turns": sum(len(p["turns"]) for p in self.pending.values()),
-                "interval": max(1, int(getattr(self.memory, "extract_interval", 3))),
+                "interval": max(self.MIN_TURNS, int(getattr(self.memory, "extract_interval", 3))),
+                "reflection_cooldown_seconds": self.COOLDOWN_SECONDS,
                 "idle_flush_seconds": self.IDLE_SECONDS}
 
     def start(self) -> None:
@@ -111,40 +129,76 @@ class MemoryLearningQueue:
             self.info["state"] = "queued"
             self._save()  # Pending source turns survive stop/restart, not just RAM tasks.
 
-    async def enqueue(self, msg, reply: str) -> None:
-        if not self.memory.enabled or not msg.content.strip():
+    @staticmethod
+    def meaningful(text):
+        text = re.sub(r'[^\w\u4e00-\u9fff]+', '', text).lower()
+        return bool(text) and text not in {'好','好的','嗯','嗯嗯','哦','噢','ok','okay','收到','谢谢','谢了','哈哈','哈哈哈','行','对','是的','晚安','再见','拜拜'}
+
+    def _eligible(self, job):
+        return len(job['turns']) >= max(self.MIN_TURNS, int(getattr(self.memory, 'extract_interval', 3)))
+
+    def _person(self, job):
+        if hasattr(self.memory, 'identity_key'):
+            return self.memory.identity_key(job.get('platform', ''), job['user_id'])
+        return job.get('identity', job['user_id'])
+
+    def _last_reflection(self, job):
+        person = self._person(job)
+        values = [self.last_reflection.get(person, 0), self.last_reflection.get(job.get('identity', ''), 0)]
+        if hasattr(self.memory, '_accounts'):
+            values += [self.last_reflection.get(a['platform']+':'+a['owner_id'], 0)
+                       for a in self.memory._accounts(job.get('platform', ''), job['user_id'])]
+        return max(values)
+
+    async def enqueue(self, msg, reply: str = '') -> None:
+        if not self.memory.enabled or not self.meaningful(msg.content):
             return
-        key = f"{msg.platform}:{msg.chat_type}:{msg.chat_id}:{msg.sender_id}"
-        message_id = str(msg.msg_id) if msg.msg_id else uuid.uuid4().hex
-        event = hashlib.sha256(f"{key}:{message_id}".encode()).hexdigest()
-        if event in self.seen:
+        identity = self.memory.identity_key(msg.platform, msg.sender_id) if hasattr(self.memory, 'identity_key') else f'{msg.platform}:{msg.sender_id}'
+        key = f'{identity}:{msg.chat_type}:{msg.chat_id}' if msg.is_group else identity
+        envelopes = msg.batch_messages or [dict(msg_id=msg.msg_id)]
+        event_ids = [hashlib.sha256(f'{msg.platform}:{msg.chat_type}:{msg.chat_id}:{msg.sender_id}:{e.get("msg_id", msg.msg_id)}'.encode()).hexdigest() for e in envelopes]
+        if all(event in self.seen for event in event_ids):
             return
+        if hasattr(self.memory, 'is_suppressed') and self.memory.is_suppressed(msg.platform, msg.sender_id, msg.content):
+            return
+        if hasattr(self.memory, 'observe_correction'): self.memory.observe_correction(msg)
+        if hasattr(self.memory, 'observe_resolution'): self.memory.observe_resolution(msg)
         now = time.time()
-        first = key not in self.contexts
-        if first:
-            self.contexts.append(key)
-        job = self.pending.setdefault(key, {
-            "user_id": msg.sender_id, "user_name": msg.sender_name or msg.sender_id,
-            "chat_id": msg.chat_id, "chat_type": msg.chat_type, "platform":msg.platform,"turns": [],
-            "due_at": now + self.IDLE_SECONDS, "retry_at": 0.0, "failures": 0,
-        })
-        # Extract only this user's actual incoming text, never persona examples/replies.
         source_time = msg.timestamp / 1000 if isinstance(msg.timestamp, (int, float)) else 0
         observed_at = source_time if 1_000_000_000 <= source_time <= now + 300 else now
-        job["turns"].append({"id": event, "user": msg.render(), "assistant": "", "observed_at": observed_at})
-        self.seen.append(event)
+        fingerprint = hashlib.sha256(f'{identity}:{re.sub(chr(10), "", msg.content).strip()}'.encode()).hexdigest()
+        last = self.recent_sources.get(fingerprint, {})
+        # Copied cross-channel messages are one evidence, not independent support.
+        if last and last.get('platform') != msg.platform and abs(observed_at - last['at']) <= 10:
+            self.seen.extend(event_ids)
+            self._save()
+            return
+        self.recent_sources = {k:v for k,v in self.recent_sources.items() if now-v.get('at', 0) < 86400}
+        self.recent_sources[fingerprint] = {'at': observed_at, 'platform':msg.platform}
+        episode = self.episodes.get(identity)
+        if not episode or observed_at - episode['last_at'] >= self.EPISODE_GAP:
+            episode = {'id':uuid.uuid4().hex, 'last_at':observed_at}
+            self.episodes[identity] = episode
+        episode['last_at'] = max(episode['last_at'], observed_at)
+        job = self.pending.setdefault(key, {
+            'identity':identity, 'user_id':msg.sender_id, 'user_name':msg.sender_name or msg.sender_id,
+            'chat_id':msg.chat_id, 'chat_type':msg.chat_type, 'platform':msg.platform, 'turns':[],
+            'due_at':now + self.IDLE_SECONDS, 'retry_at':0.0, 'failures':0})
+        event = hashlib.sha256('|'.join(event_ids).encode()).hexdigest()
+        job['turns'].append({'id':event, 'source_ids':event_ids, 'user':msg.render(), 'assistant':'',
+                             'observed_at':observed_at, 'episode_id':episode['id']})
+        self.seen.extend(event_ids)
         self.seen = self.seen[-5000:]
-        interval = max(1, int(getattr(self.memory, "extract_interval", 3)))
-        if first or EXPLICIT.search(msg.content) or len(job["turns"]) >= interval:
-            job["due_at"] = now
-        else:
-            job["due_at"] = min(job["due_at"], now + self.IDLE_SECONDS)
-        self.info["state"] = "queued"
+        # Every meaningful turn restarts the idle window; neither a first message
+        # nor "remember this" jumps ahead of subconscious/background formation.
+        job['due_at'] = max(now + self.IDLE_SECONDS,
+                            self._last_reflection(job) + self.COOLDOWN_SECONDS)
+        self.info['state'] = 'queued'
         try:
             self._save()
         except Exception as exc:
-            self.info.update(state="save_failed", last_error=error_summary(exc))
-            log.warning("自动记忆排队落盘失败：%s", error_summary(exc))
+            self.info.update(state='save_failed', last_error=error_summary(exc))
+            log.warning('自动记忆排队落盘失败：%s', error_summary(exc))
             raise
         self.start()
 
@@ -152,8 +206,9 @@ class MemoryLearningQueue:
         if not self.memory.enabled:
             return 0
         for job in self.pending.values():
-            job["due_at"] = 0.0
-            job["retry_at"] = 0.0
+            if self._eligible(job):
+                job["due_at"] = max(0.0, self._last_reflection(job) + self.COOLDOWN_SECONDS)
+                job["retry_at"] = 0.0
         if self.pending:
             self.info["state"] = "queued"
         self._save()
@@ -180,8 +235,10 @@ class MemoryLearningQueue:
             return
         self.retry_now()
         async def waiting():
-            while self.pending or self._jobs:
-                if self.info["state"] == "retry_wait" and not self._jobs:
+            while any(self._eligible(j) for j in self.pending.values()) or self._jobs:
+                if not self._jobs and (self.info['state'] == 'retry_wait' or
+                    all(self._last_reflection(j) + self.COOLDOWN_SECONDS > time.time()
+                        for j in self.pending.values() if self._eligible(j))):
                     return
                 await asyncio.sleep(0.01)
         await asyncio.wait_for(waiting(), timeout)
@@ -200,11 +257,13 @@ class MemoryLearningQueue:
                     for key, job in list(self.pending.items()):
                         if len(self._jobs) >= self.MAX_ACTIVE:
                             break
-                        due = max(job["due_at"], job["retry_at"])
-                        if key not in self._jobs and due <= now:
+                        due = max(job['due_at'], job['retry_at'], self._last_reflection(job) + self.COOLDOWN_SECONDS)
+                        active_people = {self._person(self.pending[k]) for k in self._jobs if k in self.pending}
+                        if (key not in self._jobs and self._eligible(job) and due <= now
+                                and self._person(job) not in active_people):
                             self._jobs[key] = asyncio.create_task(self._extract(key, job))
-                due_times = [max(.01, max(j["due_at"], j["retry_at"]) - time.time())
-                             for k, j in self.pending.items() if k not in self._jobs]
+                due_times = [max(.01, max(j["due_at"], j["retry_at"], self._last_reflection(j) + self.COOLDOWN_SECONDS) - time.time())
+                             for k, j in self.pending.items() if k not in self._jobs and self._eligible(j)]
                 delay = (min([2.0, *due_times])
                          if self.memory.enabled and self.configured() and len(self._jobs) < self.MAX_ACTIVE
                          else 2.0)
@@ -226,6 +285,7 @@ class MemoryLearningQueue:
                 chat_id=job["chat_id"], chat_type=job["chat_type"],
                 user_id=job["user_id"], user_name=job["user_name"], history=turns,
                 **({"platform":job.get("platform",key.split(":",1)[0])} if getattr(self.memory,"supports_platform_scope",False) else {})), self.timeout)
+            self.last_reflection[self._person(job)] = time.time()
             current = self.pending.get(key)
             before_ack = copy.deepcopy(current)
             if current is not None:
@@ -236,7 +296,7 @@ class MemoryLearningQueue:
                 if not current["turns"]:
                     self.pending.pop(key, None)
                 else:
-                    current["due_at"] = min(current["due_at"], time.time() + self.IDLE_SECONDS)
+                    current["due_at"] = max(current["due_at"], time.time() + self.IDLE_SECONDS, time.time() + self.COOLDOWN_SECONDS)
             self.info.update(state="learned" if learned else "empty", last_error="",
                              completed=self.info["completed"] + 1,
                              added=self.info["added"] + len(learned),

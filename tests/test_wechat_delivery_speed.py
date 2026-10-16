@@ -62,7 +62,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
   async def reject(e,b):bodies.append(b);return {'ret':-2}
   self.a._post=reject;model=Model();o=orch(self.a,model)
   with self.assertRaises(DeliveryError):await o.handle(msg())
-  self.assertEqual(model.calls,1);self.assertEqual(len(bodies),1);self.assertEqual(bodies[0]['msg']['item_list'][0]['text_item']['text'],'完整回答。保留结尾。');self.assertEqual(await o.store.get_recent(msg().ctx_key),[])
+  self.assertEqual(model.calls,1);self.assertEqual(len(bodies),1);self.assertEqual(bodies[0]['msg']['item_list'][0]['text_item']['text'],'完整回答。保留结尾。');history=await o.store.get_recent(msg().ctx_key);self.assertEqual(len(history),1);self.assertEqual(history[0]['user'],'你好');self.assertEqual(history[0]['assistant'],'')
  async def test_retry_reuses_draft_and_client_id(self):
   bodies=[]
   async def post(e,b):bodies.append(b);return {'ret':-2} if len(bodies)==1 else {'ret':0}
@@ -231,8 +231,8 @@ class SpeedDefaultsTests(unittest.TestCase):
  def test_no_human_delay(self):self.assertEqual(HumanLikeSender.human_delay('长'*1000),0)
  def test_ilink_separate_rate(self):
   s=HumanLikeSender(SimpleNamespace(platform='ilink'));self.assertEqual(s.global_bucket.rate,1);self.assertEqual(s.chat_buckets['u'].rate,0.5);self.assertEqual(s.chat_buckets['u'].capacity,2)
- def test_qq_old_rate_preserved(self):
-  s=HumanLikeSender(SimpleNamespace(platform='onebot'));self.assertEqual(s.chat_buckets['u'].rate,2/60)
+ def test_qq_private_rate_and_group_boundaries(self):
+  s=HumanLikeSender(SimpleNamespace(platform='onebot'));self.assertEqual(s.chat_buckets['p_u'].rate,12/60);self.assertEqual(s.chat_buckets['p_u'].capacity,2);self.assertEqual(s.chat_buckets['g_1'].rate,2/60);self.assertEqual(s.chat_buckets['g_1'].capacity,1);self.assertEqual(s.global_bucket.rate,20/60)
  def test_sdk_retries_disabled(self):
   gw=LLMGateway(ProviderCfg('primary','http://fake','fake','fake'))
   with patch('src.core.llm.AsyncOpenAI',lambda **kw:kw):self.assertEqual(gw._client(gw.primary)['max_retries'],0)

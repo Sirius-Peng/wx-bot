@@ -404,6 +404,32 @@ async def api_memory_stats() -> dict:
     return runtime.memory_stats()
 
 
+@app.get('/api/memory/graph')
+async def api_memory_graph(response:Response,platform:str='',person:str='',phase:str='',keyword:str='',include_history:bool=False,limit:int=160):
+    response.headers['Cache-Control']='no-store'
+    if (platform not in ('','ilink','onebot') or phase not in ('','candidate','stable','temporary','dormant','pinned')
+        or len(person)>100 or len(keyword)>120 or not 20<=limit<=300):
+        raise HTTPException(400,'记忆拓扑筛选参数无效')
+    try:
+        return await asyncio.to_thread(runtime.memory_graph,platform=platform,person=person,phase=phase,
+                                       keyword=keyword,include_history=include_history,limit=limit)
+    except (OSError,ValueError,TypeError,KeyError):
+        log.warning('Memory topology snapshot unavailable')
+        raise HTTPException(503,'记忆拓扑暂未读取完成，请检查本地数据文件后刷新')
+
+
+@app.get("/api/memory/forgotten")
+async def api_memory_forgotten() -> dict:
+    return {'items': runtime._ensure_memory().suppressions}
+
+
+@app.delete("/api/memory/forgotten/{marker_id}")
+async def api_memory_allow_relearning(marker_id: str) -> dict:
+    if not runtime.memory_allow_relearning(marker_id):
+        raise HTTPException(404, '遗忘标记不存在')
+    return {'ok': True, 'id': marker_id, 'message': '已允许今后重新学习，未恢复旧记忆'}
+
+
 @app.post("/api/memory/learning/retry")
 async def api_memory_retry() -> dict:
     return runtime.memory_retry_learning()
@@ -433,6 +459,16 @@ async def api_memory_add(request: Request) -> dict:
         category=b.get("category", "fact"), content=b.get("content", ""),
         keywords=b.get("keywords") or [], platform=b.get("platform", ""),
     )
+
+
+@app.patch("/api/memory/{item_id}")
+async def api_memory_pin(item_id: str, request: Request) -> dict:
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) != {'pinned'} or not isinstance(body['pinned'], bool):
+        raise HTTPException(400, '固定设置需要 pinned 布尔值')
+    if not runtime._ensure_memory().set_pinned(item_id, body['pinned']):
+        raise HTTPException(404, '记忆不存在')
+    return {'ok': True, 'id': item_id, 'pinned': body['pinned']}
 
 
 @app.delete("/api/memory/{item_id}")
@@ -638,7 +674,7 @@ CONFIG_SECTIONS={
  'search':('llm',{'search_enabled','search_key','search_model','context_timezone'}),
  'persona':('bot',{'name','persona','persona_profile','persona_relationship'}),
  'proactive':('bot',{'proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end'}),
- 'reply':('bot',{'group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
+ 'reply':('bot',{'reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
  'memory':('bot',{'memory_enabled','memory_inject','memory_extract_interval'}),
  'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror'})}
 
@@ -663,6 +699,7 @@ async def api_config_section(section:str,request:Request):
         if key=='context_timezone':
             from .core.reality import is_valid_timezone
             if not is_valid_timezone(value):raise HTTPException(400,'请填写有效的 IANA 时区，如 Asia/Shanghai')
+        if key=='reply_mode' and value not in ('natural','always'):raise HTTPException(400,'回复方式需要 natural 或 always')
         if key=='search_model' and not value:raise HTTPException(400,'搜索模型名称不能为空')
         if key=='napcat_image_mirror':
             import re
@@ -699,6 +736,8 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     inc_bot = incoming.get('bot') or {}
     from .core.proactive import PROACTIVE_FIELDS
     for field in PROACTIVE_FIELDS:
+        if field not in inc_bot: setattr(cfg.bot, field, getattr(old.bot, field))
+    for field in ('reply_mode', 'late_reply_enabled'):
         if field not in inc_bot: setattr(cfg.bot, field, getattr(old.bot, field))
     inc_llm = incoming.get("llm") or {}
     inc_ad = incoming.get("adapter") or {}

@@ -44,6 +44,22 @@ class ImportTests(unittest.TestCase):
         preview=inspect_import(str(self.old), self.new)
         return prepare_import(str(self.old), self.new, preview['fingerprint'])
     def apply(self):return initialize_storage(self.new, migrate=False)
+    def test_import_unions_forget_barriers_and_invalidates_old_summaries(self):
+        current = {'id':'current-forget', 'accounts':[{'platform':'ilink','owner_id':'fixture-user'}],
+                   'content':'old persona memory', 'fact_key':'', 'scope':'user'}
+        old = {'id':'old-forget', 'accounts':[{'platform':'onebot','owner_id':'123'}], 'content':'旧资料'}
+        _atomic_json(self.new/'memory-forgotten.json', {'version':1, 'markers':[current]})
+        _atomic_json(self.old/'memory-forgotten.json', {'version':1, 'markers':[old]})
+        _atomic_json(self.old/'context-ilink.json', {'version':2, 'summaries':{'ctx':'old persona memory'}, 'contexts':{}})
+        self.queue();self.apply()
+        markers=json.loads((self.new/'memory-forgotten.json').read_text(encoding='utf-8'))['markers']
+        self.assertEqual({m['id'] for m in markers},{'current-forget','old-forget'})
+        context=json.loads((self.new/'context-ilink.json').read_text(encoding='utf-8'));self.assertEqual(context['summaries'],{})
+        from src.core.memory import PersonaMemory
+        memory=PersonaMemory(self.new/'memory.json')
+        self.assertTrue(memory.is_suppressed('ilink','fixture-user','old persona memory'))
+        self.assertEqual(memory.recall('fixture-user','ctx','old persona memory',platform='ilink'),[])
+
     def test_internal_controls_case_alias_not_imported(self):
         (self.old/'.STORAGE-IMPORT.pending.json').write_text('internal control')
         self.queue();self.apply();self.assertFalse((self.new/'.STORAGE-IMPORT.pending.json').exists())

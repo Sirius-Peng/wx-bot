@@ -20,6 +20,7 @@ from .core.llm import LLMGateway, JudgeLLM, ProviderCfg, is_transient_llm_error
 from .core.sender import HumanLikeSender, DeliveryError
 from .core.trigger import TriggerRouter
 from .core.types import WxMessage
+from .core.turn_coordinator import TurnCoordinator, ConversationStateError, source_id
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ log = logging.getLogger(__name__)
 class Orchestrator:
     def __init__(self, adapter, store, llm: LLMGateway, judge: JudgeLLM,
                  ctx: ContextManager, router: TriggerRouter, sender: HumanLikeSender,
-                 memory=None, group_reply_at_sender: bool = True, typing_indicator: bool = True):
+                 memory=None, group_reply_at_sender: bool = True, typing_indicator: bool = True,
+                 coordinator=None, reply_decider=None, late_reply_enabled=True):
         self.adapter = adapter
         self.store = store
         self.llm = llm
@@ -40,6 +42,12 @@ class Orchestrator:
         # 群聊回复时是否 @ 提问者（界面上可关，配置必须真正生效）
         self.group_reply_at_sender = bool(group_reply_at_sender)
         self.typing_indicator = bool(typing_indicator)
+        self.coordinator = coordinator or TurnCoordinator()
+        self.reply_decider = reply_decider
+        self.late_reply_enabled = late_reply_enabled
+        from contextvars import ContextVar
+        self._active_turn = ContextVar('active_turn', default=None)
+        self._memory_snapshot = ContextVar('memory_snapshot', default=None)
         self._locks: dict[str, asyncio.Lock] = {}
         self._turn_counter: dict[str, int] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -72,7 +80,12 @@ class Orchestrator:
 
     async def _handle(self, msg: WxMessage) -> None:
         # ① 幂等去重：网关回调会重试，必须挡掉重复消息
-        if not await self.store.mark_seen(msg.msg_id):
+        originals=members(msg)
+        seen_ids=[]
+        for original in originals:
+            sid=source_id(original)
+            if await self.store.mark_seen(sid):seen_ids.append(sid)
+        if not seen_ids:
             log.debug("duplicate msg %s, skip", msg.msg_id)
             return
 
@@ -86,24 +99,75 @@ class Orchestrator:
                     await self._process(msg)
         except BaseException as exc:
             # 包括等待同会话锁期间的取消；不能把未处理消息留在幂等集合里。
-            await self.store.forget_seen(msg.msg_id)
+            for sid in seen_ids:await self.store.forget_seen(sid)
             if not isinstance(exc,(ConversationChanged,asyncio.CancelledError)):log.exception("process failed for msg %s", msg.msg_id)
             raise
 
     async def _process(self, msg: WxMessage) -> None:
+        tid=self.coordinator.begin(msg)
+        marker=self._active_turn.set(tid)
+        memory_marker=self._memory_snapshot.set(self._memory_revision(msg))
+        self.coordinator.enter(msg)
+        try:
+            await self._process_turn(msg,tid)
+        except ConversationChanged:
+            self.coordinator.finish(tid,'superseded','新来话使未提交旧稿失效')
+            raise
+        except asyncio.CancelledError:
+            # A collector will recover unfinished raw inbox work after restart.
+            raise
+        except DeliveryError:
+            self.coordinator.finish(tid,'uncertain','回复投递故障，请核查原投递状态')
+            raise
+        finally:
+            self.coordinator.leave(msg)
+            self._active_turn.reset(marker)
+            self._memory_snapshot.reset(memory_marker)
+
+    async def _process_turn(self,msg,tid):
+        prior=self.coordinator.turns.get(tid,{})
+        replay=(self.adapter.get_reply_draft(msg) if hasattr(self.adapter,'get_reply_draft') else None)
+        if prior.get('state')=='accepted':
+            if prior.get('draft'):await self.ctx.append(msg,prior['draft'])
+            return
+        if prior.get('state') in ('sending','uncertain') and replay is None:
+            # OneBot has no idempotent client token: an unknown network outcome
+            # is not permission to regenerate and submit a different answer.
+            self.coordinator.finish(tid,'uncertain','原回复提交结果待核查，保留经历，不自动重复发送')
+            return
+        if self.memory and hasattr(self.memory,'is_suppressed') and self.memory.is_suppressed(msg.platform,msg.sender_id,msg.content):
+            self.coordinator.finish(tid,'context_only','明确遗忘屏蔽了旧来话，不重新学习或补回')
+            return
+        # Admission is durable even if the character chooses to stay quiet.
+        if hasattr(self.ctx,'accept_user'):await self.ctx.accept_user(msg)
+        if self.memory is not None and hasattr(self.memory,'learner'):
+            await self._maybe_learn(msg,'')
         decision = await self.router.decide(msg)
         log.info("trigger layer=%s reply=%s reason=%s",
                  decision.layer, decision.should_reply, decision.reason)
 
         if not decision.should_reply:
+            self.coordinator.finish(tid,'context_only',decision.reason)
             for original in members(msg):await self.store.archive(original, direction="in")
             return
+
+        if self.reply_decider is not None and replay is None:
+            natural=await self._current_work(msg,self.reply_decider.decide(msg,await self.store.get_recent(msg.ctx_key)))
+            self.coordinator.decide(tid,natural,late_enabled=self.late_reply_enabled)
+            # Feed the existing message-log/UI hooks without exposing control fields in chat.
+            decision.should_reply=natural.action=='reply'
+            decision.reason=natural.reason
+            if hasattr(self,'observe_decision'):self.observe_decision(decision)
+            if natural.action!='reply':
+                for original in members(msg):await self.store.archive(original,direction='in')
+                return
 
         started=asyncio.Event()
         typing_task=(asyncio.create_task(self._typing_signal(msg,started))
                      if self.typing_indicator and hasattr(self.adapter,'send_typing') else None)
         try:
             await self._reply(msg)
+            self.coordinator.finish(tid)
         finally:
             if typing_task is not None:
                 typing_task.cancel();await asyncio.gather(typing_task,return_exceptions=True)
@@ -111,10 +175,6 @@ class Orchestrator:
                 if started.is_set() or needs_cleanup:await self._typing_once(msg,False)
 
     async def _reply(self,msg):
-        # 用户事实在收件时就排队，回复/投递失败不应阻止知识库积累。
-        if self.memory is not None and hasattr(self.memory, "learner"):
-            for original in members(msg):await self._maybe_learn(original, "")
-
         # 重试/重启复用已生成的完整回复，不能重新生成不同文本再当作同一次投递。
         replay = (self.adapter.get_reply_draft(msg)
                   if hasattr(self.adapter, "get_reply_draft") else None)
@@ -157,17 +217,24 @@ class Orchestrator:
 
         # 流式生成，完整收集后一次发送，避免一个回复被拆成多个聊天气泡
         try:
+            send_options={}
+            if isinstance(self.sender,HumanLikeSender) and replay is None:
+                tid=self._active_turn.get()
+                send_options={'check_current':lambda:self._check_current(msg),
+                              'on_submit_text':lambda text:self.coordinator.reserve(tid,kind='reply',text=text) if tid else None}
             if image_error:
                 await self._media_failure_grace(msg)
                 reply = "这几张图我这次没看清。把最想让我看的那张单独发来，好吗？"
-                await self.sender.send(msg.chat_id,reply,at=reply_at)
+                await self.sender.send(msg.chat_id,reply,at=reply_at,**send_options)
             elif replay is not None:
                 reply = replay
                 await self.sender.send(msg.chat_id, reply, at=reply_at)
             else:
                 stream = self._guarded_stream(msg,self.llm.stream(messages, chat_id=msg.chat_id))
-                reply = await self.sender.stream_send(msg.chat_id, stream, at=reply_at)
+                reply = await self.sender.stream_send(msg.chat_id, stream, at=reply_at,**send_options)
         except ConversationChanged:
+            raise
+        except ConversationStateError:
             raise
         except DeliveryError:
             # 发送故障不是LLM故障：由持久收件箱重试，不覆盖原答案、不额外发兜底。
@@ -183,13 +250,14 @@ class Orchestrator:
             if msg.images:await self._media_failure_grace(msg)
             reply = ("这几张图我这次没看清。你最想让我看哪一处？也可以把那张单独发来。"
                      if msg.images else "稍等一下，我这边有点忙不过来，你再说一遍？")
-            await self.sender.send(msg.chat_id, reply, at=reply_at)
+            await self.sender.send(msg.chat_id, reply, at=reply_at,**send_options)
 
-        # 落库 + 更新上下文
+        tid=self._active_turn.get()
+        if tid:self.coordinator.finish(tid)
+        # 落库 + 更新上下文。已获接口接受后，即使历史落盘失败也不重复提交。
         await self.ctx.append(msg, reply)
         for original in members(msg):await self.store.archive(original, direction="in")
         await self.store.archive_reply(msg, reply)
-        for original in members(msg)[1:]:await self.store.mark_seen(original.msg_id)
 
         # 人格知识库：按间隔抽取记忆（每轮都抽太费 token）
         if self.memory is None or not hasattr(self.memory, "learner"):
@@ -224,13 +292,25 @@ class Orchestrator:
         task=asyncio.ensure_future(work)
         try:
             while not task.done():
-                if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
+                self._check_current(msg)
                 await asyncio.wait({task},timeout=.05)
-            if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
+            self._check_current(msg)
             return task.result()
         finally:
             if not task.done():task.cancel()
             await asyncio.gather(task,return_exceptions=True)
+
+    def _check_current(self,msg):
+        tid=self._active_turn.get()
+        if tid:self.coordinator.check(tid)
+        snapshot=self._memory_snapshot.get()
+        if snapshot is not None and snapshot!=self._memory_revision(msg):raise ConversationChanged('Forgotten context invalidated unsent draft')
+        if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
+
+    def _memory_revision(self,msg):
+        if not self.memory or not hasattr(self.memory,'identity_key'):return None
+        identity=self.memory.identity_key(msg.platform,msg.sender_id)
+        return (identity,getattr(self.memory,'_generation',0),getattr(self.memory,'_revisions',{}).get(identity,0))
 
     async def _typing_once(self,msg,on):
         if not hasattr(self.adapter,'send_typing'):return False
@@ -250,9 +330,9 @@ class Orchestrator:
             while True:
                 pending=asyncio.create_task(anext(stream))
                 while not pending.done():
-                    if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
+                    self._check_current(msg)
                     await asyncio.wait({pending},timeout=.05)
-                if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
+                self._check_current(msg)
                 try:yield pending.result()
                 except StopAsyncIteration:return
                 pending=None

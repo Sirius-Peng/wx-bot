@@ -52,9 +52,9 @@ import httpx
 
 from ..core.http import explain_error, make_client
 from ..core.llm import is_transient_llm_error
-from ..core.turn_taking import plan_wait,ready
+from ..core.turn_taking import SendingCadence,plan_wait,ready
 from ..core.types import WxMessage
-from ..core.conversation import ConversationChanged,merge_messages,MAX_BATCH
+from ..core.conversation import ConversationChanged,merge_messages
 from .base import BaseAdapter, MessageHandler
 
 log = logging.getLogger(__name__)
@@ -145,6 +145,7 @@ class ILinkAdapter(BaseAdapter):
                           "last_errcode": None, "last_send_ms": 0, "network_retries": 0, "last_model_error_type": ""}
         self._handler: Optional[MessageHandler] = None
         self.humanized_wait=True;self.pause_timeout=120
+        self._cadence=SendingCadence()
         self._collecting=set();self._processing_capacity=asyncio.Semaphore(MAX_ACTIVE_CHATS)
         self._typing_tickets={}
         self._typing_active={}
@@ -323,6 +324,7 @@ class ILinkAdapter(BaseAdapter):
                     msg = self._normalize(raw)
                     if msg is not None:
                         self.remember_context(msg)
+                        self._cadence.record(msg.ctx_key+':'+msg.sender_id,key,raw['_wxbot_received_at'])
                         self.note_activity(msg)
             if resp.get("get_updates_buf"):
                 self._get_updates_buf = resp["get_updates_buf"]
@@ -380,17 +382,22 @@ class ILinkAdapter(BaseAdapter):
             candidates=self._peer_pending(raw)
             for r in candidates:r.setdefault('_wxbot_received_at',time.time())
             now=time.time()
-            timed=[(m,r['_wxbot_received_at']) for r in candidates if (m:=self._normalize(r)) is not None]
+            timed=[]
+            for r in candidates:
+                m=self._normalize(r)
+                if m is None:continue
+                cadence_key=m.ctx_key+':'+m.sender_id
+                self._cadence.record(cadence_key,self._raw_key(r),r['_wxbot_received_at'])
+                timed.append((m,r['_wxbot_received_at']))
             if not timed:break
-            plan=plan_wait(timed,self.message_merge_window,self.message_merge_max_wait,self.humanized_wait,self.pause_timeout)
+            plan=plan_wait(timed,self.message_merge_window,self.message_merge_max_wait,self.humanized_wait,self.pause_timeout,cadence=self._cadence.gaps(cadence_key))
             is_ready,force=ready(plan,now,timed[-1][1],len(timed))
             if is_ready:break
             await asyncio.sleep(min(.05,self.message_merge_window))
-        force=locals().get('force',False)
-        selected=candidates[:MAX_BATCH]
+        selected=list(candidates)
         raw['_wxbot_batch_keys']=[self._raw_key(r) for r in selected]
-        raw['_wxbot_batch_known']=[self._raw_key(r) for r in candidates]
-        raw['_wxbot_batch_force']=force
+        raw['_wxbot_batch_known']=[self._raw_key(r) for r in selected]
+        raw['_wxbot_batch_force']=False
         try:self._save_cursor()
         except BaseException:
             for key in ('_wxbot_batch_keys','_wxbot_batch_known','_wxbot_batch_force'):raw.pop(key,None)
@@ -399,16 +406,19 @@ class ILinkAdapter(BaseAdapter):
 
     def check_reply_current(self,msg,*,after_failure=False):
         if not self.message_merge_window:return
+        # Once submission has started, retries must keep the original body, token
+        # and client_id even if the user continues speaking in the meantime.
+        if self._reply_key(msg) in self._outbox:return
         raw=next((r for r in self._pending if str(r.get('message_id') or r.get('client_id') or self._raw_key(r))==msg.msg_id
                   and r.get('from_user_id')==msg.sender_id),None)
-        if raw and raw.get('_wxbot_batch_keys') and (after_failure or not raw.get('_wxbot_batch_force')):
-            known=set(raw['_wxbot_batch_known'])
+        if raw and raw.get('_wxbot_batch_keys'):
+            known=set(raw.get('_wxbot_batch_known',raw['_wxbot_batch_keys']))
             if any(self._raw_key(r) not in known for r in self._peer_pending(raw)):
                 raise ConversationChanged('New conversation input')
 
     def check_failed_reply_current(self,msg):
-        # A max-wait batch may finish a useful answer, but an error placeholder
-        # must never jump ahead of newer media that can make the turn succeed.
+        # Failure placeholders and good replies obey the same revision barrier;
+        # max-wait metadata from an older installation grants no exception.
         self.check_reply_current(msg,after_failure=True)
 
     async def _handle_raw(self, raw: dict) -> bool:
@@ -792,6 +802,7 @@ class ILinkAdapter(BaseAdapter):
                 checkpoint = json.loads(self._cursor_file.read_text(encoding="utf-8"))
                 self._get_updates_buf = checkpoint.get("get_updates_buf", "")
                 self._pending = checkpoint.get("pending") or []
+                self._cadence=SendingCadence(checkpoint.get("cadence"))
             except json.JSONDecodeError:
                 pass
         outbox = self.state_dir / "outbox.json"
@@ -804,7 +815,7 @@ class ILinkAdapter(BaseAdapter):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"get_updates_buf": self._get_updates_buf,
-                           "pending": self._pending}, f, ensure_ascii=False)
+                           "pending": self._pending, "cadence":self._cadence.entries}, f, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self._cursor_file)

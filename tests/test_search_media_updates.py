@@ -180,15 +180,15 @@ class LateWechatMediaTests(unittest.IsolatedAsyncioTestCase):
  async def test_video_and_mixed_markers_wait_for_caption(self):
   from src.core.turn_taking import plan_wait
   a=msg([{}]);b=msg();b.msg_type='video';b.content='[视频]';b.content_parts=[{'type':'video','text':'[视频]'}]
-  for m in [a,b]:self.assertGreater(plan_wait([(m,0)],2,10).delay,3)
- async def test_force_only_allows_useful_reply_not_stale_failure(self):
+  for m in [a,b]:self.assertEqual(plan_wait([(m,0)],4,10).delay,6)
+ async def test_legacy_force_never_allows_a_stale_reply(self):
   from src.core.conversation import ConversationChanged
   with tempfile.TemporaryDirectory() as d:
    a=ILinkAdapter(d);a.configure_burst(.02,.02,human=False)
    raw={'message_type':1,'from_user_id':'u','message_id':'1','item_list':[],'_wxbot_batch_keys':['u:1'],'_wxbot_batch_known':['u:1'],'_wxbot_batch_force':True}
    a._pending=[raw,{'from_user_id':'u','message_id':'2'}];m=a._normalize(raw)
    try:
-    a.check_reply_current(m)
+    with self.assertRaises(ConversationChanged):a.check_reply_current(m)
     with self.assertRaises(ConversationChanged):a.check_failed_reply_current(m)
    finally:await a._client.aclose()
  async def test_wechat_late_video_regroups_without_error_then_second_reply(self):

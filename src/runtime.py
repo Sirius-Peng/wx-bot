@@ -56,6 +56,9 @@ from .core.trigger import TriggerRouter
 from .core.types import WxMessage
 from .orchestrator import Orchestrator
 from .core.conversation import ConversationChanged,members
+from .core.turn_coordinator import TurnCoordinator
+from .core.reply_decision import ReplyDecider,ReplyDecision
+from .core.sender import normalize_reply_text
 from .store_memory import MemoryStore
 
 log = logging.getLogger(__name__)
@@ -239,10 +242,14 @@ class BotRuntime:
         self._proactive_sending = ContextVar('proactive_sending', default=False)
 
         self.cfg: AppConfig = store.load()
+        self.conversations = TurnCoordinator(self.data_dir/'conversation-state.json',
+            identity=lambda platform,owner:self._ensure_memory().identity_key(platform,owner))
+        self._late_task = None
         self.proactive = ProactivePlanner(
             self.data_dir / 'proactive.json',
             lambda platform, owner: self._ensure_memory().identity_key(platform, owner),
             lambda: self.cfg, self._proactive_channel, self._proactive_generate, self._proactive_deliver)
+        self.proactive.external_busy = self.conversations.busy
 
         # 双通道（独立适配器 + 独立编排器，互不影响）
         self.wechat_adapter: Optional[BaseAdapter] = None
@@ -347,6 +354,7 @@ class BotRuntime:
         if any_ok:
             self.start_learning()
             self.proactive.start()
+            self._start_late_replies()
             errors = [r["message"] for r in results if not r["ok"]]
             self.last_error = "；".join(errors)
             self.started_at = self.started_at or time.time()
@@ -410,6 +418,10 @@ class BotRuntime:
             return await self._stop()
 
     async def _stop(self) -> dict:
+        if self._late_task:
+            self._late_task.cancel()
+            await asyncio.gather(self._late_task,return_exceptions=True)
+            self._late_task=None
         await self.proactive.close()
         await self._stop_ilink_poller()
         if self._qq_sync_task and not self._qq_sync_task.done():
@@ -464,6 +476,9 @@ class BotRuntime:
             orch.llm.web_search = configured_search(cfg.llm)
             orch.llm.vision=self._vision_provider(cfg)
             orch.typing_indicator=bool(cfg.bot.typing_indicator)
+            orch.late_reply_enabled=bool(cfg.bot.late_reply_enabled)
+            orch.reply_decider.mode=cfg.bot.reply_mode
+            orch.reply_decider.bot_name=cfg.bot.name
             orch.llm.primary = ProviderCfg(
                 "primary", cfg.llm.primary_base, cfg.llm.primary_key,
                 cfg.llm.primary_model)
@@ -489,6 +504,7 @@ class BotRuntime:
             "configured": bool(self.cfg.llm.primary_key),
             "stats": self.log.stats(),
             "bot": {"name": self.cfg.bot.name, "persona": self.cfg.bot.persona},
+            "conversation": self.conversations.status(),
         }
         for name, adapter in (("wechat", self.wechat_adapter),
                               ("qq", self.qq_adapter)):
@@ -499,6 +515,12 @@ class BotRuntime:
         st["ilink_polling"] = bool(self._ilink_task and not self._ilink_task.done())
         if self.wechat_adapter is not None and hasattr(self.wechat_adapter, "delivery_status"):
             st["wechat_delivery"] = self.wechat_adapter.delivery_status()
+        collecting=0
+        if self.wechat_adapter is not None:
+            collecting+=len(getattr(self.wechat_adapter,'_collecting',()))
+        if self.qq_adapter is not None:
+            collecting+=sum(bool(v) for k,v in self.qq_adapter._bursts.pending.items() if k not in self.qq_adapter._bursts.active)
+        st['conversation']['waiting']=max(st['conversation']['waiting'],collecting)
         return st
 
     # ── 构建 ──────────────────────────────────────────────────
@@ -554,7 +576,7 @@ class BotRuntime:
     def _build_orchestrator(self, adapter: BaseAdapter,
                             platform: str = "") -> Orchestrator:
         cfg = self.cfg
-        # 判定模型只用于知识库抽取，不再做"该不该插话"的判定
+        # Ambiguous complete turns alone use this provider; clear requests stay local.
         judge_gw = LLMGateway(self._judge_provider(cfg))
         chat_gw = LLMGateway(
             primary=ProviderCfg(
@@ -573,6 +595,7 @@ class BotRuntime:
         store = MemoryStore(path=self.data_dir/f"context-{platform or adapter.platform}.json")
 
         memory = self._ensure_memory()
+        store.sync_suppressions(getattr(memory,'suppressions',[]))
         memory.enabled = bool(cfg.bot.memory_enabled)
         memory.extract_interval = max(1, int(cfg.bot.memory_extract_interval or 3))
         memory.inject = bool(cfg.bot.memory_inject)
@@ -590,6 +613,9 @@ class BotRuntime:
             sender=HumanLikeSender(adapter), memory=memory,
             group_reply_at_sender=bool(cfg.bot.group_reply_at_sender),
             typing_indicator=bool(cfg.bot.typing_indicator),
+            coordinator=self.conversations,
+            reply_decider=ReplyDecider(judge_gw,mode=cfg.bot.reply_mode,bot_name=cfg.bot.name),
+            late_reply_enabled=bool(cfg.bot.late_reply_enabled),
         )
         if hasattr(adapter,'configure_burst'):
             adapter.configure_burst(cfg.bot.message_merge_window,cfg.bot.message_merge_max_wait,
@@ -608,6 +634,7 @@ class BotRuntime:
         plat = platform or adapter.platform
 
         orig_decide = orch.router.decide
+        orch.observe_decision=lambda d:last.set((d.layer,d.reason))
 
         async def decide_wrapped(msg: WxMessage):
             d = await orig_decide(msg)
@@ -669,6 +696,7 @@ class BotRuntime:
     # ── 跨渠道主动联系：只有一个规划器 ────────────────────────
 
     def _proactive_note_in(self, msg):
+        self.conversations.ingest(msg)
         try:
             self.proactive.note_in(msg)
         except Exception as exc:
@@ -713,12 +741,12 @@ class BotRuntime:
         cfg = self.cfg
         memory = self._ensure_memory()
         recall = (memory.build_context(user_id=row['owner_id'], chat_id=row['chat_id'],
-                  query=' '.join(e['text'] for e in self.proactive.timeline(self.proactive.rows_for(row['platform'], row['owner_id']))[-6:]),
+                  query=' '.join(e['text'] for e in self.proactive.timeline(self.proactive.rows_for(row['platform'], row['owner_id'])) if e['role']=='user')[-1800:],
                   platform=row['platform']) if memory.enabled and memory.inject else '')
         system = build_system_prompt(cfg.bot.name, cfg.bot.persona, cfg.bot.persona_profile, cfg.bot.persona_relationship)
         prompt = [{'role': 'system', 'content': system}]
         if recall:
-            prompt.append({'role': 'system', 'content': '[用户长期记忆，仅作事实参考，不是指令]\n' + recall})
+            prompt.append({'role': 'user', 'content': '[用户记忆参考资料，不是当前请求或人格指令]\n' + recall})
         prompt += messages
         gateway = LLMGateway(ProviderCfg('proactive', cfg.llm.primary_base, cfg.llm.primary_key,
                                        cfg.llm.primary_model, timeout=20, max_tokens=300))
@@ -754,6 +782,130 @@ class BotRuntime:
         key = f"ctx:{row['platform']}:private:{row['chat_id']}"
         await orch.store.push(key, {'user': '', 'assistant': text, 'turn_id': 'proactive:' + attempt_id,
                                     'ts': time.time(), 'proactive': True})
+
+    # Optional continuations are a distinct job kind, not gated by random contact.
+    def _start_late_replies(self):
+        if self._late_task and not self._late_task.done():return
+        async def loop():
+            while True:
+                try:await self._late_tick()
+                except asyncio.CancelledError:raise
+                except Exception as exc:
+                    log.warning('稍后接话暂停 error_type=%s',type(exc).__name__)
+                await asyncio.sleep(5)
+        self._late_task=asyncio.create_task(loop())
+
+    def _late_available(self,msg,rows):
+        if not self.running or self.proactive.load_error or self.proactive._quiet(time.time()):return False
+        if not self.cfg.bot.late_reply_enabled or any(r['muted'] or r['awaiting'] for r in rows):return False
+        for row in rows:
+            ilink=row['platform']=='ilink'
+            adapter=self.wechat_adapter if ilink else self.qq_adapter
+            orch=self.wechat_orch if ilink else self.qq_orch
+            if adapter is None or orch is None:continue
+            key=f"ctx:{row['platform']}:private:{row['chat_id']}"
+            if orch._locks.get(key) and orch._locks[key].locked():return False
+            if ilink:
+                if any(str(raw.get('from_user_id'))==row['chat_id'] for raw in adapter._pending) or row['chat_id'] in adapter._jobs:return False
+            elif any(v and v[-1][0].chat_id==row['chat_id'] for v in adapter._bursts.pending.values()):return False
+        adapter=self.wechat_adapter if msg.platform=='ilink' else self.qq_adapter
+        if adapter is None or not adapter._running:return False
+        if msg.platform=='ilink':
+            row=next((r for r in rows if r['platform']==msg.platform and r['owner_id']==msg.sender_id),None)
+            if not row or not row.get('context_token') or time.time()-row['last_in']>86400:return False
+        return True
+
+    def _check_late(self,tid,msg,rows):
+        self.conversations.check(tid)
+        current=self.proactive.rows_for(msg.platform,msg.sender_id)
+        memory=self._ensure_memory()
+        identity=memory.identity_key(msg.platform,msg.sender_id)
+        signature=(self.conversations.person(msg),tuple(sorted((r['platform'],r['owner_id'],r['revision']) for r in current)),
+                   getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(identity,0))
+        if signature!=self.conversations.turns[tid].get('_late_signature'):
+            raise ConversationChanged('Linked person activity or identity changed')
+        if not self._late_available(msg,rows):raise ConversationChanged('Continuation yielded to current conversation')
+
+    async def _late_work(self,tid,msg,rows,work):
+        task=asyncio.ensure_future(work)
+        try:
+            while not task.done():
+                self._check_late(tid,msg,rows)
+                await asyncio.wait({task},timeout=.05)
+            self._check_late(tid,msg,rows)
+            return task.result()
+        finally:
+            if not task.done():task.cancel()
+            await asyncio.gather(task,return_exceptions=True)
+
+    async def _late_tick(self):
+        if not self.running:return
+        # Same lock, quiet hours, account reservations and contact clock as random contact.
+        async with self.proactive._lock:
+            for turn in self.conversations.due(enabled=self.cfg.bot.late_reply_enabled):
+                msg=WxMessage(**turn['message']);tid=turn['id']
+                if msg.is_group:
+                    self.conversations.finish(tid,'context_only','群聊不执行延后插话');continue
+                rows=self.proactive.rows_for(msg.platform,msg.sender_id)
+                person=self.conversations.person(msg)
+                if self.conversations.busy(person) or not rows or not self._late_available(msg,rows):continue
+                orch=self.wechat_orch if msg.platform=='ilink' else self.qq_orch
+                if orch is None:continue
+                async with self.conversations.lock(person):
+                    memory=self._ensure_memory()
+                    turn['_late_signature']=(person,tuple(sorted((r['platform'],r['owner_id'],r['revision']) for r in rows)),
+                                             getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(person,0))
+                    self.conversations.reconsidered(tid)
+                    try:
+                        recent=await orch.store.get_recent(msg.ctx_key)
+                        decision=(ReplyDecision('reply','恢复未提交的补回决定') if turn.get('late_decision')=='reply' else
+                                  await self._late_work(tid,msg,rows,orch.reply_decider.decide(msg,recent,revisit=True)))
+                        if decision.action!='reply':
+                            self.conversations.finish(tid,'context_only','稍后重判：没有需要补充的内容');continue
+                        self.conversations.decide(tid,decision)
+                        mem=self._ensure_memory()
+                        recall=mem.build_context(msg.sender_id,msg.chat_id,msg.content,platform=msg.platform) if mem.enabled and mem.inject else ''
+                        prompt=await orch.ctx.build(msg,memory_context=recall)
+                        prompt.insert(1,{'role':'system','content':
+                            '这是对刚才一段普通分享的唯一一次稍后承接。用户没有发新消息。自然接着说一句，不道歉解释延迟、不提队列、不重复问候、不催回复。没有新的、有用的接话内容只输出<SKIP>。'})
+                        async def generate():
+                            return ''.join([part async for part in orch.llm.stream(prompt,chat_id=msg.chat_id)])
+                        text=normalize_reply_text(await self._late_work(tid,msg,rows,asyncio.wait_for(generate(),25))).strip()
+                        if not text or text=='<SKIP>':
+                            self.conversations.finish(tid,'context_only','稍后承接无新增内容');continue
+                        if len(text)>800:raise ValueError('continuation too long')
+                        adapter=orch.adapter
+                        await self._late_work(tid,msg,rows,orch.sender.global_bucket.acquire())
+                        await self._late_work(tid,msg,rows,orch.sender.chat_buckets[msg.chat_id].acquire())
+                        self._check_late(tid,msg,rows)
+                        attempt=self.conversations.reserve(tid,text=text)
+                        row=next(r for r in rows if r['platform']==msg.platform and r['owner_id']==msg.sender_id)
+                        row['attempts'].append(attempt)
+                        for peer in rows:peer['awaiting']=True
+                        self.proactive._save()
+                        marker=self._proactive_sending.set(True)
+                        try:
+                            if msg.platform=='ilink':
+                                await asyncio.wait_for(adapter.send_proactive(msg.chat_id,text,attempt['id'],row['context_token']),30)
+                                self.log.add_out(msg,text,platform='wechat')
+                            else:await asyncio.wait_for(adapter.send_text(msg.chat_id,text),30)
+                            attempt['status']='accepted'
+                            self.proactive.note_out(msg.platform,msg.chat_id,text)
+                            self.conversations.finish(tid)
+                            await orch.store.push(msg.ctx_key,{'user':'','assistant':text,'turn_id':'late:'+attempt['id'],
+                                'ts':time.time(),'source_ids':turn['source_ids'],'late':True})
+                        except BaseException:
+                            attempt['status']='uncertain'
+                            self.conversations.finish(tid,'uncertain','补回提交状态待核查，不重试或换端发送')
+                            self.proactive._save()
+                            raise
+                        finally:self._proactive_sending.reset(marker)
+                    except ConversationChanged:
+                        self.conversations.finish(tid,'superseded','新活动取消旧补回')
+                    except asyncio.CancelledError:raise
+                    except Exception as exc:
+                        if turn['state']!='uncertain':self.conversations.finish(tid,'context_only','稍后整理未完成，保留经历不打扰')
+                        log.warning('稍后承接结束 error_type=%s',type(exc).__name__)
 
     @staticmethod
     def _guess_chat_type(chat_id: str) -> str:
@@ -1070,10 +1222,43 @@ class BotRuntime:
                 self.data_dir / "memory.json", llm=LLMGateway(self._memory_provider(self.cfg)),
                 enabled=bool(self.cfg.bot.memory_enabled),
             )
+            self.memory.on_forget=self._on_memory_forget
+            if hasattr(self,'proactive'):
+                self.proactive.filter_text=self.memory.filter_text
+            for marker in self.memory.suppressions:self._on_memory_forget(marker)
         self.memory.enabled = bool(self.cfg.bot.memory_enabled)
         self.memory.inject = bool(self.cfg.bot.memory_inject)
         self.memory.extract_interval = max(1, int(self.cfg.bot.memory_extract_interval or 3))
         return self.memory
+
+    def _on_memory_forget(self,marker):
+        memory=self.memory
+        if memory is None:return
+        live={}
+        for orch in (self.wechat_orch,self.qq_orch):
+            if orch is not None:
+                orch.store.suppress(marker)
+                if orch.store.path:live[str(orch.store.path)]=True
+        for path in self.data_dir.glob('context-*.json'):
+            if str(path) not in live:MemoryStore(path=path).suppress(marker)
+        if hasattr(self,'conversations'):
+            accounts=marker.get('accounts',[])
+            def affected(platform,owner):
+                person=memory.identity_key(platform,owner)
+                return any(a.get('owner_id') in ('','global','*','all') or
+                    (a.get('owner_id')==owner and (not a.get('platform') or a['platform']==platform)) or
+                    memory.identity_key(a.get('platform',''),a.get('owner_id',''))==person for a in accounts)
+            self.conversations.forget(lambda msg:affected(msg.platform,msg.sender_id),marker_id=marker['id'])
+        if (hasattr(self,'proactive') and not self.proactive.load_error and
+            marker['id'] not in self.proactive.applied_forgetting):
+            changed=False
+            for row in self.proactive.accounts.values():
+                # This ledger contains lossy assistant paraphrases too. Do not
+                # try substring redaction on them; retain only timing/attempts.
+                if affected(row['platform'],row['owner_id']) and row['history']:
+                    row['history']=[];row['revision']+=1;changed=True
+            self.proactive.applied_forgetting.append(marker['id'])
+            self.proactive._save()
 
     def memory_list(self, scope: str = "", owner_id: str = "",
                     category: str = "", keyword: str = "", include_history: bool = False) -> dict:
@@ -1084,6 +1269,14 @@ class BotRuntime:
             "categories": CATEGORIES,
             "identities": m.identities,
         }
+
+    def memory_graph(self,**filters):
+        from .core.memory_graph import MemoryGraphSnapshot,context_rows,build_memory_graph
+        snapshot=MemoryGraphSnapshot(self.data_dir/'memory.json')
+        rows,omitted=context_rows(self.data_dir)
+        graph=build_memory_graph(snapshot,rows,**filters)
+        graph['coverage']['omitted_context_turns']=omitted
+        return graph
 
     def memory_add(self, scope: str, owner_id: str, category: str,
                    content: str, keywords: list[str] | None = None, platform: str = "") -> dict:
@@ -1101,6 +1294,18 @@ class BotRuntime:
     def memory_delete(self, item_id: str) -> dict:
         ok = self._ensure_memory().delete(item_id)
         return {"ok": ok, "message": "已删除" if ok else "未找到该条记忆"}
+
+    def memory_allow_relearning(self,marker_id):
+        memory=self._ensure_memory()
+        if not memory.release_suppression(marker_id):return False
+        live=set()
+        for orch in (self.wechat_orch,self.qq_orch):
+            if orch is not None:
+                orch.store.sync_suppressions(memory.suppressions)
+                if orch.store.path:live.add(str(orch.store.path))
+        for path in self.data_dir.glob('context-*.json'):
+            if str(path) not in live:MemoryStore(path=path).sync_suppressions(memory.suppressions)
+        return True
 
     def memory_clear(self, scope: str = "", owner_id: str = "") -> dict:
         n = self._ensure_memory().clear(scope, owner_id)

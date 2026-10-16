@@ -4,10 +4,10 @@ import asyncio,json,logging,os,tempfile,time
 from dataclasses import asdict,replace
 from pathlib import Path
 from .types import WxMessage
-from .turn_taking import plan_wait,ready
+from .turn_taking import SendingCadence,plan_wait,ready
 
 log=logging.getLogger(__name__)
-MAX_BATCH=50
+MAX_BATCH=50  # preprocessing chunk size, never a conversational boundary
 class ConversationChanged(RuntimeError):
     """New input arrived before transport submission; rebuild without sending."""
 
@@ -53,6 +53,7 @@ class MessageBuffer:
     """OneBot collector: ACK after durable enqueue, not after an LLM request."""
     def __init__(self,callback):
         self.callback=callback;self.window=0.0;self.max_wait=10.0
+        self.cadence=SendingCadence()
         self.human=True;self.pause_timeout=120
         self.path=None;self.pending={};self.workers={};self.active={};self.typing_hints={};self.running=False
         self.capacity=asyncio.Semaphore(4)
@@ -68,10 +69,13 @@ class MessageBuffer:
             if self.path.exists():
                 data=json.loads(self.path.read_text(encoding='utf-8'))
                 self.pending={k:[(WxMessage(**e['message']),e['at']) for e in v] for k,v in data.get('pending',{}).items()}
+                self.cadence=SendingCadence(data.get('cadence'))
+                for key,items in self.pending.items():
+                    for m,at in items:self.cadence.record(key,self.identity(m),at)
     def save(self):
         if not self.path:return
         self.path.parent.mkdir(parents=True,exist_ok=True)
-        data={'version':1,'pending':{k:[{'message':asdict(m),'at':at} for m,at in v] for k,v in self.pending.items() if v}}
+        data={'version':2,'cadence':self.cadence.entries,'pending':{k:[{'message':asdict(m),'at':at} for m,at in v] for k,v in self.pending.items() if v}}
         fd,tmp=tempfile.mkstemp(dir=self.path.parent,suffix='.tmp')
         try:
             with os.fdopen(fd,'w',encoding='utf-8') as f:
@@ -93,7 +97,8 @@ class MessageBuffer:
         key=self.key(msg);items=self.pending.setdefault(key,[])
         if any(self.identity(m)==self.identity(msg) for m,_ in items):return
         if sum(map(len,self.pending.values()))>=200:raise RuntimeError('Conversation inbox is full')
-        items.append((msg,time.time()))
+        at=time.time();items.append((msg,at))
+        self.cadence.record(key,self.identity(msg),at)
         try:self.save()
         except BaseException:items.pop();raise
         self._start(key)
@@ -107,7 +112,7 @@ class MessageBuffer:
 
     def check(self,msg,*,after_failure=False):
         active=self.active.get(self.key(msg))
-        if active and (after_failure or not active['force']):
+        if active:
             hint=self.typing_hints.get(self.key(msg),{})
             if hint.get('until',0)>time.time() and hint.get('at',0)>active.get('typing_at',0):
                 raise ConversationChanged('Peer is continuing input')
@@ -117,13 +122,13 @@ class MessageBuffer:
         while self.running and self.pending.get(key):
             items=self.pending[key]
             while self.running:
-                plan=plan_wait(items,self.window,self.max_wait,self.human,self.pause_timeout)
+                plan=plan_wait(items,self.window,self.max_wait,self.human,self.pause_timeout,cadence=self.cadence.gaps(key))
                 is_ready,force=ready(plan,time.time(),items[-1][1],len(items))
-                if is_ready and (force or self.typing_hints.get(key,{}).get('until',0)<=time.time()):break
+                if is_ready and self.typing_hints.get(key,{}).get('until',0)<=time.time():break
                 await asyncio.sleep(.05)
             if not self.running:break
-            selected=list(items[:MAX_BATCH]);msg=merge_messages([m for m,_ in selected])
-            self.active[key]={'known':{self.identity(m) for m,_ in items},'force':force,'typing_at':self.typing_hints.get(key,{}).get('at',0)}
+            selected=list(items);msg=merge_messages([m for m,_ in selected])
+            self.active[key]={'known':{self.identity(m) for m,_ in selected},'force':False,'typing_at':self.typing_hints.get(key,{}).get('at',0)}
             try:
                 async with self.capacity:
                     self.check(msg)

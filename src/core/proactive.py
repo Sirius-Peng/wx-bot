@@ -43,6 +43,7 @@ class ProactivePlanner:
         self.uniform = uniform
         self.accounts = {}
         self.plans = {}
+        self.applied_forgetting=[]
         self.task = None
         self.started = self.clock()
         self._lock = asyncio.Lock()
@@ -75,6 +76,7 @@ class ProactivePlanner:
                     if not isinstance(plan, dict) or not isinstance(plan.get('signature'), str) or not isinstance(plan.get('due'), (int,float)) or not math.isfinite(plan['due']):
                         raise ValueError('invalid proactive plan')
                 self.accounts, self.plans = data['accounts'], data['plans']
+                self.applied_forgetting=data.get('applied_forgetting',[])
             except Exception:
                 # Preserve damaged data; never replace it with an empty plan that could send again.
                 self.load_error = True
@@ -92,7 +94,8 @@ class ProactivePlanner:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix='.tmp')
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump({'version': 1, 'accounts': self.accounts, 'plans': self.plans}, f, ensure_ascii=False)
+                json.dump({'version': 1, 'accounts': self.accounts, 'plans': self.plans,
+                           'applied_forgetting':self.applied_forgetting}, f, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
@@ -170,6 +173,8 @@ class ProactivePlanner:
 
     def _eligible(self, rows, now):
         cfg = self.config()
+        if rows and getattr(self,'external_busy',lambda person:False)(self.identity(rows[0]['platform'],rows[0]['owner_id'])):
+            return False
         if not cfg.bot.proactive_enabled or self.load_error or not any(r['enabled'] for r in rows):
             return False
         if any(r['muted'] or r['awaiting'] for r in rows) or self._quiet(now):
@@ -181,7 +186,9 @@ class ProactivePlanner:
         return count < cfg.bot.proactive_daily_limit
 
     def timeline(self, rows):
-        events = [{**e, 'time': local_datetime(self.config().llm.context_timezone, e['ts']).isoformat(timespec='seconds'), 'channel': '微信' if r['platform'] == 'ilink' else 'QQ'} for r in rows for e in r['history']]
+        scrub=getattr(self,'filter_text',lambda platform,owner,text:text)
+        events = [{**e, 'text':scrub(r['platform'],r['owner_id'],e['text']), 'time': local_datetime(self.config().llm.context_timezone, e['ts']).isoformat(timespec='seconds'), 'channel': '微信' if r['platform'] == 'ilink' else 'QQ'} for r in rows for e in r['history']]
+        events = [e for e in events if e['text']]
         return sorted(events, key=lambda e: e['ts'])[-24:]
 
     def shared_context(self, msg):
