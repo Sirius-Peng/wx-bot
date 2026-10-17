@@ -1,19 +1,19 @@
 # WxBot 桌面版 · v2.1.7
 
-当前源码版本为v2.1.7，新增人格优先渐进记忆、私聊自然接话与稍后重判、连续输入协调及只读记忆拓扑；继续保留主动联系、识图、旧目录导入、独立用户数据和Windows输入焦点修复。文档更新：2026-10-16。
+当前源码版本为v2.1.7，新增人格优先渐进记忆、私聊自然接话与稍后重判、连续输入协调及只读记忆拓扑；继续保留主动联系、识图、旧目录导入、独立用户数据和Windows输入焦点修复。文档更新：2026-10-17。
 
-v2.1.7 正在原生构建Windows x64安装/便携版与macOS arm64 DMG；下表仍为已发布v2.1.6，不能代表新版本验收完成。[下载v2.1.6](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.6) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [测试矩阵](../docs/validation.md)
+本次原生构建Windows x64安装/便携版与macOS arm64 DMG。[下载v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7) · [使用首页](../README.md) · [文档索引](../docs/README.md) · [测试矩阵](../docs/validation.md)
 
 ## 发布产物
 
 | 平台 | 文件 | 当前状态 |
 |---|---|---|
-| Windows x64安装版 | `WxBot-2.1.6-Windows-x64-Setup.exe` | 原生x64构建，NSIS引导程序与包内资源核验 |
-| Windows x64便携版 | `WxBot-2.1.6-Windows-x64-Portable.exe` | 原生x64构建，冻结后端与生命周期核验 |
-| macOS arm64 | `WxBot-2.1.6-macOS-arm64.dmg` | arm64、冻结API、源码与只读DMG内容核验 |
+| Windows x64安装版 | `WxBot-2.1.7-Windows-x64-Setup.exe` | 原生x64构建，NSIS引导程序与包内资源核验；未重复完整安装/卸载循环 |
+| Windows x64便携版 | `WxBot-2.1.7-Windows-x64-Portable.exe` | 原生x64构建，冻结后端、管理器重启/退出及实际便携进程/API启动核验 |
+| macOS arm64 | `WxBot-2.1.7-macOS-arm64.dmg` | arm64、冻结API、源码与只读DMG内容核验 |
 | 校验文件 | `SHA256SUMS.txt` | 对应本次三个安装包 |
 
-未发布其他架构；构建和验证细节见[清单](../docs/release-v2.1.6.json)。历史Release及校验文件不修改。
+未发布其他架构；构建和验证细节见[清单](../docs/release-v2.1.7.json)。历史Release及校验文件不修改。
 
 ## 架构和资源布局
 
@@ -88,7 +88,7 @@ node tools/verify_windows_manager.cjs "BACKEND.exe" "MANAGER_REPORT.json"
 python tools/verify_windows_backend.py --binary "BACKEND.exe" --report "BACKEND_REPORT.json"
 ```
 
-这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.6.json)。
+这里的 `BACKEND.exe` 指完整 onedir 中的 sidecar，而不是 Setup 安装器；报告放到已有的可写目录。临时数据不会使用真实账号/模型 Key。当前发布验收记录见[测试矩阵](../docs/validation.md)，完整文件摘要见[发布清单](../docs/release-v2.1.7.json)。
 
 ## 启动、托盘和退出
 
@@ -120,4 +120,4 @@ Electron 自身 profile/cache 与应用长期数据不是同一个目录。普�
 | 首次打开系统拦截 | 包未配置代码签名，按系统对本次下载的验证/打开流程处理；不要把文件存在当成校验成功 |
 | 安装退出后仍有后台 | 检查本版本的退出守卫/认证shutdown与日志；关闭窗口≠退出 |
 
-本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。当前v2.1.6与历史v2.1.4的运行时验证和文件摘要分别记录在对应发布清单；文档更新不会修改已发布安装包或移动发布标签。
+本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。当前v2.1.7与历史v2.1.4的运行时验证和文件摘要分别记录在对应发布清单；文档更新不会修改已发布安装包或移动发布标签。

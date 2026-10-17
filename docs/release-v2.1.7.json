@@ -1,0 +1,98 @@
+{
+  "version": "2.1.7",
+  "tag": "v2.1.7",
+  "released_date": "2026-10-17",
+  "timezone": "Asia/Shanghai",
+  "build_started_date": "2026-10-16",
+  "runtime_commit": "c8662b331d1f4919f171cac22266a716ff40ccb4",
+  "runtime_commit_note": "Build-source checkpoint; release tag also includes post-build documentation/manifests. Runtime files and packaged resources are verified unchanged.",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7",
+  "artifacts": [
+    {
+      "sha256": "d2d8c52392854591259f47418cf26d9ba0010efd315071f4044b07793f698905",
+      "name": "WxBot-2.1.7-Windows-x64-Setup.exe",
+      "bytes": 130940768,
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-Windows-x64-Setup.exe"
+    },
+    {
+      "sha256": "7fde0abcd352413875f95dbb3b369be834f5ec266e61fc41e7cfa0edbc16be7a",
+      "name": "WxBot-2.1.7-Windows-x64-Portable.exe",
+      "bytes": 130705815,
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-2.1.7-macOS-arm64.dmg",
+      "bytes": 158380532,
+      "sha256": "41b976757a60f6a5eb4262ccd3556b4729f7ebe16af8cde1496beaaf307552cc",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "6d0eaebd28115d59f65d5f9e363ccb57e5581c194574a9789f65e4a31a6cf502",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/SHA256SUMS.txt"
+    }
+  ],
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "validation": {
+    "python_macos": 755,
+    "python_windows_native": 755,
+    "python_skipped_each_platform": 1,
+    "node_suites_each_platform": 11,
+    "memory_graph_frontend_checks": 55,
+    "deterministic_dialogue_timelines_each_platform": 20,
+    "browser_synthetic_graph_desktop_and_mobile_widths": [
+      320,
+      390
+    ],
+    "frozen_graph_auth_origin_readonly_each_platform": true,
+    "frozen_graph_readonly_repeat_reads_each_platform": 20,
+    "frozen_natural_always_late_settings_each_platform": true,
+    "frozen_memory_v3_pin_unpin_forget_restart_each_platform": true,
+    "macos_frozen_proactive_api": true,
+    "macos_frozen_import_restart": true,
+    "macos_frozen_modules_source_match": 22,
+    "macos_web_files_source_match": 7,
+    "macos_asar_source_files_match": 8,
+    "macos_dmg_readonly_tree_entries": 269,
+    "macos_dmg_arch": "arm64",
+    "windows_build_environment": "isolated native x64 Python venv; Chinese/space source path; onedir backend",
+    "windows_backend_smoke_runs": 3,
+    "windows_backend_manager_restart_exit": true,
+    "windows_frozen_proactive_api": true,
+    "windows_frozen_import_restart": true,
+    "windows_frozen_modules_source_match": 41,
+    "windows_asar_source_files_match": 8,
+    "windows_asar_source_and_production_metadata_match": true,
+    "windows_web_files_source_match": 7,
+    "windows_web_resource_copies": 2,
+    "windows_portable_native_process_http_start": true,
+    "windows_portable_owned_processes_after_cleanup": 0,
+    "windows_portable_backend_listener_closed": true,
+    "duplicate_asar_icon_files": 0,
+    "external_icons_each_platform": 6,
+    "windows_setup_pe_verified": true,
+    "windows_setup_install_uninstall_cycle_run": false,
+    "real_account_login_tested": false,
+    "interactive_windows_ime_tested": false,
+    "paid_model_search_quality_tested": false,
+    "windows_portable_taskkill_returncode": 255,
+    "windows_post_test_cim_process_audit_owned": 0,
+    "windows_post_test_cim_matching_app_processes": 0,
+    "windows_portable_cleanup_note": "Original taskkill returned 255; listener closed and main process waited. Independent post-test CIM enumeration found zero WxBot/Electron app processes matching test scope, recorded separately."
+  },
+  "source_checkpoint": {
+    "files": 170,
+    "zip_sha256": "c6ea548deab43dcd7bb8e5b2a2c2e46f2341097ff1a62b06e7084f652099ee40",
+    "manifest_sha256": "e6b486ee7c1e4c25474abab7299d674bb517f70f175443f8aa6080d93d4468f3"
+  },
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-17"
+}
