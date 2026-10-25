@@ -1,6 +1,6 @@
 # WxBot 文档索引
 
-文档同步日期：2026-10-25。当前源码 **v3.0.0（开发中）**，最近正式发布仍为[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)。没有v3下载包；历史发布清单和原生验收保持原版本，不挪用为v3结论。
+文档同步日期：2026-10-25。当前发布[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)，平台及摘要见[本次清单](release-v3.0.0.json)。历史v2验收不挪用为v3结论。
 
 ## v3优先阅读
 
@@ -12,7 +12,7 @@
 - [接话策略与已退役本地实验](v3/local-decision.md)：规则保护、单请求云判定；本地训练工具与失败结果只保留研究用途。
 - [稳定会话与KV缓存](v3/context-session.md)：窗口自动/手填、默认40%后压缩、稳定追加前缀与usage真实命中统计。
 - [费用核查与减少无效调用](v3/cache-cost.md)：固定v2.1.7源码证据、v3批次判定预算/搜索复用/按需复核，以及手动真实用量诊断；混合token总量不反推缓存率。
-- [第三方来源与发行核对草案](v3/third-party.md)：历史模型研究、实际运行依赖、Live2D及机制参考的不同来源与条款。
+- [第三方来源与发行组件声明](v3/third-party.md)：历史模型研究、实际运行依赖、Live2D及机制参考的不同来源与条款。
 
 以下专题中标明v2.1.7的界面、截图或历史测试只适用于旧发布；当前源码入口以四页面说明为准。
 
@@ -35,7 +35,7 @@
 | 原生构建、资源布局、托盘、退出、故障检查 | [桌面开发](../desktop/README.md) |
 | Windows v2.1.3改进与原生验收 | [Windows专项](windows-v2.1.3.md) |
 | v3验收与历史发布边界 | [v3状态](v3/validation.md)、[历史验证矩阵](validation.md) |
-| 精确发布大小、SHA256、版本与验收快照 | [当前发布清单](release-v2.1.7.json)、[v2.1.6历史清单](release-v2.1.6.json)、[v2.1.5历史清单](release-v2.1.5.json)、[v2.1.4历史清单](release-v2.1.4.json)、[v2.1.3历史清单](release-v2.1.3.json) |
+| 精确发布大小、SHA256、版本与验收快照 | [当前发布清单](release-v3.0.0.json)、[v2.1.7历史清单](release-v2.1.7.json)、[v2.1.6历史清单](release-v2.1.6.json)、[v2.1.5历史清单](release-v2.1.5.json)、[v2.1.4历史清单](release-v2.1.4.json)、[v2.1.3历史清单](release-v2.1.3.json) |
 | 版本历史 | [CHANGELOG](../CHANGELOG.md) |
 | 弗洛洛角色卡与合成资料 | [人格卡](../personas/phrolova/PERSONA.md)、[评估与迭代](../personas/phrolova/EVALUATION.md) |
 

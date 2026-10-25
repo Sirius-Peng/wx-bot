@@ -2,15 +2,15 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v3.0.0（开发中） · 当前发布：v2.1.7 · 文档更新：2026-10-23。**
+**当前版本：v3.0.0 · 当前发布：v3.0.0 · 文档更新：2026-10-25。**
 
-> **v3 尚未发布安装包。** 本页的 v3 功能说明对应当前源码，不代表下方 v2.1.7 下载包已包含这些功能。接话已改为规则保护与轻量云端判定，不再运行或随包提供本地判定模型；Windows/macOS 新版原生验收与覆盖升级验收尚待完成。见 [v3 实施与验收状态](docs/v3/README.md)。
+> **v3.0.0已按本次发布清单构建。** 平台、资源、验收与未测范围分别记录，不挪用历史v2成绩。见[v3说明](docs/v3/README.md)及[本次发布清单](docs/release-v3.0.0.json)。
 
 微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等待、长期记忆、联网搜索、主动联系和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-[下载 v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
+[下载 v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
-## v3.0.0 源码重构
+## v3.0.0 轻量陪伴内核
 
 - **一个对话内核**：微信、QQ 与新增桌面文字伙伴共用收集、接话、记忆、生成和投递逻辑；桌面账号默认独立，不自动关联微信/QQ。保留首启引导、QQ 一键启动/快速登录、识图、联网总结、当前时间和旧资料导入。
 - **界面收敛**：侧栏仅保留「首页」「接入设置」「人格与记忆」「设置」。人格、了解和简要词频/话题气泡放到同页；消息记录和引导从首页进入，移除完整拓扑界面。
@@ -21,32 +21,32 @@
 - **稳定会话与服务端缓存**：默认保持完整会话前缀，达到所配置窗口的40%才压缩，而不是8轮滑窗或5k即压缩；窗口可自动识别或手填。缓存只按服务真实usage计数，不承诺100%命中。见 [会话与KV缓存](docs/v3/context-session.md)。
 - **减少无效调用、显示真实用量**：同一连续输入批次只开放一次云判定额度；搜索成功公开query短缓存60秒并合并相同在途请求，合格成稿不固定再复核。设置可手动查看近期真实usage、任务分类与token加权缓存比例；未知不补0，近期事件不是账单。不预报省费百分比，见 [v2.1.7费用核查与v3调整](docs/v3/cache-cost.md)。
 
-现有数据目录、文件名、自定义路径、凭证和应用 ID `com.siriuspeng.wxbot` 保持不变。设计与当前待办见 [v3 总览](docs/v3/README.md)，原生验证结果单独记录，不用源码回归代替安装验收。
+现有数据目录、文件名、自定义路径、凭证和应用 ID `com.siriuspeng.wxbot` 保持不变。功能与使用见 [v3 总览](docs/v3/README.md)，原生验证结果单独记录，不用源码回归代替安装验收。
 
 ## 下载与平台
 
-**最近已发布版本仍为 v2.1.7**，以下均为历史已发布附件；没有 v3 下载链接。v2.1.7 Windows x64安装版、便携版及macOS arm64 DMG均由对应原生平台构建。
+本次附件仅包含下表实际构建并验证的平台；历史[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)保持不变。
 
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
-| Windows x64安装版 | [WxBot-2.1.7-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-Windows-x64-Setup.exe) | 约 124.9 MiB |
-| Windows x64便携版 | [WxBot-2.1.7-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-Windows-x64-Portable.exe) | 约 124.7 MiB |
-| macOS Apple Silicon | [WxBot-2.1.7-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/WxBot-2.1.7-macOS-arm64.dmg) | 约 151.0 MiB |
-| SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v2.1.7/SHA256SUMS.txt) | 对应 v2.1.7 三个安装包 |
+| Windows x64安装版 | [WxBot-3.0.0-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-Windows-x64-Setup.exe) | 125.5 MiB |
+| Windows x64便携版 | [WxBot-3.0.0-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-Windows-x64-Portable.exe) | 125.3 MiB |
+| macOS Apple Silicon | [WxBot-3.0.0-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-macOS-arm64.dmg) | 151.5 MiB |
+| SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/SHA256SUMS.txt) | 对应本次实际发布平台 |
 
-安装包自带运行时，无需Python / Node.js。v2.1.7没有macOS Intel、Windows ARM64/32位或Linux桌面包；Linux可用源码/Docker，其他架构构建入口见[桌面说明](desktop/README.md)。发布包未配置代码签名，首次打开流程见同页。历史Release与附件保持不变。
+安装包自带运行时，无需Python / Node.js。未列出的架构没有本次桌面包；Linux可用源码/Docker。未配置代码签名，首次打开流程见[桌面说明](desktop/README.md)。精确摘要与本次验收范围见[发布清单](docs/release-v3.0.0.json)。
 
 ## 升级与旧数据
 
-v3 源码仍使用下方原数据位置和应用 ID；正式覆盖安装流程须等 v3 云判定、升级夹具和原生包验收完成后再确认。测试源码前先备份资料，不以开发包替代已发布安装包。
+v3继续使用原数据位置和应用ID。覆盖前先备份并退出旧应用；本次实际验收范围与未执行项目见[发布清单](docs/release-v3.0.0.json)。
 
-macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「设置 → 本地数据与备份」（v2.1.7 为「模型与行为」）创建备份。Windows先退出旧应用，再使用v2.1.7安装版覆盖安装；便携版退出后替换旧程序。两种方式均继续使用独立用户数据目录。
+macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「设置 → 本地数据与备份」（v2.1.7 为「模型与行为」）创建备份。Windows先退出旧应用，再使用v3.0.0安装版覆盖安装；便携版退出后替换旧程序。两种方式均继续使用独立用户数据目录。
 
 v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行为」）：选择包含 `config.json` 的旧目录，预览并确认整套替换，准备导入后重启后台。导入前自动备份当前资料，旧目录不修改；保留配置、人格、记忆、上下文、聊天记录及普通文件，QQ Docker卷另行备份。详见[导入与恢复](docs/data-import.md)。
 
 ## 零基础开始
 
-以下平台登录与 Key 流程沿用 v2.1.7；当前 v3 源码将相应卡片归入四个主页面，下载包的菜单名称仍以其版本为准。
+v3沿用现有平台登录与Key流程，配置入口收敛为四个主页面；以下按v3菜单说明，旧v2.1.7用户以其版本菜单为准。
 
 1. **安装并打开**应用，首次配置进入「上手引导」，选择微信、QQ 或两者。引导进度保存在本地，暂时跳过后可继续。
 2. **配置模型**：默认地址 `https://api.deepseek.com`，API 模型名 `deepseek-flash`。在 [DeepSeek 开放平台](https://platform.deepseek.com/)登录，到 [API keys](https://platform.deepseek.com/api_keys) 创建 Key，检查余额后粘贴到引导中并点击「保存并测试模型」。测试会产生少量 API 用量；聊天网页版登录不等于已经配置 API。费用以[官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)为准，不作固定预算或免费承诺。
@@ -59,7 +59,7 @@ v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行�
 
 ## 当前功能
 
-| 功能 | 当前 v3 源码行为（未发布） |
+| 功能 | v3.0.0行为 |
 |---|---|
 | 微信 | 本项目采用腾讯 iLink 私聊通道，长轮询收件；不提供微信群聊或 GeWe 通道 |
 | QQ | NapCat / OneBot 11，私聊回复、群聊仅 @ 机器人时回复；反向 WebSocket 或 HTTP 上报 |
@@ -86,14 +86,14 @@ v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行�
 
 ## 管理界面
 
-| 侧栏页面 | 当前源码内容 |
+| 侧栏页面 | v3.0.0内容 |
 |---|---|
 | 首页 | 运行/投递状态、QQ 一键启动、桌面伙伴开关/导入/打开、消息记录和上手引导入口 |
 | 接入设置 | 微信登录、QQ 扫码/快速登录、网关与推送状态、日志 |
 | 人格与记忆 | 人格设定独立保存；对用户的了解、形成中/已熟悉/已淡化/已固定、来源、固定/遗忘、可选身份关联、简要词频/话题气泡 |
 | 设置 | 主/备用/判定/视觉模型、联网搜索与时区、fast/deep、回复行为、主动联系、记忆、备份/导入、桌面管理；卡片独立保存 |
 
-完整拓扑界面已从 v3 源码移除；[v2.1.7 拓扑说明](docs/memory-topology.md)仅供旧版用户。旧 `#graph` / `#statistics` 入口转到记忆页，不删除已有用户资料。
+完整拓扑界面已从 v3 移除；[v2.1.7 拓扑说明](docs/memory-topology.md)仅供旧版用户。旧 `#graph` / `#statistics` 入口转到记忆页，不删除已有用户资料。
 
 ## 模型与数据流
 
@@ -101,7 +101,7 @@ v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行�
 - 日常 `fast` 对已识别支持的官方 DeepSeek 接口关闭思考；`deep` 是单独开关。不向未知兼容接口强塞供应商专用参数，不擅自更换用户模型或 Key。
 - 独立视觉配置留空时使用主模型。官方 `deepseek-flash` 的图像内容块依据见[视觉文档](https://api-docs.deepseek.com/guides/vision/)；其他兼容接口的视觉/工具能力需自行配置和验证。
 - 判定只读本轮及必要的少量会话状态，不读取人格全文或知识库。等待窗口内先防抖约0.8秒再与图片预取/本地检索并行；同一连续输入批次只开放一次云判定额度，同一有效结果仅交接一次。新来话取消旧版本且不复用旧静默结论；额度已用时最新全文仍走保护规则，模糊则保守回应，不逐碎片重发。运行与安装包不使用ONNX/tokenizers或本地判定权重。
-- 搜索 Key 留空时，仅官方 DeepSeek 主接口可复用主 Key；使用其他供应商主模型时需要单独配置 DeepSeek 搜索 Key。每轮最多两次辅助搜索；后台抽取、摘要与引导连通测试不搜索。
+- 搜索 Key 留空时，仅官方 DeepSeek 主接口可复用主 Key；使用其他供应商主模型时需要单独配置 DeepSeek 搜索 Key。每轮Search与Fetch合计最多两次工具调用；后台抽取、摘要与引导连通测试不搜索。
 - 聊天文本、图像和相关记忆会按功能发给所配置的模型服务；“本地保存”不表示模型推理全部离线。搜索只提交必要公开 query，不把整段聊天、记忆或图片用作搜索查询。
 - 默认参考时间来自本机时钟，不推断用户所在时区。统计读取本地持久消息日志，话题为多标签关键词类别，不是 LLM 语义分类；一次最多扫描最近 32 MiB，达到限额时会提示。
 
@@ -210,7 +210,7 @@ python tools/check_docs.py
 
 **历史 v2.1.7 发布验收**：macOS和Windows原生源码各755项Python回归（各跳过1项）、11组Node回归通过，含55项拓扑前端检查和20组固定对话时间线。两端冻结后端的只读图谱、自然设置、记忆v3、固定/遗忘与重启，以及主动联系、旧资料导入和包内源码/资源一致性另行核验；Windows便携版原生进程/API启动、macOS DMG只读挂载验证通过。完整边界与精确摘要见[v2.1.7 发布清单](docs/release-v2.1.7.json)和[测试矩阵](docs/validation.md)。
 
-v3 开发验收独立记录于 [验收状态](docs/v3/validation.md)：源码回归和模拟桌面链路不等于三平台原生验收。历史本地模型实验已退役，保留研究记录；当前云判定、稳定会话与原生包须另行验收，未产出 v3 正式安装包。
+v3本次原生构建、冻结后端、资源与架构、源码回归及未执行项目见[本次发布清单](docs/release-v3.0.0.json)和[验收记录](docs/v3/validation.md)。源码、模拟桌面链路、实际安装生命周期和真实账号测试分别记录；未测试的NSIS安装/卸载、Windows中文IME或账号流程不记为已通过。历史本地模型实验已退役，仅保留研究记录。
 
 ## 项目结构
 
@@ -226,7 +226,8 @@ src/core/media.py               图片下载、解密与视觉输入
 src/core/context.py, memory.py  人格/上下文/长期事实与身份关联
 src/core/memory_learning.py     后台渐进记忆整理
 src/core/companion_models.py    Live2D 本地目录导入与资源校验
-src/core/web_search.py          DeepSeek 辅助搜索
+src/core/web_search.py          联网后端、短缓存与旧native兼容
+src/core/deepseek_tools.py      官方Search/Fetch直接工具
 src/core/reality.py             每轮现实时间
 src/core/analytics.py           本地词频/话题统计
 src/core/storage.py, fileio.py  独立目录、迁移/备份、Windows快照
@@ -238,9 +239,9 @@ tests/, tools/                 离线回归、平台/打包和文档核验
 docs/, CHANGELOG.md             使用、设计、验证与版本历史
 ```
 
-此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包分别固定对应其发布标签：最近已发布macOS和Windows包均为`v2.1.7`，尚无`v3.0.0`包；主分支文档更新不会改动旧包或移动标签。
+此仓库提供本地文件形态的长期记忆与轻量词法/结构化召回，未接入向量数据库或托管记忆服务。下载包固定对应发布标签：当前v3.0.0的平台与附件见[本次发布清单](docs/release-v3.0.0.json)；历史v2.1.7文件与标签不变，不以旧包改名替代新构建。
 
-第三方渲染资源及模型来源分别按其自身条款处理，项目元数据中的 MIT 不替代第三方条款；见 [v3 第三方清单与发布核对草案](docs/v3/third-party.md)。
+第三方渲染资源及模型来源分别按其自身条款处理，项目元数据中的 MIT 不替代第三方条款；见 [v3 第三方来源与发行组件声明](docs/v3/third-party.md)。
 
 ## 作者与贡献者
 

@@ -1,0 +1,97 @@
+{
+  "version": "3.0.0",
+  "tag": "v3.0.0",
+  "released_date": "2026-10-25",
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": "267fa290d14abe05b04eb1596555a9f8d1bc0804",
+  "runtime_commit_note": "Verified build-source checkpoint; release tag may additionally contain documentation/manifests. See per-platform build evidence.",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0",
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "artifacts": [
+    {
+      "name": "WxBot-3.0.0-Windows-x64-Setup.exe",
+      "bytes": 131615845,
+      "sha256": "5ec3de815e81d02a786800faf511ef64a81b506270af574b92ed3066e916413e",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-Windows-x64-Setup.exe"
+    },
+    {
+      "name": "WxBot-3.0.0-Windows-x64-Portable.exe",
+      "bytes": 131380887,
+      "sha256": "725dd1c47b6d278071f8cb0121eb5121e0dccf26e981333dd0d5840853c2fc71",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-3.0.0-macOS-arm64.dmg",
+      "bytes": 158825100,
+      "sha256": "dd8a1979138fe5125d54c58f5b69608b9f2aad3c46b2a7e2c8ab9c40bd6b0cdc",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/WxBot-3.0.0-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "24beef83dc8f7356fb073cc90e01dc2b787bdb544ae9ce7fed16f49307083c20",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.0/SHA256SUMS.txt"
+    }
+  ],
+  "validation": {
+    "python_macos": 1507,
+    "python_macos_skipped": 3,
+    "python_windows_native": 1507,
+    "python_windows_skipped": 9,
+    "python_full_regression_each_platform_passed": true,
+    "node_suites_each_platform": 18,
+    "windows_flaky_test_fixture_fixed": "Fast image is completed before an artificial deadline; production media timeout unchanged.",
+    "windows_backend_runs": 3,
+    "windows_x64_frozen_backend_and_onedir_verified": true,
+    "windows_setup_pe_verified": true,
+    "windows_portable_native_electron_verified": true,
+    "windows_packaged_companion_restart_port_change_verified": true,
+    "windows_renderer_chinese_input_and_dom_confirmation_focus_verified": true,
+    "windows_frozen_legacy_v136_import_preserves_persona_unknown_file_empty_directory": true,
+    "cover_upgrade_v136_v214_v217_synthetic_fixtures_passed": true,
+    "macos_dmg_arch": "arm64",
+    "macos_dmg_integrity_and_mounted_resources_verified": true,
+    "macos_packaged_native_directory_dialog_cancel_then_chinese_clipboard_input_verified": true,
+    "macos_packaged_backend_sha256": "59d7b0ebf7783e84057a9214a850e118ad49a48444bb2691baf3da08927f341c",
+    "electron_final_companion_restart_source_in_each_platform_asar_verified": true,
+    "frozen_companion_http_ws_stream_duplicate_and_reconnect_each_platform": true,
+    "frozen_search_fetch_cache_protocol_each_platform": true,
+    "frozen_two_images_plus_video_one_reply_each_platform": true,
+    "frozen_protocol_tests_use_local_stubs_no_paid_api": true,
+    "third_party_inventory_components_each_platform": 41,
+    "third_party_license_files_macos": 65,
+    "third_party_license_files_windows": 64,
+    "retired_local_decision_weights_and_training_frameworks_excluded": true,
+    "windows_setup_install_uninstall_cycle_run": false,
+    "interactive_windows_ime_tested": false,
+    "interactive_macos_ime_composition_tested": false,
+    "real_account_login_tested": false,
+    "paid_model_latency_or_total_savings_verified": false,
+    "long_term_companion_quality_tested": false,
+    "code_signed_or_notarized": false
+  },
+  "limitations": [
+    "Windows x64 Setup/Portable and macOS arm64 DMG only; other desktop architectures were not built.",
+    "Windows executables have no Authenticode signature; macOS has no Developer ID signature or notarization.",
+    "NSIS full installation/uninstallation was not run; native unpacked and Portable execution are separately verified.",
+    "Windows Chinese text was entered through the renderer; OS IME composition and real QQ/WeChat account login were not exercised. macOS verified Chinese clipboard input, not manual IME composition.",
+    "Frozen model/search/media integration used local stubs without paid API calls; no fixed latency or bill-savings guarantee is inferred.",
+    "Upgrade synthetic fixtures and one frozen v1.3.6 import are not a full lifecycle test of every historic installation; back up user data before covering an installation.",
+    "macOS binary minimum deployment target is 11.0; this release was not run on macOS 11 hardware. Long-term companion quality remains an observation task."
+  ],
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-25",
+  "source_checkpoint": {
+    "runtime_source_checkpoint": "267fa290d14abe05b04eb1596555a9f8d1bc0804",
+    "post_build_changes": "Only deterministic test fixture and release documentation/manifests; packaged runtime unchanged.",
+    "stable_app_id": "com.siriuspeng.wxbot",
+    "existing_user_data_paths_preserved": true
+  }
+}

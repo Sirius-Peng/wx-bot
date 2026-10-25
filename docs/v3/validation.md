@@ -1,6 +1,6 @@
-# v3 开发验收状态
+# v3 验收记录与发布边界
 
-初次记录：2026-10-19；最近补充：2026-10-23。**尚未发布v3；本记录不是最终Release验收清单。** 历史[v2.1.7验收](../validation.md)不自动适用于重构后的源码或新安装包。
+初次记录：2026-10-19；本次发布记录：2026-10-25。以下开发阶段历史逐项保留，本次真实安装包与未执行范围以[发布清单](../release-v3.0.0.json)为准，历史[v2.1.7](../validation.md)不自动适用于v3。
 
 ## 已观察的阶段性与历史结果
 
@@ -24,7 +24,9 @@
 
 阶段性计数须由最终完整回归覆盖。不要把命令运行结束、模型导出成功、包文件存在或一个浏览器截图当作完成全部验收。
 
-## 尚待完成的发布门
+## 历史发布前门槛（2026-10-23记录）
+
+本节保留当日计划及勾选原样；本次完成范围以文末发布记录和[本次发布清单](../release-v3.0.0.json)为准，不从发布状态推断未测项目通过。
 
 - [ ] 轻量云判定：覆盖口语/繁体/中英混输/反讽/引用/情绪/撤销/更正/连续补充；保护诉求不误静默，短R/D/C协议、非思考单请求、3秒总期限、失败保守回应；独立配置兼容、并行预判同轮一次复用与新来话取消。
 - [ ] 真实API与会话：在Windows主验证机记录判定/主回复端到端延迟、请求数和真实usage token；窗口自动/手填、默认40%后压缩、完整稳定前缀、遗忘/人格/provider变更失效与不跨用户复用。缓存hit/miss仅来自服务返回，缺失为未知，不承诺100%。
@@ -86,3 +88,56 @@ Windows使用`.venv\Scripts\python.exe`及PowerShell逐项运行Node套件。训
 - 公开文档真实接口观察：Search 481.39ms、Fetch 91.81ms，均HTTP200；两次HTTP、零次LLM，未修改配置或发送聊天数据。这是单次样本，不是总体性能/费用指标；详细机制及范围见[1017联网说明](search-1017.md)。
 
 本轮完整源码回归：Python **1507项、跳过3项**通过，Node **17组**通过（含新搜索后端20项及用量显示15项）。新增38项provider协议回归和24项独立审查覆盖预算、缓存、取消、正文分级、私密URL、重试及计费统计分流。文档与无模型源码资源检查通过。原生安装包验收及Release发布另行执行。
+
+## 2026-10-25：v3.0.0本次发布记录
+
+仅发布清单中的实际平台，本次验证元数据如下；上述开发历史中的“尚未”按其记录日期理解，不作为当前平台矩阵。
+
+```json
+{
+  "python_macos": 1507,
+  "python_macos_skipped": 3,
+  "python_windows_native": 1507,
+  "python_windows_skipped": 9,
+  "python_full_regression_each_platform_passed": true,
+  "node_suites_each_platform": 18,
+  "windows_flaky_test_fixture_fixed": "Fast image is completed before an artificial deadline; production media timeout unchanged.",
+  "windows_backend_runs": 3,
+  "windows_x64_frozen_backend_and_onedir_verified": true,
+  "windows_setup_pe_verified": true,
+  "windows_portable_native_electron_verified": true,
+  "windows_packaged_companion_restart_port_change_verified": true,
+  "windows_renderer_chinese_input_and_dom_confirmation_focus_verified": true,
+  "windows_frozen_legacy_v136_import_preserves_persona_unknown_file_empty_directory": true,
+  "cover_upgrade_v136_v214_v217_synthetic_fixtures_passed": true,
+  "macos_dmg_arch": "arm64",
+  "macos_dmg_integrity_and_mounted_resources_verified": true,
+  "macos_packaged_native_directory_dialog_cancel_then_chinese_clipboard_input_verified": true,
+  "macos_packaged_backend_sha256": "59d7b0ebf7783e84057a9214a850e118ad49a48444bb2691baf3da08927f341c",
+  "electron_final_companion_restart_source_in_each_platform_asar_verified": true,
+  "frozen_companion_http_ws_stream_duplicate_and_reconnect_each_platform": true,
+  "frozen_search_fetch_cache_protocol_each_platform": true,
+  "frozen_two_images_plus_video_one_reply_each_platform": true,
+  "frozen_protocol_tests_use_local_stubs_no_paid_api": true,
+  "third_party_inventory_components_each_platform": 41,
+  "third_party_license_files_macos": 65,
+  "third_party_license_files_windows": 64,
+  "retired_local_decision_weights_and_training_frameworks_excluded": true,
+  "windows_setup_install_uninstall_cycle_run": false,
+  "interactive_windows_ime_tested": false,
+  "interactive_macos_ime_composition_tested": false,
+  "real_account_login_tested": false,
+  "paid_model_latency_or_total_savings_verified": false,
+  "long_term_companion_quality_tested": false,
+  "code_signed_or_notarized": false
+}
+```
+
+未执行/边界：
+- Windows x64 Setup/Portable and macOS arm64 DMG only; other desktop architectures were not built.
+- Windows executables have no Authenticode signature; macOS has no Developer ID signature or notarization.
+- NSIS full installation/uninstallation was not run; native unpacked and Portable execution are separately verified.
+- Windows Chinese text was entered through the renderer; OS IME composition and real QQ/WeChat account login were not exercised. macOS verified Chinese clipboard input, not manual IME composition.
+- Frozen model/search/media integration used local stubs without paid API calls; no fixed latency or bill-savings guarantee is inferred.
+- Upgrade synthetic fixtures and one frozen v1.3.6 import are not a full lifecycle test of every historic installation; back up user data before covering an installation.
+- macOS binary minimum deployment target is 11.0; this release was not run on macOS 11 hardware. Long-term companion quality remains an observation task.
