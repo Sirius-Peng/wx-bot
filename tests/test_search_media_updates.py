@@ -105,7 +105,11 @@ class PartialMediaTests(unittest.IsolatedAsyncioTestCase):
     try:await asyncio.Event().wait()
     finally:late.set()
    return png()
-  async def short(tasks,**kwargs):return await original_wait(tasks,timeout=.03)
+  async def short(tasks,**kwargs):
+   # Finish the fast image deterministically before simulating the deadline.
+   # A 30ms wall-clock race can expire during Windows Pillow cold start.
+   await asyncio.wait_for(asyncio.shield(tasks[0]),timeout=10)
+   return await original_wait(tasks,timeout=0)
   loader.fetch=fetch
   with patch('src.core.media.asyncio.wait',side_effect=short):data=await loader.load_partial([{}, {'slow':True}])
   self.assertTrue(data[0]);self.assertIsNone(data[1]);self.assertTrue(late.is_set())
