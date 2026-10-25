@@ -156,7 +156,9 @@ def create_backup(data_dir, extras=None):
 
 
 def _has_state(root):
-    return any((root/f).is_file() for f in ('config.json','memory.json','onboarding.json','messages.jsonl','qq-bursts.json','ilink/account.json')) or any(root.glob('context-*.json'))
+    return (any((root/f).is_file() for f in ('config.json','memory.json','onboarding.json','messages.jsonl','qq-bursts.json','ilink/account.json',
+                                          'persona-state.json','identity-links.json','memory-forgotten.json'))
+            or (root/'persona-spaces').exists() or any(root.glob('context-*.json')))
 
 
 def _finish_pending(root,pending):
@@ -165,6 +167,14 @@ def _finish_pending(root,pending):
     file=root/'.backups'/name;manifest=verify_backup(file)
     imported={name:digest for name,digest in manifest['files'].items() if Path(name).parts[0]!='logs'}
     with zipfile.ZipFile(file) as z:
+        from .data_import import _validate_persona_payload, _validate_state_json
+        # Legacy migration archives without a persona registry preserve their old
+        # compatibility behavior. New space-aware archives are checked atomically
+        # before publishing any of their routing pointer or memory files.
+        _validate_persona_payload(manifest['files'], z.read, manifest.get('directories', []))
+        if 'persona-state.json' in manifest['files']:
+            for name in manifest['files']:
+                _validate_state_json(name, lambda: z.read(name))
         # Check every path and conflict before writing. Existing newer files always win.
         for name,digest in imported.items():
             relative=Path(name)
@@ -210,6 +220,20 @@ def initialize_storage(data_dir=None, sources=None, migrate=None):
         if _has_state(root) or not candidates:
             report={'version':1,'status':'existing' if _has_state(root) else 'fresh','imported_files':0}
             _atomic_json(root/MARKER,report);return report
+        # Empty namespace directories are not ZIP payload members. Check the
+        # live layout as well, so an orphan persona-spaces/ cannot evade the
+        # archive checks merely by containing no regular files.
+        from .data_import import _validate_persona_payload, _validate_state_json
+        for source in candidates:
+            if (source/'persona-state.json').exists() or (source/'persona-spaces').exists():
+                payload = list(_payload_files(source))
+                folders = []
+                base = source/'persona-spaces'
+                if base.is_dir():
+                    folders = ['persona-spaces', *[p.relative_to(source).as_posix() for p in base.iterdir() if p.is_dir()]]
+                _validate_persona_payload([name for _,name in payload], lambda name: (source/name).read_bytes(), folders)
+                for path,name in payload:
+                    _validate_state_json(name, lambda: path.read_bytes())
         archives=[_snapshot(p,root/'.backups','migration') for p in candidates]
         pending={'archive':archives[0].name,'source':str(candidates[0]),'other_backups':[p.name for p in archives[1:]]}
         _atomic_json(root/PENDING,pending)

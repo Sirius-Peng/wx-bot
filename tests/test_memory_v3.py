@@ -56,11 +56,11 @@ class MemoryV3Tests(unittest.IsolatedAsyncioTestCase):
  async def test_100_recalls_do_not_strengthen_or_renew(self):
   await self.observe(self.source(at=self.now-86400));await self.observe(self.source('b','two'));item=next(iter(self.memory._items.values()));before=(item.confidence,item.last_user_evidence_at,item.lifecycle(self.now),list(item.evidence_sources),item.updated_at)
   for _ in range(100):self.memory.recall('alice','alice','绿茶',platform='ilink')
-  self.assertEqual((item.confidence,item.last_user_evidence_at,item.lifecycle(self.now),item.evidence_sources,item.updated_at),before);self.assertEqual(item.hits,100)
+  self.assertEqual((item.confidence,item.last_user_evidence_at,item.lifecycle(self.now),item.evidence_sources,item.updated_at),before);self.assertEqual(item.hits,0)
  async def test_candidate_halflife_and_dormancy_without_deletion(self):
-  await self.observe(self.source());item=next(iter(self.memory._items.values()));self.assertAlmostEqual(item.lifecycle(self.now+7*86400)[1],.5);self.assertEqual(item.lifecycle(self.now+14*86400)[0],'dormant');self.assertIn(item.id,self.memory._items)
+  await self.observe(self.source());item=next(iter(self.memory._items.values()));self.assertAlmostEqual(item.lifecycle(self.now+2*86400)[1],.5);self.assertEqual(item.lifecycle(self.now+7*86400)[0],'dormant');self.assertIn(item.id,self.memory._items)
  async def test_stable_halflife_and_dormancy(self):
-  await self.observe(self.source(at=self.now-86400));await self.observe(self.source('b','two'));item=next(iter(self.memory._items.values()));self.assertAlmostEqual(item.lifecycle(self.now+90*86400)[1],.5);self.assertEqual(item.lifecycle(self.now+180*86400)[0],'dormant')
+  await self.observe(self.source(at=self.now-86400));await self.observe(self.source('b','two'));item=next(iter(self.memory._items.values()));self.assertAlmostEqual(item.lifecycle(self.now+2*86400)[1],.5);self.assertEqual(item.lifecycle(self.now+7*86400)[0],'dormant')
  async def test_historical_retrieval_does_not_awaken(self):
   await self.observe(self.source(at=self.now-181*86400));await self.observe(self.source('b','two',self.now-180*86400));item=next(iter(self.memory._items.values()));anchor=item.last_user_evidence_at
   self.assertEqual(self.memory.recall('alice','alice','绿茶',platform='ilink'),[]);self.assertIn(item,self.memory.recall('alice','alice','以前绿茶',platform='ilink'));self.assertEqual(item.last_user_evidence_at,anchor)

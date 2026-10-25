@@ -319,12 +319,13 @@ class ILinkAdapter(BaseAdapter):
                 key = self._raw_key(raw)
                 if key not in existing:
                     raw["_wxbot_received_at"]=time.time()
+                    raw['_wxbot_persona_space']=self.current_persona_space()
                     self._pending.append(raw)
                     existing.add(key)
                     msg = self._normalize(raw)
                     if msg is not None:
                         self.remember_context(msg)
-                        self._cadence.record(msg.ctx_key+':'+msg.sender_id,key,raw['_wxbot_received_at'])
+                        self._cadence.record(self._cadence_key(msg),key,raw['_wxbot_received_at'])
                         self.note_activity(msg)
             if resp.get("get_updates_buf"):
                 self._get_updates_buf = resp["get_updates_buf"]
@@ -371,22 +372,42 @@ class ILinkAdapter(BaseAdapter):
 
     def _peer_pending(self,raw):
         return [r for r in self._pending if r.get('from_user_id')==raw.get('from_user_id')
-                and r.get('group_id')==raw.get('group_id')]
+                and r.get('group_id')==raw.get('group_id')
+                and self._raw_space(r)==self._raw_space(raw)]
+
+    def _raw_space(self, raw):
+        value=raw.get('_wxbot_persona_space')
+        return value if isinstance(value,str) and value else self.legacy_persona_space()
+
+    @staticmethod
+    def _cadence_key(msg):
+        key=msg.ctx_key+':'+msg.sender_id
+        return key+':space:'+msg.persona_space if msg.persona_space else key
+
+    def pending_turn(self, msg):
+        messages = []
+        for raw in self._pending:
+            candidate = self._normalize(raw)
+            if (candidate is not None and candidate.ctx_key == msg.ctx_key and candidate.sender_id == msg.sender_id
+                    and self.message_persona_space(candidate)==self.message_persona_space(msg)):
+                messages.append(candidate)
+        return merge_messages(messages) if messages else msg
 
     async def _batch_raw(self,raw):
         if not self.message_merge_window:return [raw]
         keys=raw.get('_wxbot_batch_keys')
-        if keys:return [r for r in self._pending if self._raw_key(r) in keys]
+        if keys:return [r for r in self._pending if self._raw_key(r) in keys and self._raw_space(r)==self._raw_space(raw)]
         raw.setdefault('_wxbot_received_at',time.time())
         while True:
             candidates=self._peer_pending(raw)
+            if hasattr(self,'active_space') and self._raw_space(raw)!=self.current_persona_space():break
             for r in candidates:r.setdefault('_wxbot_received_at',time.time())
             now=time.time()
             timed=[]
             for r in candidates:
                 m=self._normalize(r)
                 if m is None:continue
-                cadence_key=m.ctx_key+':'+m.sender_id
+                cadence_key=self._cadence_key(m)
                 self._cadence.record(cadence_key,self._raw_key(r),r['_wxbot_received_at'])
                 timed.append((m,r['_wxbot_received_at']))
             if not timed:break
@@ -410,7 +431,7 @@ class ILinkAdapter(BaseAdapter):
         # and client_id even if the user continues speaking in the meantime.
         if self._reply_key(msg) in self._outbox:return
         raw=next((r for r in self._pending if str(r.get('message_id') or r.get('client_id') or self._raw_key(r))==msg.msg_id
-                  and r.get('from_user_id')==msg.sender_id),None)
+                  and r.get('from_user_id')==msg.sender_id and self._raw_space(r)==self.message_persona_space(msg)),None)
         if raw and raw.get('_wxbot_batch_keys'):
             known=set(raw.get('_wxbot_batch_known',raw['_wxbot_batch_keys']))
             if any(self._raw_key(r) not in known for r in self._peer_pending(raw)):
@@ -557,6 +578,7 @@ class ILinkAdapter(BaseAdapter):
                 seq=raw.get("seq"),
                 session_id=raw.get("session_id"),
                 group_id=group_id,
+                persona_space=self._raw_space(raw),
             )
         except Exception:
             log.exception("归一化失败：%s", raw)

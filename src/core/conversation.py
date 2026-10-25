@@ -37,6 +37,8 @@ def has_video(msg):
 
 def merge_messages(messages):
     first=messages[0]
+    if any(m.persona_space != first.persona_space for m in messages):
+        raise ValueError('Conversation batch crosses persona spaces')
     token=next((m.context_token for m in reversed(messages) if m.context_token),None)
     parts=[];offset=0
     for index,msg in enumerate(messages):
@@ -58,9 +60,34 @@ class MessageBuffer:
         self.path=None;self.pending={};self.workers={};self.active={};self.typing_hints={};self.running=False
         self.capacity=asyncio.Semaphore(4)
     @staticmethod
-    def key(msg):return msg.ctx_key+":"+msg.sender_id
+    def key(msg):
+        base=msg.ctx_key+":"+msg.sender_id
+        return base+":space:"+msg.persona_space if msg.persona_space else base
     @staticmethod
-    def identity(msg):return msg.platform+":"+msg.ctx_key+":"+msg.sender_id+":"+msg.msg_id
+    def identity(msg):
+        base=msg.platform+":"+msg.ctx_key+":"+msg.sender_id+":"+msg.msg_id
+        return base+":space:"+msg.persona_space if msg.persona_space else base
+
+    def _space(self, field):
+        value=getattr(self,field,'')
+        value=value() if callable(value) else value
+        return value if isinstance(value,str) else ''
+
+    def _is_active(self,msg):
+        if not hasattr(self,'active_space'):return True
+        return (msg.persona_space or self._space('legacy_space'))==self._space('active_space')
+
+    def _restore_spaces(self):
+        rebuilt={}
+        for old_key,items in self.pending.items():
+            for msg,at in items:
+                if not msg.persona_space:msg.persona_space=self._space('legacy_space')
+                key=self.key(msg)
+                rebuilt.setdefault(key,[]).append((msg,at))
+                if key!=old_key and old_key in self.cadence.entries and key not in self.cadence.entries:
+                    self.cadence.entries[key]=self.cadence.entries[old_key]
+        for items in rebuilt.values():items.sort(key=lambda value:value[1])
+        self.pending=rebuilt
     def configure(self,window,max_wait,path=None,human=True,pause_timeout=120):
         self.human=human;self.pause_timeout=pause_timeout
         self.window=max(0.0,float(window));self.max_wait=max(self.window,float(max_wait))
@@ -83,6 +110,7 @@ class MessageBuffer:
             os.chmod(tmp,0o600);os.replace(tmp,self.path)
         finally:Path(tmp).unlink(missing_ok=True)
     def start(self):
+        self._restore_spaces()
         self.running=True
         for key in self.pending:self._start(key)
     def _start(self,key):
@@ -94,6 +122,7 @@ class MessageBuffer:
                 if self.running and self.pending.get(k):self._start(k)
             task.add_done_callback(finished)
     def submit(self,msg):
+        if not msg.persona_space:msg.persona_space=self._space('legacy_space')
         key=self.key(msg);items=self.pending.setdefault(key,[])
         if any(self.identity(m)==self.identity(msg) for m,_ in items):return
         if sum(map(len,self.pending.values()))>=200:raise RuntimeError('Conversation inbox is full')
@@ -104,6 +133,8 @@ class MessageBuffer:
         self._start(key)
     def note_typing(self,chat_id,sender_id,on=True,platform='onebot',chat_type='private'):
         key=f'ctx:{platform}:{chat_type}:{chat_id}:{sender_id}'
+        space=self._space('active_space')
+        if space:key+=':space:'+space
         if not self.pending.get(key):return False
         if on:
             now=time.time();self.typing_hints[key]={'at':now,'until':now+4}
@@ -122,6 +153,9 @@ class MessageBuffer:
         while self.running and self.pending.get(key):
             items=self.pending[key]
             while self.running:
+                # A switched-away "wait for me" never blocks the new persona.
+                # The handler durably preserves the old user-only experience.
+                if not self._is_active(items[-1][0]):break
                 plan=plan_wait(items,self.window,self.max_wait,self.human,self.pause_timeout,cadence=self.cadence.gaps(key))
                 is_ready,force=ready(plan,time.time(),items[-1][1],len(items))
                 if is_ready and self.typing_hints.get(key,{}).get('until',0)<=time.time():break

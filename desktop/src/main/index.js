@@ -27,6 +27,7 @@ const { Backend } = require('./backend');
 const { WindowManager } = require('./window');
 const { TrayManager } = require('./tray');
 const { registerIpc } = require('./ipc');
+const { CompanionWindow } = require('./companion');
 
 // 可选隔离数据目录：测试/便携部署时不污染默认用户配置。
 if (process.env.WXBOT_USER_DATA_DIR) {
@@ -47,6 +48,7 @@ app.isQuitting = false;
 const backend = new Backend();
 const windowMgr = new WindowManager();
 const trayMgr = new TrayManager();
+const companionMgr = new CompanionWindow();
 
 /** 优雅退出：先停后端，再退应用 */
 async function quitApp() {
@@ -59,6 +61,7 @@ async function quitApp() {
   }
   trayMgr.destroy();
   windowMgr.destroy();
+  companionMgr.destroy();
   app.quit();
 }
 
@@ -104,7 +107,11 @@ function buildAppMenu() {
             trayMgr.setStatus({ backend: 'starting' });
             const r = await backend.restart();
             trayMgr.setStatus({ backend: r.ok ? 'running' : 'crashed' });
-            if (r.ok) windowMgr.reload(`http://127.0.0.1:${r.port}`);
+            if (r.ok) {
+              const url = `http://127.0.0.1:${r.port}`;
+              windowMgr.reload(url);
+              companionMgr.reload(url);
+            }
             else dialog.showErrorBox('重启失败', r.error || '未知错误');
           },
         },
@@ -142,16 +149,21 @@ app.whenReady().then(async () => {
   // 托盘先建起来，保证用户随时有入口（即使后端还没起来）
   trayMgr.create({
     onOpen: () => windowMgr.show(),
+    onCompanion: () => companionMgr.show(backend.url),
     onRestart: async () => {
       trayMgr.setStatus({ backend: 'starting' });
       const r = await backend.restart();
       trayMgr.setStatus({ backend: r.ok ? 'running' : 'crashed' });
-      if (r.ok) windowMgr.reload(`http://127.0.0.1:${r.port}`);
+      if (r.ok) {
+        const url = `http://127.0.0.1:${r.port}`;
+        windowMgr.reload(url);
+        companionMgr.reload(url);
+      }
     },
     onQuit: quitApp,
   });
 
-  registerIpc({ windowMgr, backend, trayMgr, quit: quitApp });
+  registerIpc({ windowMgr, backend, trayMgr, companionMgr, quit: quitApp });
 
   // 后端事件 → 托盘状态 + 通知
   backend.on('ready', (port) => trayMgr.setStatus({ backend: 'running' }));
@@ -163,6 +175,7 @@ app.whenReady().then(async () => {
     if (r.ok) {
       trayMgr.setStatus({ backend: 'running' });
       windowMgr.reload(`http://127.0.0.1:${r.port}`);
+      companionMgr.reload(`http://127.0.0.1:${r.port}`);
     }
   });
   backend.on('error', (msg) => {

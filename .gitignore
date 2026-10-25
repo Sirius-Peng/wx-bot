@@ -7,6 +7,8 @@
 data/*
 !data/.gitkeep
 *.jsonl
+# Public, frozen synthetic decision-model regression fixture (never private chat).
+!tools/decision_model/stress-v1.jsonl
 # Reproducible synthetic exports; source lives in src/personas/phrolova.py.
 personas/phrolova/generated/
 config.json
@@ -65,3 +67,10 @@ desktop/resources/backend/
 .workbuddy-ai/
 .claude/
 .cursor/
+
+# Validated offline model artifacts are built separately, never committed.
+desktop/resources/decision-model/
+resources/decision-model/
+
+# Native-build license inventory is generated from the packaged runtime.
+desktop/resources/third-party/

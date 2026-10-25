@@ -18,11 +18,50 @@ class BaseAdapter(ABC):
 
     platform: str = "base"
 
+    def current_persona_space(self) -> str:
+        active = getattr(self, 'active_space', None)
+        value = active() if callable(active) else active
+        return value if isinstance(value, str) else self.legacy_persona_space()
+
+    def legacy_persona_space(self) -> str:
+        value = getattr(self, 'legacy_space', '')
+        value = value() if callable(value) else value
+        return value if isinstance(value, str) else ''
+
+    def message_persona_space(self, msg: WxMessage) -> str:
+        return msg.persona_space or self.legacy_persona_space()
+
+    def stamp_ingress(self, msg: WxMessage) -> WxMessage:
+        """Only true ingress gets the active space; restored envelopes keep theirs."""
+        if hasattr(self, 'active_space'):
+            msg.persona_space = self.current_persona_space()
+        return msg
+
     def on_activity(self, handler) -> None:
         """Observe private ingress before debounce, so proactive work yields immediately."""
         self._activity_handler = handler
 
+    def on_turn_preparation(self, handler) -> None:
+        self._turn_preparation_handler = handler
+
+    def pending_turn(self, msg: WxMessage) -> WxMessage:
+        """Read-only collector snapshot; concrete transports preserve their order."""
+        return msg
+
+    def collection_snapshot(self, msg: WxMessage) -> WxMessage:
+        return self.pending_turn(msg)
+
     def note_activity(self, msg: WxMessage) -> None:
+        prefetch=getattr(self,'prefetch_media',None)
+        if prefetch is not None and msg.images:
+            prefetch(msg)
+        prepare = getattr(self, '_turn_preparation_handler', None)
+        if prepare is not None:
+            try:
+                prepare(self.collection_snapshot(msg))
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).debug('Turn preparation skipped error_type=%s', type(exc).__name__)
         handler = getattr(self, '_activity_handler', None)
         if handler is not None:
             try:

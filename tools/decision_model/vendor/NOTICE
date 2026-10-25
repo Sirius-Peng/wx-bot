@@ -1,0 +1,7 @@
+Adapted development-only source: modeling.py and sequence.py
+Upstream: https://github.com/NandhaKishorM/laya
+Revision: d74e8be46ef5241e4ba2b16cd25e896f24f71373
+License: Apache License, Version 2.0 (see LICENSE).
+Original source is retained; this project adds a separate fixed three-class task head
+in ../pipeline.py. It does not distribute Chinese-Jev medical weights or claim that
+raw Laya scores are calibrated for this project's conversation policy.

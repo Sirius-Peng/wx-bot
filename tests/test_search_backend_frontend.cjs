@@ -1,0 +1,35 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const root=process.env.WXBOT_TEST_ROOT||path.resolve(__dirname,'..');
+const source=fs.readFileSync(path.join(root,'src/web/app.js'),'utf8');
+const html=fs.readFileSync(path.join(root,'src/web/index.html'),'utf8');
+const card=html.slice(html.indexOf('data-settings-section="search"'),html.indexOf('data-settings-section="reply"'));
+let tests=0;
+assert(card.includes('id="search-backend"'));assert(card.includes('value="tools"'));assert(card.includes('value="native"'));tests++;
+assert(card.includes('按工具请求次数额外计费'));assert(card.includes('不是免费或仅按 token 计费'));tests++;
+assert(card.includes('失败不会自动切到旧版搜索重复计费'));tests++;
+assert(card.includes('Search + Fetch 合计最多 2 次'));tests++;
+assert(card.includes('data-save-section="search"'));assert(card.includes('data-save-status="search"'));tests++;
+assert(card.includes('仅兼容方式使用'));assert(card.includes('不会更改主模型'));tests++;
+assert(source.includes("$('#search-backend').value = c.llm.search_backend || 'tools'"));tests++;
+assert(source.includes("$('#search-backend').addEventListener('change', syncSearchBackend)"));tests++;
+const elements=new Map();
+const context={JSON,Math,Number,CHANNELS:{wechat:true,qq:false},STATE:{config:{adapter:{},llm:{primary_model:'keep-main',search_model:'keep-native'},bot:{name:'fixture'}}}};
+context.$=selector=>{if(!elements.has(selector))elements.set(selector,{value:'',checked:false,disabled:false});return elements.get(selector);};
+vm.createContext(context);
+vm.runInContext(source.slice(source.indexOf('const SECTION_FIELDS ='),source.indexOf('function sectionStatus(')),context);
+vm.runInContext(source.slice(source.indexOf('function syncSearchBackend()'),source.indexOf('/** 平台卡片')),context);
+vm.runInContext(source.slice(source.indexOf('function collectConfig()'),source.indexOf('async function loadProactive()')),context);
+const fields=JSON.parse(vm.runInContext('JSON.stringify(SECTION_FIELDS.search)',context));
+assert.deepEqual(fields,['llm',['search_enabled','search_backend','search_key','search_model','context_timezone']]);tests++;
+for(const section of ['primary','fallback','judge','vision','reply','memory']){
+  const mapping=JSON.parse(vm.runInContext(`JSON.stringify(SECTION_FIELDS.${section})`,context));
+  assert(!mapping[1].includes('search_backend'));tests++;
+}
+context.$('#search-model').value='keep-native';context.$('#search-backend').value='tools';
+context.syncSearchBackend();assert(context.$('#search-model').disabled);assert.equal(context.$('#search-model').value,'keep-native');tests++;
+let saved=context.collectConfig();assert.equal(saved.llm.search_backend,'tools');assert.equal(saved.llm.search_model,'keep-native');tests++;
+context.$('#search-backend').value='native';context.syncSearchBackend();assert(!context.$('#search-model').disabled);tests++;
+saved=context.collectConfig();assert.equal(saved.llm.search_backend,'native');assert.equal(saved.llm.search_model,'keep-native');tests++;
+assert.equal(context.STATE.config.llm.primary_model,'keep-main');assert(!Object.hasOwn(context.STATE.config.llm,'search_backend'));tests++;
+console.log(`SEARCH_BACKEND_FRONTEND PASS tests=${tests} independent_save=1 backend_switch=1 native_setting_preserved=1 no_live_api=1`);

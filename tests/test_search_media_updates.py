@@ -56,7 +56,7 @@ class SearchReviewTests(unittest.IsolatedAsyncioTestCase):
   g,c=self.gateway();out=[x async for x in g.stream([{'role':'user','content':'帮我总结通行安排'}],chat_id='p')]
   self.assertEqual(len(out),1);self.assertIn('两条车道',out[0]);self.assertIn('预约',out[0]);self.assertEqual(out[0].count('http'),1);self.assertNotIn(TITLE,out[0]);self.assertEqual(c.call_count,3)
   data=c.call_args_list[1].kwargs['messages'];self.assertIn(SUMMARY,next(x['content'] for x in data if x['role']=='tool'))
-  review=c.call_args_list[2].kwargs;self.assertNotIn('tools',review);self.assertIn('联网回答复核',review['messages'][-1]['content'])
+  review=c.call_args_list[2].kwargs;self.assertEqual(review['tool_choice'],'none');self.assertTrue(review['tools']);self.assertIn('联网回答复核',review['messages'][-1]['content'])
  async def test_review_error_keeps_substantive_answer_not_error(self):
   g,c=self.gateway(RuntimeError('fixture-secret'),draft=FINAL);out=await g.chat([],chat_id='p');self.assertIn('预约',out);self.assertNotIn('fixture-secret',out)
  async def test_repeated_title_wall_uses_retained_synthesis(self):
@@ -74,7 +74,8 @@ class SearchReviewTests(unittest.IsolatedAsyncioTestCase):
   client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json=native())))
   g,c=self.gateway();g.web_search=DeepSeekWebSearch('fixture-not-real')
   with patch('src.core.web_search.make_client',return_value=client):out=await g.chat([],chat_id='p')
-  self.assertIn('预约',out);self.assertEqual(c.call_count,3);self.assertTrue(client.is_closed)
+  self.assertIn('预约',out);self.assertEqual(c.call_count,3);self.assertFalse(client.is_closed)
+  await g.aclose();self.assertTrue(client.is_closed)
 
  async def test_code_urls_survive_source_compaction(self):
   text='可以用下面的示例调用。\n```python\nget("https://api.example.com/v1")\n```'
@@ -91,7 +92,7 @@ class PartialMediaTests(unittest.IsolatedAsyncioTestCase):
   parts=(await ContextManager(__import__('src.store_memory',fromlist=['MemoryStore']).MemoryStore()).build(msg([{}, {}, {}]),image_inputs=data))[-1]['content']
   self.assertIn('[图片3]',[p.get('text') for p in parts]);self.assertEqual(sum(p['type']=='image_url' for p in parts),2)
  async def test_first_six_only_preserve_overflow_placeholders(self):
-  loader=ImageLoader();loader.fetch=AsyncMock(return_value=png());data=await loader.load_partial([{}]*8);self.assertEqual(loader.fetch.await_count,6);self.assertEqual(len(data),8);self.assertEqual(data[-2:],[None,None])
+  loader=ImageLoader();loader.fetch=AsyncMock(return_value=png());data=await loader.load_partial([{}]*8);self.assertEqual(loader.fetch.await_count,1);self.assertEqual(len(data),8);self.assertEqual(data[-2:],[None,None])
  async def test_resolver_failure_does_not_cancel_good_input(self):
   async def resolve(r):
    if r.get('bad'):raise MediaError('fixture')

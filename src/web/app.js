@@ -64,16 +64,16 @@ const ICON_EMPTY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 
 const PAGE_META = {
   guide: ['上手引导', '按步骤连接模型、QQ 与微信'],
-  overview: ['概览', '查看机器人运行状态与今日数据'],
-  connect:  ['接入设置', '配置通道并完成登录'],
-  memory:   ['人格知识库', '对用户的了解：经历慢慢沉淀，人格始终优先'],
+  overview: ['首页', '查看机器人运行状态与今日数据'],
+  connect:  ['连接', '配置通道并完成登录'],
+  memory:   ['人格与记忆', '对用户的了解：经历慢慢沉淀，人格始终优先'],
   messages: ['消息记录', '查看收发消息与触发判定结果'],
   statistics: ['对话统计', '以气泡图和排行查看高频词与常聊话题'],
-  'memory-graph': ['记忆拓扑', '从对话来源到长期记忆，直观看见关联'],
-  settings: ['模型与行为', '配置大模型与机器人性格'],
+  settings: ['设置', '配置大模型与机器人性格'],
 };
 
 function switchPage(name) {
+  if (name==='memory-graph'||name==='statistics') name='memory';
   if (!PAGE_META[name]) name = 'overview';
   STATE.page = name;
   $('#btn-start').hidden = !!STATE.status?.running || name === 'guide';
@@ -83,22 +83,21 @@ function switchPage(name) {
   $('#page-title').textContent = title;
   $('#page-sub').textContent = sub;
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
-  if (name === 'memory') loadMemory();
+  if (name === 'memory') {loadMemory();loadStatistics();loadConfig();}
   if (name === 'messages') loadMessages();
   if (name === 'statistics') loadStatistics();
-  if (name === 'memory-graph') loadMemoryGraph();
-  else leaveMemoryGraph();
+
   if (name === 'settings' || name === 'connect') loadConfig();
   if (name === 'guide') refreshOnboarding().catch(e=>guideMessage(e.message));
   else GUIDE.wechatSession++;
 
-  // 接入设置页需要持续刷新 QQ 网关状态
+  // 连接页需要持续刷新 QQ 网关状态
   if (name === 'connect') startConnectPolling();
   else stopConnectPolling();
 }
 
 // ⚠️ 必须先声明：删掉「Docker 面板」那段时把 let 声明一起删了，
-//    结果首次进入「接入设置」页就读到未声明变量 → ReferenceError，
+//    结果首次进入「连接」页就读到未声明变量 → ReferenceError，
 //    整页状态轮询起不来（界面一直显示"等待中"，控制台报错）。
 let connectPollTimer = null;
 
@@ -114,7 +113,7 @@ function stopConnectPolling() {
     clearInterval(connectPollTimer);
     connectPollTimer = null;
   }
-  // 离开「接入设置」页要停掉扫码轮询，避免定时器泄漏
+  // 离开「连接」页要停掉扫码轮询，避免定时器泄漏
   if ($('#qq-login-modal').hidden && !STATE.qqLoginPending) stopQQLoginPolling();
 }
 
@@ -155,7 +154,7 @@ async function refreshStatus() {
     : '先听完整段表达，再自然接话';
   $('#hero-desc').textContent = running
     ? `正在接收消息：${rule}`
-    : (s.last_error || '完成接入设置后点击「启动机器人」即可开始工作');
+    : (s.last_error || '完成连接后点击「启动机器人」即可开始工作');
   if (running && s.wechat_delivery) {
     const d = s.wechat_delivery;
     const label = { api_accepted: '接口已接受', retry_pending: '发送网络异常，等待重试', generation_retry_pending: '模型网络异常，保留消息待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status;
@@ -242,6 +241,67 @@ async function loadStorage() {
     $('#btn-open-storage').hidden = !window.wxbotDesktop;
     renderImportStatus(s.import || {status:'none'});
   } catch (e) { $('#storage-status').textContent = '数据位置读取失败：' + e.message; }
+}
+
+/* Runtime observations only; deliberately not called by page loads or timers. */
+function usageCount(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value.toLocaleString('zh-CN') : '未知';
+}
+
+function usageRatio(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+    ? (value * 100).toFixed(1) + '%' : '未知';
+}
+
+function renderUsageDiagnostics(data) {
+  if (!data || data.scope !== 'recent_runtime_events' || !data.summary ||
+      typeof data.summary !== 'object' || Array.isArray(data.summary)) {
+    throw new Error('未返回当前运行的用量统计');
+  }
+  const summary = data.summary, cache = summary.cache || {}, fields = summary.fields || {};
+  const rawTools = data.tool_requests?.operations || {};
+  const rawRows = ['search','fetch'].map(name => {
+    const row = rawTools[name] || {};
+    return `${name === 'search' ? '官方 Search' : '官方 Fetch'}：${usageCount(row.attempts)} 次尝试，返回非空结果 ${usageCount(row.results_returned)} 次，失败 ${usageCount(row.failed)} 次，取消 ${usageCount(row.cancelled)} 次，结果未知 ${usageCount(row.result_unknown)} 次`;
+  }).map(esc).join('<br>');
+  const observedRatio = Object.hasOwn(cache, 'observed_hit_ratio') ? cache.observed_hit_ratio : cache.hit_ratio;
+  const field = (name, label) => {
+    const record = fields[name] || {};
+    return `<div class="field"><span>${esc(label)}</span><strong>${esc(usageCount(record.observed_sum))}</strong><em>已知 ${esc(usageCount(record.known_calls))} 次 · 未知 ${esc(usageCount(record.unknown_calls))} 次</em></div>`;
+  };
+  const names = {chat:'聊天回复',decision:'接话判定',memory:'记忆整理',search:'原生搜索',
+    search_plan:'搜索规划',search_synthesis:'搜索整合',search_review:'搜索复核',
+    compaction:'上下文压缩',proactive:'主动联系',late_reply:'稍后接话',internal:'内部任务',unknown:'未知任务'};
+  const tasks = summary.by_task && typeof summary.by_task === 'object' && !Array.isArray(summary.by_task)
+    ? Object.entries(summary.by_task) : [];
+  const taskRows = tasks.map(([name, record]) => `<li>${esc(Object.hasOwn(names,name) ? names[name] : name)}：${esc(usageCount(record?.attempts))} 次请求；用量未知 ${esc(usageCount(record?.usage_unknown_calls))} 次</li>`).join('');
+  return `<p>当前运行近期 ${esc(usageCount(data.observed_events))} 条已记录事件 · 共 ${esc(usageCount(summary.attempts))} 次模型请求尝试。</p>
+    <div class="field-grid">
+      <div class="field"><span>已知输入的加权缓存命中率</span><strong>${esc(usageRatio(observedRatio))}</strong><em>已知命中 ${esc(usageCount(cache.hit_tokens))} / 已知输入 ${esc(usageCount(cache.input_tokens))} token</em></div>
+      <div class="field"><span>总体缓存命中率</span><strong>${esc(usageRatio(cache.overall_hit_ratio))}</strong><em>缓存覆盖：已知 ${esc(usageCount(cache.known_calls))} 次 · 未知 ${esc(usageCount(cache.unknown_calls))} 次 · 数据不一致 ${esc(usageCount(cache.inconsistent_calls))} 次</em></div>
+      ${field('prompt_tokens','已知输入 token')}
+      ${field('cache_miss_tokens','未命中输入 token')}
+      ${field('completion_tokens','输出 token')}
+      ${field('reasoning_tokens','思考 token（输出子集）')}
+    </div>
+    <p>本地搜索结果复用：${esc(usageCount(data.local_search_cache))} 次（不是供应商 KV 命中）。</p>
+    <p>原始联网 API（按次，不计入模型 token 或 KV 命中率）</p><p>${rawRows}</p>
+    <p>分任务调用数</p>${taskRows ? `<ul>${taskRows}</ul>` : '<p>尚无可用任务统计。</p>'}
+    <p class="help-note">当前运行近期最多 500 条事件，不是账户历史账单。思考属于输出子集，不重复相加；未知不代表没有消耗。此处不估算价格或费用。</p>`;
+}
+
+async function loadUsageDiagnostics() {
+  const button = $('#btn-usage-refresh'), box = $('#usage-diagnostics');
+  if (!button || !box || button.disabled) return;
+  button.disabled = true;
+  box.textContent = '正在获取当前运行的用量诊断…';
+  try {
+    const result = await api('/api/diagnostics');
+    box.innerHTML = renderUsageDiagnostics(result?.usage);
+  } catch (error) {
+    box.textContent = '未获取用量诊断：' + (error?.message || '请稍后手动刷新');
+  } finally { button.disabled = false; }
 }
 
 async function backupStorage() {
@@ -333,18 +393,18 @@ async function restartForImport() {
   finally {IMPORT.busy=false;$('#btn-import-restart').disabled=false;$('#btn-import-cancel').disabled=false;}
 }
 
-/* ══════════ 接入设置 ══════════ */
+/* ══════════ 连接 ══════════ */
 
 const DIRTY_SECTIONS = new Set();
 const SECTION_FIELDS = {
-  primary: ['llm', ['primary_base','primary_model','primary_key']],
+  primary: ['llm', ['primary_base','primary_model','primary_key','context_window_tokens','context_compact_ratio']],
   fallback: ['llm', ['fallback_base','fallback_model','fallback_key']],
   judge: ['llm', ['judge_base','judge_model','judge_key']],
   vision: ['llm', ['vision_base','vision_model','vision_key']],
-  search: ['llm', ['search_enabled','search_key','search_model','context_timezone']],
+  search: ['llm', ['search_enabled','search_backend','search_key','search_model','context_timezone']],
   persona: ['bot', ['name','persona','persona_profile','persona_relationship']],
   proactive: ['bot', ['proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end']],
-  reply: ['bot', ['reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
+  reply: ['bot', ['chat_mode','reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
   memory: ['bot', ['memory_enabled','memory_inject','memory_extract_interval']],
   channels: ['adapter', ['wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror']]
 };
@@ -384,6 +444,8 @@ async function loadConfig() {
   $('#primary-base').value = c.llm.primary_base || '';
   $('#primary-model').value = c.llm.primary_model || '';
   $('#primary-key').value = c.llm.primary_key || '';
+  $('#context-window-tokens').value = c.llm.context_window_tokens ?? 0;
+  $('#context-compact-percent').value = (c.llm.context_compact_ratio ?? .4) * 100;
   $('#fallback-base').value = c.llm.fallback_base || '';
   $('#fallback-model').value = c.llm.fallback_model || '';
   $('#fallback-key').value = c.llm.fallback_key || '';
@@ -395,11 +457,14 @@ async function loadConfig() {
   $('#vision-model').value = c.llm.vision_model || '';
   $('#vision-key').value = c.llm.vision_key || '';
   $('#search-enabled').checked = c.llm.search_enabled !== false;
+  $('#search-backend').value = c.llm.search_backend || 'tools';
   $('#search-key').value = c.llm.search_key || '';
   $('#search-model').value = c.llm.search_model || 'deepseek-flash';
   $('#context-timezone').value = c.llm.context_timezone || 'Asia/Shanghai';
 
   // 机器人行为
+  $('#chat-mode').value = c.bot.chat_mode || 'fast';
+  $('#companion-enabled').checked=!!c.companion?.enabled;
   $('#bot-name').value = c.bot.name || '';
   $('#bot-persona').value = c.bot.persona || '';
   $('#persona-profile').value = c.bot.persona_profile || 'custom';
@@ -410,7 +475,7 @@ async function loadConfig() {
   $('#memory-interval').value = c.bot.memory_extract_interval || 3;
   $('#reply-mode').value = c.bot.reply_mode || 'natural';
   $('#late-reply-enabled').checked = c.bot.late_reply_enabled !== false;
-  $('#message-merge-window').value = c.bot.message_merge_window ?? 4;
+  $('#message-merge-window').value = c.bot.message_merge_window ?? 2;
   $('#message-merge-max-wait').value = c.bot.message_merge_max_wait ?? 10;
   $('#humanized-wait').checked = c.bot.humanized_wait !== false;
   $('#typing-indicator').checked = c.bot.typing_indicator !== false;
@@ -431,11 +496,16 @@ async function loadConfig() {
   }
 
   for (const draft of drafts) { const el = $('#'+draft.id); if(el){el.value=draft.value;el.checked=draft.checked;} }
+  syncSearchBackend();
   CHANNELS.wechat = $('#adapter-type input[value="wechat"]').checked;
   CHANNELS.qq = $('#adapter-type input[value="qq"]').checked;
   renderPlatformCards();
   applyChannels();
   updateWizardStatus(c);
+}
+
+function syncSearchBackend() {
+  $('#search-model').disabled = $('#search-backend').value !== 'native';
 }
 
 /** 平台卡片：显式 .is-selected 类驱动选中外观，禁用态置灰 */
@@ -535,6 +605,8 @@ function collectConfig() {
   c.llm.primary_base = $('#primary-base').value.trim();
   c.llm.primary_model = $('#primary-model').value.trim();
   c.llm.primary_key = $('#primary-key').value.trim();
+  c.llm.context_window_tokens = Number($('#context-window-tokens').value);
+  c.llm.context_compact_ratio = Number($('#context-compact-percent').value) / 100;
   c.llm.fallback_base = $('#fallback-base').value.trim();
   c.llm.fallback_model = $('#fallback-model').value.trim();
   c.llm.fallback_key = $('#fallback-key').value.trim();
@@ -546,6 +618,7 @@ function collectConfig() {
   c.llm.vision_model = $('#vision-model').value.trim();
   c.llm.vision_key = $('#vision-key').value.trim();
   c.llm.search_enabled = $('#search-enabled').checked;
+  c.llm.search_backend = $('#search-backend').value;
   c.llm.search_key = $('#search-key').value.trim();
   c.llm.search_model = $('#search-model').value.trim();
   c.llm.context_timezone = $('#context-timezone').value.trim();
@@ -556,6 +629,7 @@ function collectConfig() {
   c.bot.persona_profile = $('#persona-profile').value;
   c.bot.persona_relationship = $('#persona-relationship').value;
   c.bot.group_reply_at_sender = $('#group-at-sender').checked;
+  c.bot.chat_mode = $('#chat-mode').value;
   c.bot.reply_mode = $('#reply-mode').value;
   c.bot.late_reply_enabled = $('#late-reply-enabled').checked;
   c.bot.message_merge_window = Math.min(10, Math.max(0, Number($('#message-merge-window').value)));
@@ -621,6 +695,7 @@ async function saveSection(section, quiet = false) {
     else { markSectionDirty(section); sectionStatus(section, '已保存上一版；新修改尚未保存', true); }
     // Re-render only persisted sections; other cards retain their unsaved drafts.
     await loadConfig();
+    if(section==='persona')await loadMemory();
     if (saved.requires_restart && STATE.status?.running) {
       const action = saved.config.adapter.qq_enabled || saved.config.adapter.wechat_enabled ? 'restart' : 'stop';
       const result = await api(`/api/bot/${action}`, {method:'POST'});
@@ -809,7 +884,7 @@ async function startQQGateway({saveForm=true}={}) {
     const r=await api('/api/qq/setup',{method:'POST'});
     if(!r.ok)throw new Error(r.message||'网关启动未完成');
     st=await pollQQStatus();
-    if(!st || st.task?.stage==='error'||st.task?.stage==='timeout')throw new Error(st?.task?.message||'网关尚未就绪，请查看接入设置中的日志');
+    if(!st || st.task?.stage==='error'||st.task?.stage==='timeout')throw new Error(st?.task?.message||'网关尚未就绪，请查看连接中的日志');
     if(st.task?.needsUser){reportQQProgress(st.task.message||'请按提示完成安装后继续');return false;}
     if(!st.napcat?.running&&st.task?.stage!=='waiting_login')throw new Error('网关还未运行，请稍后继续');
     // Reload saved tokens from setup, never submit stale fields from hidden forms.
@@ -996,7 +1071,7 @@ function startQQLoginPolling() {
   const t0=Date.now();let querying=false;
   STATE.qqLoginTimer=setInterval(async()=>{
     if(querying)return;
-    if(Date.now()-t0>5*60*1000){stopQQLoginPolling();$('#qq-login-hint').textContent=$('#qq-qr-status').textContent='登录等待超时，请重试快速登录或扫码';reportQQProgress('QQ 登录等待超时，可在接入设置重试');return;}
+    if(Date.now()-t0>5*60*1000){stopQQLoginPolling();$('#qq-login-hint').textContent=$('#qq-qr-status').textContent='登录等待超时，请重试快速登录或扫码';reportQQProgress('QQ 登录等待超时，可在连接重试');return;}
     querying=true;
     try{
       const r=await api('/api/qq/login/check');
@@ -1099,11 +1174,13 @@ async function toggleQQLogs() {
   }
 }
 
-/* ══════════ 人格知识库 ══════════ */
+/* ══════════ 人格与记忆 ══════════ */
 
 let memoryItems = [];
 
+let memoryLoadSequence=0;
 async function loadMemory() {
+  const sequence=++memoryLoadSequence;
   const kw = ($('#mem-search') || {}).value || '';
   const q = new URLSearchParams();
   if (kw) q.set('keyword', kw);
@@ -1115,11 +1192,13 @@ async function loadMemory() {
     toast('读取知识库失败：' + e.message, 'err');
     return;
   }
+  if(sequence!==memoryLoadSequence)return;
   memoryItems = data.items || [];
+  if(data.space)$('#memory-space-status').textContent=`当前独立空间：${data.space.profile} / ${data.space.relationship} · 记忆：${data.space.memory_file} · 人格配置：${data.space.persona_file}。切回其他模式可查看其原有内容；明确遗忘在所有空间生效。`;
   renderMemoryStats({...data.stats, categories:data.categories});
   renderMemoryList(memoryItems);
   await loadForgotten();
-  $('#identity-list').innerHTML = (data.identities || []).map(it => `<div>${it.accounts.map(a => `${a.platform === 'ilink' ? '微信' : 'QQ'} ${esc(a.owner_id)}`).join(' ↔ ')} <button class="btn btn-ghost btn-sm" data-unlink="${esc(it.id)}">解除关联</button></div>`).join('') || '尚未关联；手动通用记忆始终对两个通道生效。';
+  $('#identity-list').innerHTML = (data.identities || []).map(it => `<div>${it.accounts.map(a => `${a.platform === 'ilink' ? '微信' : a.platform==='desktop'?'桌面':'QQ'} ${esc(a.owner_id)}`).join(' ↔ ')} <button class="btn btn-ghost btn-sm" data-unlink="${esc(it.id)}">解除关联</button></div>`).join('') || '尚未关联，各账号独立；手动通用记忆对所有通道生效。';
   $$('#identity-list [data-unlink]').forEach(b => b.addEventListener('click', async () => {
     if (!await confirmAction('解除后按原账号分别使用记忆，来源记录会保留。确定解除？')) return;
     await api(`/api/memory/identities/${encodeURIComponent(b.dataset.unlink)}`, {method:'DELETE'});
@@ -1206,7 +1285,7 @@ function renderMemoryList(items) {
           </span>
           <span>${esc(it.phaseLabel || '形成中')}</span>
           ${it.status && it.status !== 'active' ? `<span>${esc(it.stateLabel || '历史版本')}</span>` : ''}
-          <span>来源 ${esc(it.platform === 'ilink' ? '微信' : it.platform === 'onebot' ? 'QQ' : '手动/旧版')} · ${esc(it.owner_id || '通用')}</span>
+          <span>来源 ${esc(it.platform === 'ilink' ? '微信' : it.platform === 'onebot' ? 'QQ' : it.platform==='desktop'?'桌面':'手动/旧版')} · ${esc(it.owner_id || '通用')}</span>
           ${memoryEvidenceMarkup(it)}
           <span>使用 ${it.hits || 0} 次</span>
           <span>用户证据 ${esc(it.last_user_evidence_at ? fmtMemoryTime(it.last_user_evidence_at) : (it.updatedAt || '未知'))}</span>
@@ -1277,9 +1356,10 @@ async function saveMemory() {
 /* ══════════ 事件绑定 ══════════ */
 
 function bind() {
+  bindCompanion();
   bindStatistics();
-  bindMemoryGraph();
   $('#btn-storage-backup').addEventListener('click',backupStorage);
+  $('#btn-usage-refresh').addEventListener('click',loadUsageDiagnostics);
   $('#import-source').addEventListener('input',invalidateImportPreview);
   $('#btn-import-choose').addEventListener('click',chooseImportDirectory);
   $('#btn-import-preview').addEventListener('click',previewImportDirectory);
@@ -1292,8 +1372,10 @@ function bind() {
   $('#mem-history').addEventListener('change', loadMemory);
   $('#btn-identity-link').addEventListener('click', async () => {
     try {
-      await api('/api/memory/identities', {method:'POST', body:JSON.stringify({wechat_id:$('#identity-wechat').value.trim(), qq_id:$('#identity-qq').value.trim()})});
-      toast('已关联，两个平台将共享此人的长期记忆', 'ok');
+      const accounts=[['ilink','identity-wechat'],['onebot','identity-qq'],['desktop','identity-desktop']].map(([platform,id])=>({platform,owner_id:$('#'+id).value.trim()})).filter(a=>a.owner_id);
+      if(accounts.length<2){toast('请填写至少两个属于同一个人的账号','info');return;}
+      await api('/api/memory/identities', {method:'POST', body:JSON.stringify({accounts})});
+      toast('已关联，所选账号将共享此人的长期记忆', 'ok');
       await loadMemory();
     } catch(e) { toast(e.message, 'err'); }
   });
@@ -1307,7 +1389,7 @@ function bind() {
     await loadRecent();
     if (STATE.page === 'messages') await loadMessages();
     if (STATE.page === 'statistics') await loadStatistics();
-    if (STATE.page === 'memory-graph') await loadMemoryGraph();
+
     if (STATE.page === 'memory') await loadMemory();
     toast('已刷新');
   });
@@ -1352,7 +1434,7 @@ function bind() {
   $('#btn-get-qr').addEventListener('click', getQR);
   $('#btn-check-login').addEventListener('click', checkLogin);
 
-  // 人格知识库
+  // 人格与记忆
   $('#btn-mem-refresh').addEventListener('click', loadMemory);
   $('#btn-mem-add').addEventListener('click', openMemoryModal);
   let memTimer = null;
@@ -1410,11 +1492,14 @@ function bind() {
   $$('[data-settings-section]').forEach(card=>{
     for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.id && e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
   });
+  $('#search-backend').addEventListener('change', syncSearchBackend);
   $('#btn-phrolova-preset').addEventListener('click', async () => {
     try {
       const data = await api('/api/persona/profiles');
       const preset = data.profiles.find(p => p.id === 'phrolova');
-      $('#bot-name').value = preset.default_name;
+      $('#chat-mode').value = c.bot.chat_mode || 'fast';
+  $('#companion-enabled').checked=!!c.companion?.enabled;
+  $('#bot-name').value = preset.default_name;
       $('#bot-persona').value = preset.default_persona;
       $('#persona-profile').value = preset.id;
       $('#persona-relationship').value = 'neutral';
@@ -1575,3 +1660,32 @@ init().catch(e => {
   console.error(e);
   toast('界面初始化失败，请刷新页面', 'err');
 });
+
+/* v3 optional local surface; all settings remain independently persisted. */
+function bindCompanion(){
+  $('#companion-enabled').addEventListener('change',async event=>{
+    try{const r=await api('/api/config/section/companion',{method:'PATCH',body:JSON.stringify({enabled:event.target.checked})});STATE.config=r.config;toast('桌面伙伴设置已保存','ok');}
+    catch(error){event.target.checked=!event.target.checked;toast(error.message,'err');}
+  });
+  $('#btn-companion-open').addEventListener('click',()=>{
+    if(!$('#companion-enabled').checked){toast('请先勾选启用桌面会话','info');return;}
+    if(window.wxbotDesktop?.companion)window.wxbotDesktop.companion.show();else window.open('/companion','wxbot-companion','width=380,height=620');
+  });
+  $('#btn-open-history').addEventListener('click',()=>switchPage('messages'));
+  $('#btn-open-guide').addEventListener('click',()=>switchPage('guide'));
+  $('#btn-companion-import').addEventListener('click',async()=>{
+    const status=$('#companion-status');
+    if(!window.wxbotDesktop?.companion){status.textContent='请使用桌面应用导入本地Live2D模型。';return;}
+    try{
+      const selected=await window.wxbotDesktop.companion.chooseModel();if(selected.canceled)return;
+      const importOne=async manifest=>{
+        const result=await api('/api/companion/model/import',{method:'POST',body:JSON.stringify({path:selected.path,manifest})});
+        if(result.needs_selection){
+          status.replaceChildren();const label=document.createElement('label');label.textContent='选择模型清单：';const select=document.createElement('select');
+          for(const name of result.manifests){const option=document.createElement('option');option.value=name;option.textContent=name;select.appendChild(option);}
+          const button=document.createElement('button');button.textContent='导入所选模型';button.className='btn btn-ghost';button.onclick=()=>importOne(select.value).catch(e=>{status.textContent=e.message;});label.appendChild(select);status.append(label,button);
+        }else{await window.wxbotDesktop.companion.reload();status.textContent='已导入 '+result.name+'，伙伴窗口已刷新。';}
+      };await importOne('');
+    }catch(error){status.textContent='导入未完成：'+error.message;}
+  });
+}

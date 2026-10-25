@@ -1207,3 +1207,5 @@ body.is-electron.is-mac .brand { padding-top: 4px; }
 dialog.action-confirm { border: 0; padding: 0; color: var(--text); width: calc(100% - 48px); }
 dialog.action-confirm::backdrop { background: rgba(20,26,34,.42); backdrop-filter: blur(2px); }
 #action-confirm-message { padding: 16px 20px 0; margin: 0; white-space: pre-wrap; line-height: 1.65; }
+/* v3 integrated local insights; no separate chart dashboard or graph engine. */
+.memory-statistics{margin-top:24px;border-top:1px solid var(--border,#e3e6e9);padding-top:20px}.memory-statistics .stats-filters .field-grid>label:nth-child(n+3),.memory-statistics .stats-summary,.memory-statistics .stats-method{display:none}.memory-statistics .stats-bubbles{min-height:220px}.memory-statistics .stats-columns{grid-template-columns:minmax(0,1.3fr) minmax(210px,1fr)}

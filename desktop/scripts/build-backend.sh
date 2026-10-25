@@ -39,6 +39,8 @@ PIP_SOURCE="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
 "$PY" -m pip install -q -r "$REPO_ROOT/requirements.txt" pyinstaller --index-url "$PIP_SOURCE" || \
   "$PY" -m pip install -q -r "$REPO_ROOT/requirements.txt" pyinstaller --index-url https://pypi.org/simple
 
+"$PY" "$DESKTOP_DIR/scripts/collect-notices.py"
+
 # ── 3. 清理旧产物 ────────────────────────────────────────────
 # 只清后端自己的产物；dist/ 是应用打包的输出，不归这里管
 rm -rf "$DESKTOP_DIR/build" "$OUT_DIR"
@@ -80,6 +82,15 @@ SEP=":"   # macOS / Linux 用冒号分隔 add-data
   --collect-all httpcore \
   --collect-all certifi \
   --collect-all tzdata \
+  --exclude-module src.core.local_decision \
+  --exclude-module src.core.local_decision_worker \
+  --exclude-module src.core.local_decision_cpu \
+  --exclude-module onnxruntime \
+  --exclude-module onnx \
+  --exclude-module tokenizers \
+  --exclude-module numpy \
+  --exclude-module torch \
+  --exclude-module transformers \
   --collect-all jieba \
   "$DESKTOP_DIR/backend/entry.py"
 

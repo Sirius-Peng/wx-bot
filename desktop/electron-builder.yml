@@ -11,6 +11,10 @@ appId: com.siriuspeng.wxbot
 productName: 微信AI助手
 copyright: Copyright © 2026 Sirius-Peng
 
+# Formal packages use cloud decision only. Check resource configuration and reject
+# stale local-model dependencies even when electron-builder is invoked directly.
+beforePack: ./scripts/verify-runtime-resources.cjs
+
 directories:
   output: dist
   buildResources: assets
@@ -23,6 +27,12 @@ files:
 
 # 不打进 asar、以独立文件形式放在 Resources/ 下
 extraResources:
+  - from: ../LICENSE
+    to: LICENSE
+  - from: ../THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+  - from: resources/third-party
+    to: third-party
   # 网页界面（Python 后端直接读这个目录）
   - from: ../src/web
     to: web

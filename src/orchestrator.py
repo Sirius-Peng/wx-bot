@@ -21,6 +21,8 @@ from .core.sender import HumanLikeSender, DeliveryError
 from .core.trigger import TriggerRouter
 from .core.types import WxMessage
 from .core.turn_coordinator import TurnCoordinator, ConversationStateError, source_id
+from .core.context import ContextWindowExceeded
+from .core.turn_preparation import TurnPreparation, prior_turns, recall_query
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +32,9 @@ class Orchestrator:
                  ctx: ContextManager, router: TriggerRouter, sender: HumanLikeSender,
                  memory=None, group_reply_at_sender: bool = True, typing_indicator: bool = True,
                  coordinator=None, reply_decider=None, late_reply_enabled=True):
+        from contextvars import ContextVar
+        self._turn_resources=ContextVar('turn_resources',default=None)
+        self._persona_space=''
         self.adapter = adapter
         self.store = store
         self.llm = llm
@@ -52,29 +57,76 @@ class Orchestrator:
         self._turn_counter: dict[str, int] = {}
         self._tasks: set[asyncio.Task] = set()
         self._memory_tasks: set[asyncio.Task] = set()
+        self._typing_generations: dict[str,int] = {}
+        self._typing_locks: dict[str,asyncio.Lock] = {}
+        self._typing_cleanup_tasks: set[asyncio.Task] = set()
+        self._retired_work: set[asyncio.Task] = set()
+        self.preparation = TurnPreparation(self)
         adapter.on_message(self.handle)
+        if hasattr(adapter, 'on_turn_preparation'):
+            adapter.on_turn_preparation(self.preparation.accept)
 
     # ── 主链路 ────────────────────────────────────────────────
 
+    @property
+    def store(self):
+        resources=self._turn_resources.get()
+        return resources[0] if resources else self._store
+    @store.setter
+    def store(self,value):self._store=value
+    @property
+    def ctx(self):
+        resources=self._turn_resources.get()
+        return resources[1] if resources else self._ctx
+    @ctx.setter
+    def ctx(self,value):self._ctx=value
+    @property
+    def memory(self):
+        resources=self._turn_resources.get()
+        return resources[2] if resources else self._memory
+    @memory.setter
+    def memory(self,value):self._memory=value
+    @property
+    def persona_space(self):
+        resources=self._turn_resources.get()
+        return resources[3] if resources else self._persona_space
+    @persona_space.setter
+    def persona_space(self,value):self._persona_space=value
+
     async def handle(self, msg: WxMessage) -> None:
+        resource_marker=self._turn_resources.set((self._store,self._ctx,self._memory,self._persona_space))
         task = asyncio.current_task()
         if task is not None:
             self._tasks.add(task)
         try:
+            handler=getattr(self,'inactive_handler',None)
+            incoming=getattr(msg,'persona_space','') or getattr(self.adapter,'legacy_space','')
+            if handler is not None and incoming and incoming!=self._persona_space:
+                await handler(msg)
+                return
             await self._handle(msg)
         finally:
             self._tasks.discard(task)
+            self._turn_resources.reset(resource_marker)
 
     async def close(self) -> None:
         # 重启接入通道前先停止旧消息任务，防止向已关闭的适配器继续发送。
         current = asyncio.current_task()
+        await self.preparation.close()
         tasks = [t for t in self._tasks | self._memory_tasks if t is not current]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        if hasattr(self.ctx,"close"):await self.ctx.close()
-        gateways = {self.llm, getattr(self.judge, "gateway", None)}
-        for gateway in gateways:
+        await asyncio.gather(*self._typing_cleanup_tasks,return_exceptions=True)
+        if hasattr(self.images,'aclose'):await self.images.aclose()
+        contexts={self._ctx,*getattr(self,'_persona_contexts',{}).values()}
+        for ctx in contexts:
+            if hasattr(ctx,'close'):await ctx.close()
+        if self._retired_work:
+            await asyncio.wait(self._retired_work, timeout=1.0)
+        gateways = (self.llm, getattr(self.judge, "gateway", None),
+                    getattr(self.reply_decider, "gateway", None))
+        for gateway in {id(g): g for g in gateways}.values():
             if gateway is not None and hasattr(gateway, "aclose"):
                 await gateway.aclose()
 
@@ -106,15 +158,19 @@ class Orchestrator:
     async def _process(self, msg: WxMessage) -> None:
         tid=self.coordinator.begin(msg)
         marker=self._active_turn.set(tid)
-        memory_marker=self._memory_snapshot.set(self._memory_revision(msg))
+        memory_marker=self._memory_snapshot.set(self._memory_revision(msg,live=False))
         self.coordinator.enter(msg)
         try:
-            await self._process_turn(msg,tid)
+            self._check_current(msg)
+            with self.preparation.bind(msg):
+                await self._process_turn(msg,tid)
         except ConversationChanged:
             self.coordinator.finish(tid,'superseded','新来话使未提交旧稿失效')
+            await self._cancel_preview(msg)
             raise
         except asyncio.CancelledError:
             # A collector will recover unfinished raw inbox work after restart.
+            await self._cancel_preview(msg)
             raise
         except DeliveryError:
             self.coordinator.finish(tid,'uncertain','回复投递故障，请核查原投递状态')
@@ -123,6 +179,7 @@ class Orchestrator:
             self.coordinator.leave(msg)
             self._active_turn.reset(marker)
             self._memory_snapshot.reset(memory_marker)
+            if hasattr(self.ctx, 'discard'): self.ctx.discard(msg)
 
     async def _process_turn(self,msg,tid):
         prior=self.coordinator.turns.get(tid,{})
@@ -152,7 +209,8 @@ class Orchestrator:
             return
 
         if self.reply_decider is not None and replay is None:
-            natural=await self._current_work(msg,self.reply_decider.decide(msg,await self.store.get_recent(msg.ctx_key)))
+            history=prior_turns(msg,await self.store.get_recent(msg.ctx_key))
+            natural=await self._current_work(msg,self.reply_decider.decide(msg,history))
             self.coordinator.decide(tid,natural,late_enabled=self.late_reply_enabled)
             # Feed the existing message-log/UI hooks without exposing control fields in chat.
             decision.should_reply=natural.action=='reply'
@@ -163,7 +221,9 @@ class Orchestrator:
                 return
 
         started=asyncio.Event()
-        typing_task=(asyncio.create_task(self._typing_signal(msg,started))
+        generation=self._typing_generations.get(msg.chat_id,0)+1
+        self._typing_generations[msg.chat_id]=generation
+        typing_task=(asyncio.create_task(self._typing_signal(msg,started,generation))
                      if self.typing_indicator and hasattr(self.adapter,'send_typing') else None)
         try:
             await self._reply(msg)
@@ -172,7 +232,12 @@ class Orchestrator:
             if typing_task is not None:
                 typing_task.cancel();await asyncio.gather(typing_task,return_exceptions=True)
                 needs_cleanup = getattr(self.adapter,'typing_cleanup_required',lambda _:False)(msg.chat_id)
-                if started.is_set() or needs_cleanup:await self._typing_once(msg,False)
+                if started.is_set() or needs_cleanup:
+                    # Finishing the typing signal must not hold delivery ACK or
+                    # the next incoming turn hostage to an optional platform call.
+                    cleanup=asyncio.create_task(self._typing_once(msg,False,generation))
+                    self._typing_cleanup_tasks.add(cleanup)
+                    cleanup.add_done_callback(self._typing_cleanup_tasks.discard)
 
     async def _reply(self,msg):
         # 重试/重启复用已生成的完整回复，不能重新生成不同文本再当作同一次投递。
@@ -184,15 +249,18 @@ class Orchestrator:
         mem_ctx = ""
         if self.memory and getattr(self.memory, "inject", True):
             try:
-                recall_query = msg.content
-                if re.fullmatch(r'[那这它他她]?个?(?:后来呢|然后呢|继续|怎么样了|呢|还记得吗)[？?。!！ ]*', msg.content.strip()):
-                    recent = await self.store.get_recent(msg.ctx_key)
-                    if recent:
-                        recall_query += ' ' + recent[-1].get('user', '')[-300:]
-                mem_ctx = self.memory.build_context(
-                    user_id=msg.sender_id, chat_id=msg.chat_id, query=recall_query,
-                    **({"platform":msg.platform} if getattr(self.memory,"supports_platform_scope",False) else {}),
-                )
+                query = recall_query(msg,prior_turns(msg,await self.store.get_recent(msg.ctx_key)))
+                prepared = self.preparation.memory_context(msg,query)
+                if prepared is not None:
+                    mem_ctx, used = prepared
+                    if used and hasattr(self.memory,'record_usage'):
+                        self.memory.record_usage(used)
+                else:
+                    mem_ctx = self.memory.build_context(
+                        user_id=msg.sender_id, chat_id=msg.chat_id, query=query,
+                        **({"platform":msg.platform} if getattr(self.memory,"supports_platform_scope",False) else {}),
+                        **({'mark_used':True} if hasattr(self.memory,'record_usage') else {}),
+                    )
             except Exception:
                 log.debug("知识库召回失败", exc_info=True)
 
@@ -207,8 +275,16 @@ class Orchestrator:
             except MediaError:
                 image_error=True;log.warning('Image load failed for message %s',msg.msg_id)
         if replay is None and hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
-        messages=(await self.ctx.build(msg,memory_context=mem_ctx,image_inputs=image_inputs)
-                  if image_inputs else await self.ctx.build(msg,memory_context=mem_ctx))
+        context_error=False
+        messages=[]
+        if replay is None:
+            build = (self.ctx.build(msg,memory_context=mem_ctx,image_inputs=image_inputs)
+                     if image_inputs else self.ctx.build(msg,memory_context=mem_ctx))
+            try:
+                messages = await self._current_work(msg, build)
+            except ContextWindowExceeded:
+                context_error=True
+                log.warning('Complete input exceeds configured model/protocol window; retain originals and request smaller parts')
 
         # 群聊回复时 @ 提问者 —— 否则群里没人知道这条回复是给谁的
         reply_at = ([msg.sender_id]
@@ -222,7 +298,10 @@ class Orchestrator:
                 tid=self._active_turn.get()
                 send_options={'check_current':lambda:self._check_current(msg),
                               'on_submit_text':lambda text:self.coordinator.reserve(tid,kind='reply',text=text) if tid else None}
-            if image_error:
+            if context_error:
+                reply = "这一段内容有点多，我们分几段聊，好吗？原来的内容我先留着，你把最想聊的部分单独发来。"
+                await self.sender.send(msg.chat_id,reply,at=reply_at,**send_options)
+            elif image_error:
                 await self._media_failure_grace(msg)
                 reply = "这几张图我这次没看清。把最想让我看的那张单独发来，好吗？"
                 await self.sender.send(msg.chat_id,reply,at=reply_at,**send_options)
@@ -230,8 +309,15 @@ class Orchestrator:
                 reply = replay
                 await self.sender.send(msg.chat_id, reply, at=reply_at)
             else:
-                stream = self._guarded_stream(msg,self.llm.stream(messages, chat_id=msg.chat_id))
-                reply = await self.sender.stream_send(msg.chat_id, stream, at=reply_at,**send_options)
+                capture = getattr(self.llm, 'capture_request', None)
+                with capture() if capture else nullcontext({}) as trace:
+                    stream = self._guarded_stream(msg,self.llm.stream(messages, chat_id=msg.chat_id))
+                    reply = await self.sender.stream_send(msg.chat_id, stream, at=reply_at,**send_options)
+                if hasattr(self.ctx, 'capture_request'):
+                    self.ctx.capture_request(msg, trace.get('messages'), trace.get('usage'), trace.get('assistant'))
+                    usage = trace.get('usage') or {}
+                    self.ctx.last_budget.update({'cache_hit_tokens':usage.get('prompt_cache_hit_tokens'),
+                                                 'cache_miss_tokens':usage.get('prompt_cache_miss_tokens')})
         except ConversationChanged:
             raise
         except ConversationStateError:
@@ -255,7 +341,10 @@ class Orchestrator:
         tid=self._active_turn.get()
         if tid:self.coordinator.finish(tid)
         # 落库 + 更新上下文。已获接口接受后，即使历史落盘失败也不重复提交。
-        await self.ctx.append(msg, reply)
+        if context_error:
+            await self.ctx.append(msg,reply,context_excluded=True)
+        else:
+            await self.ctx.append(msg, reply)
         for original in members(msg):await self.store.archive(original, direction="in")
         await self.store.archive_reply(msg, reply)
 
@@ -297,8 +386,25 @@ class Orchestrator:
             self._check_current(msg)
             return task.result()
         finally:
-            if not task.done():task.cancel()
-            await asyncio.gather(task,return_exceptions=True)
+            if not task.done():
+                task.cancel()
+                self._retire(task)
+            elif not task.cancelled():
+                task.exception()  # consume even when _check_current rejected it
+
+    def _retire(self, task, stream=None):
+        """Cancellation cleanup must not hold an obsolete turn's conversation lock."""
+        async def cleanup():
+            try:
+                if task is not None:
+                    await asyncio.gather(task, return_exceptions=True)
+                if stream is not None and hasattr(stream, 'aclose'):
+                    await stream.aclose()
+            except Exception:
+                log.debug('Retired model stream cleanup failed', exc_info=True)
+        job = asyncio.create_task(cleanup())
+        self._retired_work.add(job)
+        job.add_done_callback(self._retired_work.discard)
 
     def _check_current(self,msg):
         tid=self._active_turn.get()
@@ -307,21 +413,31 @@ class Orchestrator:
         if snapshot is not None and snapshot!=self._memory_revision(msg):raise ConversationChanged('Forgotten context invalidated unsent draft')
         if hasattr(self.adapter,'check_reply_current'):self.adapter.check_reply_current(msg)
 
-    def _memory_revision(self,msg):
-        if not self.memory or not hasattr(self.memory,'identity_key'):return None
-        identity=self.memory.identity_key(msg.platform,msg.sender_id)
-        return (identity,getattr(self.memory,'_generation',0),getattr(self.memory,'_revisions',{}).get(identity,0))
+    def _memory_revision(self,msg,*,live=True):
+        memory=self._memory if live else self.memory
+        if not memory or not hasattr(memory,'identity_key'):return None
+        identity=memory.identity_key(msg.platform,msg.sender_id)
+        return (str(getattr(memory,'path','')),identity,getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(identity,0))
 
-    async def _typing_once(self,msg,on):
+    async def _typing_once(self,msg,on,generation=None):
         if not hasattr(self.adapter,'send_typing'):return False
-        try:return await asyncio.wait_for(self.adapter.send_typing(msg.chat_id,on),timeout=3.0 if on else .8)
+        try:
+            async with self._typing_locks.setdefault(msg.chat_id,asyncio.Lock()):
+                if generation is not None and self._typing_generations.get(msg.chat_id)!=generation:return False
+                return await asyncio.wait_for(self.adapter.send_typing(msg.chat_id,on),timeout=3.0 if on else .8)
         except Exception:return False
 
-    async def _typing_signal(self,msg,started):
+    async def _typing_signal(self,msg,started,generation=None):
         await asyncio.sleep(.45)
         while True:
-            if await self._typing_once(msg,True):started.set()
+            if generation is not None and self._typing_generations.get(msg.chat_id)!=generation:return
+            if await self._typing_once(msg,True,generation):started.set()
             await asyncio.sleep(4)
+
+    async def _cancel_preview(self,msg):
+        if not hasattr(self.adapter,'cancel_turn'):return
+        try:await asyncio.wait_for(self.adapter.cancel_turn(msg),.3)
+        except (Exception,asyncio.CancelledError):pass
 
     async def _guarded_stream(self,msg,stream):
         """Cancel an obsolete generation even when the next SSE delta is blocked."""
@@ -333,13 +449,21 @@ class Orchestrator:
                     self._check_current(msg)
                     await asyncio.wait({pending},timeout=.05)
                 self._check_current(msg)
-                try:yield pending.result()
+                try:delta=pending.result()
                 except StopAsyncIteration:return
                 pending=None
+                if hasattr(self.adapter,'preview'):
+                    try:await asyncio.wait_for(self.adapter.preview(msg,delta),.2)
+                    except asyncio.CancelledError:raise
+                    except Exception:log.debug('Desktop preview unavailable; retain final delivery')
+                self._check_current(msg)
+                yield delta
         finally:
             if pending is not None:
-                pending.cancel();await asyncio.gather(pending,return_exceptions=True)
-            if hasattr(stream,'aclose'):await stream.aclose()
+                pending.cancel()
+                self._retire(pending, stream)
+            elif hasattr(stream,'aclose'):
+                self._retire(None, stream)
 
     async def _maybe_learn(self, msg: WxMessage, reply: str) -> None:
         """按配置的间隔，从最近的对话中抽取长期记忆。"""

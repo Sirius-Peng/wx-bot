@@ -46,7 +46,9 @@ class MemoryLearningQueue:
         self._wake = asyncio.Event()
         self._runner = None
         self._jobs: dict[str, asyncio.Task] = {}
+        self._job_identities: dict[str, str] = {}
         self._closed = False
+        self.foreground_busy = lambda: False
         if self.path.exists():
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             version = raw.get('version', 1)
@@ -150,8 +152,57 @@ class MemoryLearningQueue:
                        for a in self.memory._accounts(job.get('platform', ''), job['user_id'])]
         return max(values)
 
+    def _foreground_active(self):
+        try:
+            return bool(self.foreground_busy())
+        except Exception:
+            # Missing admission status is not a reason to compete with a reply.
+            return True
+
+    def _postpone(self, job):
+        job['due_at'] = max(job['due_at'], time.time() + self.IDLE_SECONDS,
+                            self._last_reflection(job) + self.COOLDOWN_SECONDS)
+
+    def _yield_jobs(self, person=None, *, persist=True):
+        cancelled=0
+        for key,task in list(self._jobs.items()):
+            job=self.pending.get(key)
+            if (job is None or task.done() or task.cancelling() or
+                    (person is not None and self._person(job)!=person)):
+                continue
+            self._postpone(job)
+            # observe() already checks this revision after its network await.
+            # Invalidate an interrupted snapshot even if a provider delays or
+            # suppresses cancellation; it must not commit stale impressions.
+            revisions=getattr(self.memory,'_revisions',None)
+            if isinstance(revisions,dict):
+                identities={self._person(job),self._job_identities.get(key)}-{None}
+                for identity in identities:revisions[identity]=revisions.get(identity,0)+1
+            task.cancel()
+            cancelled+=1
+        if cancelled:
+            self.info['state']='queued' if self.pending else 'idle'
+            self._wake.set()
+            if persist:
+                try:self._save()
+                except Exception as exc:
+                    # A background bookkeeping error must not reject the new
+                    # foreground message. Original durable sources remain.
+                    self.info.update(state='save_failed',last_error=error_summary(exc))
+                    log.warning('自动记忆让位状态落盘失败：%s',error_summary(exc))
+        return cancelled
+
+    def yield_to_foreground(self):
+        """Cancel in-flight reflection, preserving every unacknowledged source.
+
+        This synchronous admission hook never waits for network cleanup, never
+        counts a provider failure and never resets the successful-reflection
+        cooldown. It can be called directly from protocol ingress.
+        """
+        return self._yield_jobs()
+
     async def enqueue(self, msg, reply: str = '') -> None:
-        if not self.memory.enabled or not self.meaningful(msg.content):
+        if not self.memory.enabled:
             return
         identity = self.memory.identity_key(msg.platform, msg.sender_id) if hasattr(self.memory, 'identity_key') else f'{msg.platform}:{msg.sender_id}'
         key = f'{identity}:{msg.chat_type}:{msg.chat_id}' if msg.is_group else identity
@@ -159,7 +210,15 @@ class MemoryLearningQueue:
         event_ids = [hashlib.sha256(f'{msg.platform}:{msg.chat_type}:{msg.chat_id}:{msg.sender_id}:{e.get("msg_id", msg.msg_id)}'.encode()).hexdigest() for e in envelopes]
         if all(event in self.seen for event in event_ids):
             return
+        # Even an acknowledgement can resume a live conversation. Stop this
+        # person's old model request before deciding whether the new message
+        # contributes a meaningful memory turn. Duplicate callbacks do not yield.
+        yielded=self._yield_jobs(identity,persist=False)
+        if not self.meaningful(msg.content):
+            if yielded:self._save()
+            return
         if hasattr(self.memory, 'is_suppressed') and self.memory.is_suppressed(msg.platform, msg.sender_id, msg.content):
+            if yielded:self._save()
             return
         if hasattr(self.memory, 'observe_correction'): self.memory.observe_correction(msg)
         if hasattr(self.memory, 'observe_resolution'): self.memory.observe_resolution(msg)
@@ -253,7 +312,9 @@ class MemoryLearningQueue:
                             task.result()
                         del self._jobs[key]
                 now = time.time()
-                if self.memory.enabled and self.configured():
+                foreground=self._foreground_active()
+                if foreground:self.yield_to_foreground()
+                if self.memory.enabled and self.configured() and not foreground:
                     for key, job in list(self.pending.items()):
                         if len(self._jobs) >= self.MAX_ACTIVE:
                             break
@@ -265,7 +326,7 @@ class MemoryLearningQueue:
                 due_times = [max(.01, max(j["due_at"], j["retry_at"], self._last_reflection(j) + self.COOLDOWN_SECONDS) - time.time())
                              for k, j in self.pending.items() if k not in self._jobs and self._eligible(j)]
                 delay = (min([2.0, *due_times])
-                         if self.memory.enabled and self.configured() and len(self._jobs) < self.MAX_ACTIVE
+                         if self.memory.enabled and self.configured() and not foreground and len(self._jobs) < self.MAX_ACTIVE
                          else 2.0)
                 try:
                     await asyncio.wait_for(self._wake.wait(), delay)
@@ -275,9 +336,18 @@ class MemoryLearningQueue:
             self._wake.set()
 
     async def _extract(self, key: str, job: dict) -> None:
+        # Admission may become busy after _run schedules this task but before
+        # the task gets CPU time. Do not count that as a model attempt/failure.
+        if self._foreground_active():
+            self._postpone(job)
+            try:self._save()
+            except Exception as exc:
+                self.info.update(state='save_failed',last_error=error_summary(exc))
+            return
         turns = list(job["turns"][:6])
         events = {t["id"] for t in turns}
         self.info.update(state="extracting", attempts=self.info["attempts"] + 1)
+        self._job_identities[key]=self._person(job)
         started = time.monotonic()
         try:
             self._save()  # Do not send a non-durable batch to the model.
@@ -285,6 +355,10 @@ class MemoryLearningQueue:
                 chat_id=job["chat_id"], chat_type=job["chat_type"],
                 user_id=job["user_id"], user_name=job["user_name"], history=turns,
                 **({"platform":job.get("platform",key.split(":",1)[0])} if getattr(self.memory,"supports_platform_scope",False) else {})), self.timeout)
+            # A provider may swallow cancellation and return an empty result.
+            # That is not a completed reflection and must not acknowledge users'
+            # pending evidence or advance the successful-reflection cooldown.
+            if asyncio.current_task().cancelling():raise asyncio.CancelledError()
             self.last_reflection[self._person(job)] = time.time()
             current = self.pending.get(key)
             before_ack = copy.deepcopy(current)
@@ -308,6 +382,7 @@ class MemoryLearningQueue:
                     self.pending[key] = before_ack
                 raise
         except asyncio.CancelledError:
+            self.info['state']='queued' if self.pending else 'idle'
             raise  # Pending turns have not been removed; resume them next startup.
         except Exception as exc:
             current = self.pending.get(key)
@@ -326,5 +401,6 @@ class MemoryLearningQueue:
             except Exception as write_error:
                 self.info.update(state="save_failed", last_error=error_summary(write_error))
         finally:
+            self._job_identities.pop(key,None)
             self.info["last_elapsed_ms"] = round((time.monotonic() - started) * 1000, 1)
             self._wake.set()

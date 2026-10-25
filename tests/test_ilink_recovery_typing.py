@@ -165,7 +165,7 @@ class WechatTests(unittest.IsolatedAsyncioTestCase):
             return {'ret':0}
         class Model:
             async def stream(self,*a,**k):await on_started.wait();yield '完整回答'
-        self.a._typing_tickets['peer']=('ticket',time.time()+60);self.a._post=post;o=self.orch(Model(),True);await asyncio.wait_for(o.handle(message()),2);self.assertEqual(statuses,[1,2]);self.assertFalse(self.a.typing_cleanup_required('peer'));await o.close()
+        self.a._typing_tickets['peer']=('ticket',time.time()+60);self.a._post=post;o=self.orch(Model(),True);await asyncio.wait_for(o.handle(message()),2);await asyncio.gather(*o._typing_cleanup_tasks);self.assertEqual(statuses,[1,2]);self.assertFalse(self.a.typing_cleanup_required('peer'));await o.close()
     async def test_model_outage_keeps_incoming_without_placeholder_draft(self):
         class Model:
             def __init__(self):self.calls=0

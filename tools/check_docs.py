@@ -54,21 +54,23 @@ def audit(root,metadata=None):
     for name,value in [('primary_base','https://api.deepseek.com'),('primary_model','deepseek-flash'),('context_timezone','Asia/Shanghai')]:
         check(bool(re.search(r'\b'+name+r': str = "'+re.escape(value)+r'"',source)),'default source changed: '+name)
         check(value in readme,'README missing model/time default: '+name)
-    for name,value in [('message_merge_window',4.0),('message_merge_max_wait',10.0),('message_pause_timeout',120.0)]:
+    for name,value in [('message_merge_window',2.0),('message_merge_max_wait',10.0),('message_pause_timeout',120.0)]:
         check(bool(re.search(r'\b'+name+r': float = '+str(value),source)),'default waiting configuration changed: '+name)
     for name in ['Windows','macOS','Linux','user-data','XDG_DATA_HOME','LOCALAPPDATA']:
         check(name in readme and name in desktop,'platform data paths incomplete: '+name)
     for old in ['零封号','39 项测试','五层触发漏斗','10 元够用','成本可降到 0','存在即成功']:
         check(old not in readme+desktop,'obsolete claim: '+old)
     html=(root/'src/web/index.html').read_text()
-    for id,label in [('overview','概览'),('connect','接入设置'),('memory','人格知识库'),('messages','消息记录'),('statistics','对话统计'),('settings','模型与行为'),('guide','上手引导')]:
+    for id,label in [('overview','首页'),('connect','连接'),('memory','人格与记忆'),('messages','消息记录'),('statistics','对话统计'),('settings','设置'),('guide','上手引导')]:
         check('id="page-'+id+'"' in html and label in readme,'page docs mismatch: '+id)
+    check(re.findall(r'class="nav-item[^\"]*" data-page="([^\"]+)"',html)==['overview','connect','memory','settings'],'v3 four-page navigation mismatch')
+    check('data-goto="memory-graph"' not in html and 'memory-graph.js' not in html,'retired graph frontend still linked')
     sections=re.findall(r'data-settings-section="([^"]+)"',html)
     check(len(set(sections)-{'channels'})==9,'settings section count changed; update NapCat docs')
     check('九个配置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
     check("'--onedir'" in (root/'desktop/scripts/build-backend.ps1').read_text(encoding='utf-8-sig') and 'onedir' in desktop,'Windows layout mismatch')
     check('--onefile' in (root/'desktop/scripts/build-backend.sh').read_text() and 'onefile' in desktop,'macOS layout mismatch')
-    paths=[root/'README.md',root/'CHANGELOG.md',root/'CONTRIBUTORS.md',root/'CONTRIBUTING.md',root/'desktop/README.md',*sorted((root/'docs').glob('*.md'))]
+    paths=[root/'README.md',root/'CHANGELOG.md',root/'CONTRIBUTORS.md',root/'CONTRIBUTING.md',root/'desktop/README.md',*sorted((root/'docs').rglob('*.md'))]
     local_links=0
     for p in paths:
         if not p.exists():continue

@@ -45,7 +45,7 @@ async function main(){
  }
  {const f=fixture();f.context.payload=data;f.run("STATISTICS.data=payload;renderStatistics();api=async()=>{throw Error('offline')}");await f.run('loadStatistics()');assert.equal(f.node('#stats-messages').textContent,'—');assert.equal(f.node('#stats-rank-total').textContent,'— 项');assert.equal(f.node('#btn-stats-refresh').disabled,false);tests++;}
  {const f=fixture();f.context.payload={...data,coverage:{omitted_bytes:999},summary:{...data.summary,unknown_platform_messages:1}};f.run('STATISTICS.data=payload;renderStatistics()');assert(f.node('#stats-status').textContent.includes('并非全部历史'));assert(f.node('#stats-status').textContent.includes('未标记平台'));tests++;}
- const html=fs.readFileSync(path.join(root,'src/web/index.html'),'utf8');assert(html.includes('data-page="statistics"'));assert(html.indexOf('/static/statistics.js')<html.indexOf('/static/app.js'));tests++;
+ const html=fs.readFileSync(path.join(root,'src/web/index.html'),'utf8');assert(html.includes('id="page-statistics"')&&!html.includes('data-page="statistics"'));assert(html.indexOf('/static/statistics.js')<html.indexOf('/static/app.js'));tests++;
  console.log(`STATISTICS_FRONTEND PASS tests=${tests} geometry_area=1 no_overlap=1 keyboard=1 xss_inert=1 stale_responses_ignored=1`);
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

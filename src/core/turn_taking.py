@@ -64,12 +64,12 @@ class WaitPlan:
     reason:str
 
 
-def plan_wait(items,base=4,max_wait=10,human=True,pause_timeout=120,*,cadence=None):
+def plan_wait(items,base=2,max_wait=10,human=True,pause_timeout=120,*,cadence=None):
     """items = [(WxMessage, receipt epoch)]. Max wait is an evaluation, not a send.
 
     The configured window remains scalable for tests and existing custom settings;
-    the default 4 second window becomes 6 seconds for fragments/attachment captions.
-    Historical cadence can only increase a normal window (up to 8 seconds).
+    the default 2 second window becomes 4 seconds for fragments/attachment captions.
+    Historical cadence can only increase a normal window (up to 6 seconds).
     """
     latest,at=items[-1];start=items[0][1]
     if not human or base<=0:return WaitPlan(max(0,base),start+max_wait,False,'fixed')
@@ -78,18 +78,18 @@ def plan_wait(items,base=4,max_wait=10,human=True,pause_timeout=120,*,cadence=No
     done=[i for i,(m,_) in enumerate(items) if is_done(m.content)]
     if paused and (not done or paused[-1] > done[-1]):
         pause_at=items[paused[-1]][1]
-        return WaitPlan(min(8,base*1.5),pause_at+pause_timeout,True,'explicit_pause')
+        return WaitPlan(min(6,base*2),pause_at+pause_timeout,True,'explicit_pause')
     if is_done(text):return WaitPlan(min(.3,base*.15),at+max_wait,False,'explicit_done')
     reason='normal';delay=base
-    if UNFINISHED.search(text):delay=base*1.5;reason='unfinished'
+    if UNFINISHED.search(text):delay=base*2;reason='unfinished'
     elif (latest.images or latest.msg_type=='video' or any(p.get('type')=='video' for p in latest.content_parts)):
-        delay=base*1.5;reason='image_caption' if latest.images else 'video_caption'
-    elif len(text)<8 and not re.search(r'[。！？!?]$',text):delay=base*1.5;reason='short_fragment'
+        delay=base*2;reason='image_caption' if latest.images else 'video_caption'
+    elif len(text)<8 and not re.search(r'[。！？!?]$',text):delay=base*2;reason='short_fragment'
     gaps=(list(cadence) if cadence is not None else
           [items[i][1]-items[i-1][1] for i in range(1,len(items))])
     gaps=[g for g in gaps if 0<g<30*60][-20:]
-    if gaps:delay=max(delay,min(8,statistics.median(gaps)*1.5))
-    return WaitPlan(min(8,delay),start+max_wait,False,reason)
+    if gaps:delay=max(delay,min(6,statistics.median(gaps)*1.5))
+    return WaitPlan(min(max(6,base),delay),start+max_wait,False,reason)
 
 
 def ready(plan,now,last_at,count):

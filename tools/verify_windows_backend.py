@@ -33,7 +33,7 @@ def check(binary,output,runs=3):
      assert api.get('/api/statistics?platform=qq').json()['summary']['messages']==1
      assert api.get('/api/data/status').status_code==200
      assert api.get('/api/onboarding').status_code==200
-     assert '对话统计' in api.get('/').text
+     assert 'id="page-statistics"' in api.get('/').text
      assert api.get('/static/statistics.js').status_code==200
      backup=api.post('/api/data/backup').json();assert backup['ok'],backup
      downloaded=api.get(backup['download_url']);assert downloaded.status_code==200

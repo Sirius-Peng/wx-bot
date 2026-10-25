@@ -107,7 +107,9 @@ class LearningTests(unittest.IsolatedAsyncioTestCase):
   for _ in range(100):
    if not q._jobs:break
    await asyncio.sleep(.01)
-  self.assertEqual(q.status()['pending_turns'],1)
+  # A fresh user turn now preempts background reflection; its three original
+  # source turns remain pending along with the new supplement, not acknowledged.
+  self.assertEqual(q.status()['pending_turns'],4);self.assertEqual(q.info['failures'],0)
  async def test_restart_preserves_pending(self):
   await self.seed();await self.mem.learner.close();loaded=PersonaMemory(self.path/'memory.json',llm=self.model)
   try:

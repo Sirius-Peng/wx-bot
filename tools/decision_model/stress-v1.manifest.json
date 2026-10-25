@@ -1,0 +1,29 @@
+{
+  "schema": "wxbot.decision-stress.v1",
+  "records": 120,
+  "sha256": "1a53ce91765c3cb3c1fb89624bf2c85cb71aac1989fd97fbbdba422390a48978",
+  "purpose": "Locked research-only regression stress test; never training or calibration input",
+  "provenance": "AI-authored individually composed cases, not human annotations or private user messages",
+  "independence": "Each row is a separate fictional session; recent messages belong only to that row. No corpus.py template generation.",
+  "created_after": "run-v3-fixed training/calibration and first synthetic evaluation",
+  "label_policy": "reply protects a current conversational request/emotion/important share; defer keeps an incomplete expression open; context_only is completed acknowledgement/withdrawal/closure. Ordinary shares are subjective fixtures, not ground truth about real users.",
+  "slices": {
+    "colloquial": 10,
+    "traditional": 10,
+    "mixed_language": 10,
+    "irony": 10,
+    "quoted_nonreply": 10,
+    "emotional_no_question_mark": 10,
+    "correction_cancel": 10,
+    "multi_turn": 10,
+    "ordinary_sharing": 10,
+    "natural_closing": 10,
+    "unfinished_expression": 10,
+    "indirect_invitation": 10
+  },
+  "usage_limitations": [
+    "Small AI-authored Chinese challenge set, not a human-labelled generalization benchmark",
+    "Protected and silent cohorts are below production gate sample minima; no release-gate pass is inferred",
+    "Results may guide future regression review but v1 stays frozen; changing it requires a new dataset version"
+  ]
+}

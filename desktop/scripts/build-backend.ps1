@@ -28,6 +28,8 @@ if ($LASTEXITCODE -ne 0) {
  & $selected -m pip install -r (Join-Path $RepoRoot 'requirements.txt') pyinstaller --index-url 'https://pypi.org/simple'
 }
 if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed on both sources.' }
+& $selected (Join-Path $PSScriptRoot 'collect-notices.py')
+if ($LASTEXITCODE -ne 0) { throw 'Original third-party license collection failed.' }
 if (Test-Path -LiteralPath $OutDir) { Remove-Item -LiteralPath $OutDir -Recurse -Force }
 if (Test-Path -LiteralPath $BuildDir) { Remove-Item -LiteralPath $BuildDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $OutDir,$BuildDir | Out-Null
@@ -42,6 +44,11 @@ foreach ($module in @('uvicorn.logging','uvicorn.loops.auto','uvicorn.loops.asyn
 }
 foreach ($module in @('uvicorn','fastapi','starlette','pydantic','anyio','httpx','httpcore','certifi','tzdata','jieba')) {
  $arguments += @('--collect-all',$module)
+}
+# Exclude retired local inference even when the developer environment still has it.
+foreach ($module in @('src.core.local_decision','src.core.local_decision_worker','src.core.local_decision_cpu',
+ 'onnxruntime','onnx','tokenizers','numpy','torch','transformers')) {
+ $arguments += @('--exclude-module',$module)
 }
 $arguments += (Join-Path $DesktopDir 'backend\entry.py')
 & $selected @arguments

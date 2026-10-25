@@ -17,7 +17,27 @@ const P = require('./paths');
  * @param {object} ctx.trayMgr    TrayManager
  * @param {Function} ctx.quit     退出应用的回调
  */
-function registerIpc({ windowMgr, backend, trayMgr, quit }) {
+function registerIpc({ windowMgr, backend, trayMgr, companionMgr, quit }) {
+  const trusted=event=>{
+    const allowed=[windowMgr.win,companionMgr?.win].filter(Boolean);
+    if(!allowed.some(win=>event.sender===win.webContents)||event.senderFrame!==event.sender.mainFrame)return false;
+    try{return new URL(event.senderFrame.url).origin===backend.url;}catch(_){return false;}
+  };
+  if(companionMgr){
+    ipcMain.handle('companion:show',event=>{if(trusted(event))companionMgr.show(backend.url);});
+    ipcMain.handle('companion:reload',event=>{if(trusted(event))companionMgr.reload(backend.url);});
+    ipcMain.handle('companion:hide',event=>{if(trusted(event))companionMgr.hide();});
+    ipcMain.handle('companion:top',(event,value)=>{if(trusted(event))companionMgr.top(value===true);});
+    ipcMain.handle('companion:through',(event,value)=>{if(trusted(event))companionMgr.through(value===true);});
+    ipcMain.handle('companion:chooseModel',async event=>{
+      if(!trusted(event))return {canceled:true};
+      const parent=windowMgr.win&&event.sender===windowMgr.win.webContents?windowMgr.win:companionMgr.win;
+      try{
+        const result=await dialog.showOpenDialog(parent,{title:'选择Live2D模型目录',properties:['openDirectory']});
+        return {canceled:result.canceled,path:result.canceled?'':result.filePaths[0]};
+      }finally{if(parent&&!parent.isDestroyed()&&parent.isVisible()){parent.focus();parent.webContents.focus();}}
+    });
+  }
   // ── 应用信息 ──────────────────────────────────────────────
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
@@ -55,7 +75,11 @@ function registerIpc({ windowMgr, backend, trayMgr, quit }) {
     trayMgr.setStatus({ backend: 'starting' });
     const r = await backend.restart();
     trayMgr.setStatus({ backend: r.ok ? 'running' : 'crashed' });
-    if (r.ok) windowMgr.reload(`http://127.0.0.1:${r.port}`);
+    if (r.ok) {
+      const url = `http://127.0.0.1:${r.port}`;
+      windowMgr.reload(url);
+      companionMgr?.reload(url);
+    }
     return r;
   });
 

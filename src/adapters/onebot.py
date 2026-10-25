@@ -91,6 +91,8 @@ class OneBotAdapter(BaseAdapter):
         self._running = False
         self._reply_context=ContextVar("onebot_reply_context",default=None)
         self._bursts=MessageBuffer(self._deliver)
+        self._bursts.active_space=self.current_persona_space
+        self._bursts.legacy_space=self.legacy_persona_space
 
         # 反向 WS 连接（网关连过来的）
         self._ws: Any = None
@@ -125,6 +127,11 @@ class OneBotAdapter(BaseAdapter):
 
     def configure_burst(self,window,max_wait,state_path=None,human=True,pause_timeout=120):
         self._bursts.configure(window,max_wait,state_path,human,pause_timeout)
+
+    def pending_turn(self, msg):
+        from ..core.conversation import merge_messages
+        messages = [m for m, _ in self._bursts.pending.get(self._bursts.key(msg), [])]
+        return merge_messages(messages) if messages else msg
 
     async def _deliver(self,msg):
         if self._handler is None:raise RuntimeError('No message handler')
@@ -202,9 +209,12 @@ class OneBotAdapter(BaseAdapter):
         if post_type == "message":
             msg = self._normalize(event)
             if msg and self._handler:
-                self.note_activity(msg)
+                self.stamp_ingress(msg)
                 if self._bursts.window or self._bursts.pending:
-                    self._bursts.submit(msg);return
+                    self._bursts.submit(msg)
+                    self.note_activity(msg)
+                    return
+                self.note_activity(msg)
                 try:
                     await self._handler(msg)
                 except Exception:

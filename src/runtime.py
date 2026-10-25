@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -32,6 +33,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -45,6 +47,7 @@ from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.web_search import configured_search
+from .core.usage_accounting import summary as summarize_usage, task_scope, ALL_TOKEN_FIELDS
 from .core.storage import migrated_state_path
 from .core.proactive import ProactivePlanner
 from .core.analytics import ConversationAnalytics
@@ -58,6 +61,7 @@ from .orchestrator import Orchestrator
 from .core.conversation import ConversationChanged,members
 from .core.turn_coordinator import TurnCoordinator
 from .core.reply_decision import ReplyDecider,ReplyDecision
+from .core.persona_spaces import PersonaSpaces
 from .core.sender import normalize_reply_text
 from .store_memory import MemoryStore
 
@@ -242,6 +246,13 @@ class BotRuntime:
         self._proactive_sending = ContextVar('proactive_sending', default=False)
 
         self.cfg: AppConfig = store.load()
+        original_persona=(self.cfg.bot.name,self.cfg.bot.persona)
+        self.persona_spaces=PersonaSpaces(self.data_dir,self.cfg.bot)
+        if original_persona!=(self.cfg.bot.name,self.cfg.bot.persona):store.save(self.cfg)
+        self._memory_cache={}
+        self._usage_events=deque(maxlen=500)
+        self._retired_search={}
+        self._search_cleanup_tasks=set()
         self.conversations = TurnCoordinator(self.data_dir/'conversation-state.json',
             identity=lambda platform,owner:self._ensure_memory().identity_key(platform,owner))
         self._late_task = None
@@ -250,12 +261,19 @@ class BotRuntime:
             lambda platform, owner: self._ensure_memory().identity_key(platform, owner),
             lambda: self.cfg, self._proactive_channel, self._proactive_generate, self._proactive_deliver)
         self.proactive.external_busy = self.conversations.busy
+        for component in (self.conversations,self.proactive):
+            component.active_space=lambda:self.persona_spaces.active_key
+            component.legacy_space=self.persona_spaces.legacy_key
 
         # 双通道（独立适配器 + 独立编排器，互不影响）
         self.wechat_adapter: Optional[BaseAdapter] = None
         self.wechat_orch: Optional[Orchestrator] = None
         self.qq_adapter: Optional[BaseAdapter] = None
         self.qq_orch: Optional[Orchestrator] = None
+        self.desktop_adapter: Optional[BaseAdapter] = None
+        self.desktop_orch: Optional[Orchestrator] = None
+        self._desktop_lock = asyncio.Lock()
+        self._memory_usage_task = None
 
         self.running = False
         self._lifecycle_lock = asyncio.Lock()
@@ -281,6 +299,106 @@ class BotRuntime:
         self._login: dict = {"status": "idle", "qrcode": "", "image": "",
                              "uuid": "", "app_id": "", "message": "",
                              "channel": ""}
+
+    def _observe_usage(self, event):
+        """Only observed, non-content request metadata enters the bounded UI window."""
+        if not isinstance(event,dict):return
+        if not hasattr(self,'_usage_events'):self._usage_events=deque(maxlen=500)
+        allowed={'kind','request_id','task','model','status','started_at','finished_at','elapsed_ms',
+                 'usage_reported','error_type','http_status','reason','protocol','cache_inconsistent',
+                 'operation','result_count','billable_result','retry',
+                 'cache_hit_source','cache_miss_source','prompt_tokens_source','stream','ttft_ms',
+                 *ALL_TOKEN_FIELDS}
+        self._usage_events.append({key:value for key,value in event.items() if key in allowed and
+                                  (value is None or isinstance(value,(str,int,float,bool)))})
+
+    def _observe_gateway(self,gateway):
+        if gateway is not None:
+            gateway.usage_observer=self._observe_usage
+            search=getattr(gateway,'web_search',None)
+            if search is not None:search.usage_observer=self._observe_usage
+        return gateway
+
+    def usage_diagnostics(self):
+        """Pair request/usage IDs; unreported and failed attempts stay unknown."""
+        events=list(getattr(self,'_usage_events',()))
+        paired={};anonymous=[];local_cache=0;tool_records={}
+        for event in events:
+            kind=event.get('kind','usage')
+            if kind=='local_search_cache':local_cache+=1;continue
+            if kind=='tool_request':
+                # These are per-request raw APIs, not model token requests.
+                tool_records[event.get('request_id') or str(id(event))]=event
+                continue
+            if kind not in ('request','usage'):continue
+            identifier=event.get('request_id')
+            if not identifier:
+                anonymous.append(dict(event) if kind=='usage' else
+                                 {'task':event.get('task','unknown'),'usage':None})
+                continue
+            row=paired.setdefault(identifier,{'request':None,'usage':None})
+            row[kind]=event
+        records=list(anonymous);states={}
+        for row in paired.values():
+            attempt,usage=row['request'],row['usage']
+            if attempt:
+                status=attempt.get('status','unknown');states[status]=states.get(status,0)+1
+            records.append(dict(usage) if usage is not None else
+                           {'task':attempt.get('task','unknown'),'usage':None})
+        tools={'attempts':len(tool_records),'operations':{}}
+        for operation in ('search','fetch'):
+            rows=[row for row in tool_records.values() if row.get('operation')==operation]
+            tools['operations'][operation]={'attempts':len(rows),
+                'results_returned':sum(row.get('billable_result') is True for row in rows),
+                'result_unknown':sum(row.get('billable_result') is None for row in rows),
+                'failed':sum(row.get('status')=='error' for row in rows),
+                'cancelled':sum(row.get('status')=='cancelled' for row in rows)}
+        return {'scope':'recent_runtime_events','tool_requests':tools,'summary':summarize_usage(records,attempts=len(records)),
+                'observed_events':len(events),'requests':len(records),'local_search_cache':local_cache,
+                'request_states':states,'window_limit':500,
+                'usage_records':sum(e.get('kind','usage')=='usage' for e in events)}
+
+    def _refresh_search(self,gateway,cfg):
+        candidate=configured_search(cfg.llm)
+        old=getattr(gateway,'web_search',None)
+        fields=('key','model','context_timezone')
+        if (old is not None and candidate is not None and type(old) is type(candidate) and
+            all(getattr(old,name,None)==getattr(candidate,name,None) for name in fields) and
+            not getattr(old,'_closed',False)):
+            candidate=old
+        elif old is not None and hasattr(old,'aclose'):
+            # A settings save must not close a request already using the old key.
+            # Native search has a 20s hard deadline; retire its pool afterwards.
+            if not hasattr(self,'_retired_search'):self._retired_search={}
+            if not hasattr(self,'_search_cleanup_tasks'):self._search_cleanup_tasks=set()
+            self._retired_search[id(old)]=old
+            async def retire():
+                try:
+                    await asyncio.sleep(21)
+                    await old.aclose()
+                finally:self._retired_search.pop(id(old),None)
+            try:loop=asyncio.get_running_loop()
+            except RuntimeError:pass
+            else:
+                task=loop.create_task(retire())
+                self._search_cleanup_tasks.add(task)
+                def done(finished):
+                    self._search_cleanup_tasks.discard(finished)
+                    if not finished.cancelled():
+                        try:finished.result()
+                        except Exception:log.warning('Search pool cleanup failed')
+                task.add_done_callback(done)
+        gateway.web_search=candidate
+        self._observe_gateway(gateway)
+
+    async def _close_retired_search(self):
+        tasks=list(getattr(self,'_search_cleanup_tasks',()))
+        # Keep providers before cancellation removes their registry entries.
+        providers=list(getattr(self,'_retired_search',{}).values())
+        for task in tasks:task.cancel()
+        if tasks:await asyncio.gather(*tasks,return_exceptions=True)
+        for provider in providers:await provider.aclose()
+        if hasattr(self,'_retired_search'):self._retired_search.clear()
 
     # ── 生命周期 ──────────────────────────────────────────────
 
@@ -428,11 +546,12 @@ class BotRuntime:
             self._qq_sync_task.cancel()
             await asyncio.gather(self._qq_sync_task, return_exceptions=True)
         self._qq_sync_task = None
-        for orch in (self.wechat_orch, self.qq_orch):
+        for orch in self._orchestrators():
             if orch is not None:
                 await orch.close()
+        await self._close_retired_search()
         for name, adapter in (("wechat", self.wechat_adapter),
-                              ("qq", self.qq_adapter)):
+                              ("qq", self.qq_adapter),("desktop",self.desktop_adapter)):
             if adapter is not None:
                 try:
                     await adapter.stop()
@@ -442,13 +561,22 @@ class BotRuntime:
         self.wechat_orch = None
         self.qq_adapter = None
         self.qq_orch = None
+        self.desktop_adapter = None
+        self.desktop_orch = None
         self.running = False
         self.started_at = 0.0
         self.platforms_running.clear()
-        if self.memory is not None:
-            await self.memory.learner.close()
-            if self.memory.llm is not None and hasattr(self.memory.llm, "aclose"):
-                await self.memory.llm.aclose()
+        if self._memory_usage_task:
+            self._memory_usage_task.cancel()
+            await asyncio.gather(self._memory_usage_task,return_exceptions=True)
+            self._memory_usage_task=None
+        memories={*self._memory_cache.values()}
+        if self.memory is not None:memories.add(self.memory)
+        for memory in memories:
+            await memory.learner.close()
+            if hasattr(memory,'close_usage'):await memory.close_usage()
+            if memory.llm is not None and hasattr(memory.llm, "aclose"):
+                await memory.llm.aclose()
         return {"ok": True, "message": "机器人已停止"}
 
     async def restart(self) -> dict:
@@ -458,11 +586,51 @@ class BotRuntime:
 
     def apply_config(self, cfg: AppConfig) -> bool:
         """行为/模型设置热更新；接入通道设置变更明确要求重启。"""
+        previous_space=self.persona_spaces.active_key
+        restore=(cfg.bot.name,cfg.bot.persona)==(self.cfg.bot.name,self.cfg.bot.persona)
+        original_persona=(cfg.bot.name,cfg.bot.persona)
+        from .core.persona_spaces import space_key
+        target=space_key(cfg.bot.persona_profile,cfg.bot.persona_relationship)
+        self.persona_spaces.activate(cfg.bot,restore_existing=target!=previous_space and restore)
+        if original_persona!=(cfg.bot.name,cfg.bot.persona):self.config_store.save(cfg)
+        switched=previous_space!=self.persona_spaces.active_key
+        if switched and self.memory is not None:
+            self._memory_cache[previous_space]=self.memory
+            self.memory.enabled=False
+            self.memory.learner.yield_to_foreground()
+            self.memory.flush_usage(force=True)
+            self.memory=None
+            if self._memory_usage_task:
+                self._memory_usage_task.cancel();self._memory_usage_task=None
         self.cfg = cfg
-        for orch in (self.wechat_orch, self.qq_orch):
+        if switched:
+            memory=self._ensure_memory()
+            for orch in self._orchestrators():
+                key=self.persona_spaces.active_key
+                contexts=getattr(orch,'_persona_contexts',{})
+                contexts[previous_space]=orch.ctx
+                if key not in contexts:
+                    storage=MemoryStore(path=self.persona_spaces.directory()/orch.context_filename)
+                    storage.sync_suppressions(memory.suppressions)
+                    ctx=ContextManager(storage,compactor=orch.ctx.compactor,bot_name=cfg.bot.name,persona=cfg.bot.persona,
+                        persona_profile=cfg.bot.persona_profile,persona_relationship=cfg.bot.persona_relationship,context_timezone=cfg.llm.context_timezone)
+                    self._configure_context_session(ctx,cfg,gateway=orch.llm)
+                    ctx.shared_context=self.proactive.shared_context;ctx.shared_history=self.proactive.shared_turns
+                    contexts[key]=ctx
+                orch._persona_contexts=contexts
+                orch.ctx=contexts[key];orch.store=orch.ctx.store;orch.memory=memory;orch.persona_space=key
+                orch.store.sync_suppressions(memory.suppressions)
+            cancel=getattr(self.conversations,'cancel_other_spaces',None)
+            if cancel:cancel()
+            if self.desktop_adapter is not None:
+                self.desktop_adapter.publish('space_changed','',{'persona_space':self.persona_spaces.active_key})
+            if self.running:self.start_learning()
+        for orch in self._orchestrators():
             if orch is None:
                 continue
             orch.ctx.persona_profile = cfg.bot.persona_profile
+            if hasattr(orch,'preparation'):
+                orch.preparation.invalidate()
             orch.ctx.persona_relationship = cfg.bot.persona_relationship
             orch.ctx.system_prompt = build_system_prompt(
                 cfg.bot.name, cfg.bot.persona, cfg.bot.persona_profile,
@@ -471,10 +639,13 @@ class BotRuntime:
             orch.router.bot_name = cfg.bot.name
             if hasattr(orch.adapter,'configure_burst'):
                 orch.adapter.configure_burst(cfg.bot.message_merge_window,cfg.bot.message_merge_max_wait,
-                                            state_path=self.data_dir/'qq-bursts.json',human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
+                                            state_path=self.data_dir/('desktop-bursts.json' if orch.adapter.platform=='desktop' else 'qq-bursts.json'),human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
             orch.ctx.context_timezone = cfg.llm.context_timezone
-            orch.llm.web_search = configured_search(cfg.llm)
+            orch.ctx.chat_mode = cfg.bot.chat_mode
+            self._configure_context_session(orch.ctx,cfg,gateway=orch.llm)
+            self._refresh_search(orch.llm,cfg)
             orch.llm.vision=self._vision_provider(cfg)
+            orch.llm.chat_mode=cfg.bot.chat_mode
             orch.typing_indicator=bool(cfg.bot.typing_indicator)
             orch.late_reply_enabled=bool(cfg.bot.late_reply_enabled)
             orch.reply_decider.mode=cfg.bot.reply_mode
@@ -485,6 +656,22 @@ class BotRuntime:
             orch.llm.fallback = (ProviderCfg(
                 "fallback", cfg.llm.fallback_base, cfg.llm.fallback_key,
                 cfg.llm.fallback_model) if cfg.llm.fallback_key else None)
+            # The old implementation updated chat keys but left the judge and
+            # compactor using stale providers until a full application restart.
+            gateways={getattr(orch.judge,'gateway',None),
+                      getattr(getattr(orch.ctx,'compactor',None),'judge_llm',None)}
+            for gateway in gateways:
+                if gateway is not None:
+                    gateway.primary=self._judge_provider(cfg)
+                    gateway.fallback=None
+                    gateway.chat_mode='fast'
+            # Foreground admission has its own short-request connection pool;
+            # background compaction keeps the existing configured model.
+            admission=getattr(orch.reply_decider,'gateway',None)
+            if admission is not None:
+                admission.primary=self._admission_provider(cfg)
+                admission.fallback=None
+                admission.chat_mode='fast'
         if self.memory is not None:
             self.memory.enabled = bool(cfg.bot.memory_enabled)
             self.memory.inject = bool(cfg.bot.memory_inject)
@@ -492,6 +679,11 @@ class BotRuntime:
             if self.memory.llm is not None:
                 self.memory.llm.primary = self._memory_provider(cfg)
             self.memory.learner.retry_now()
+        if not cfg.companion.enabled and self.desktop_adapter is not None:
+            # UI/API input is rejected immediately; lifecycle teardown is queued
+            # without blocking the synchronous settings save.
+            try:asyncio.get_running_loop().create_task(self.unregister_desktop())
+            except RuntimeError:pass
         return bool(self.running and self._active_adapter_config != asdict(cfg.adapter))
 
     def status(self) -> dict:
@@ -505,6 +697,10 @@ class BotRuntime:
             "stats": self.log.stats(),
             "bot": {"name": self.cfg.bot.name, "persona": self.cfg.bot.persona},
             "conversation": self.conversations.status(),
+            "chat_mode": self.cfg.bot.chat_mode,
+            "desktop_running": self.desktop_orch is not None and self.cfg.companion.enabled,
+            "decision_backend": "cloud",
+            "decisions": [getattr(o.reply_decider,'last_status',{}) for o in self._orchestrators()],
         }
         for name, adapter in (("wechat", self.wechat_adapter),
                               ("qq", self.qq_adapter)):
@@ -547,25 +743,146 @@ class BotRuntime:
         )
 
     @staticmethod
+    def _context_window_tokens(cfg: AppConfig, provider=None) -> int:
+        explicit=cfg.llm.context_window_tokens
+        if isinstance(explicit,int) and not isinstance(explicit,bool) and explicit>0:
+            return explicit
+        base=provider.base_url if provider is not None else cfg.llm.primary_base
+        model=provider.model if provider is not None else cfg.llm.primary_model
+        try:
+            url=urlsplit(base)
+            official=(url.scheme=='https' and url.hostname=='api.deepseek.com'
+                and url.port in (None,443) and not url.username and not url.password)
+        except (ValueError,TypeError):official=False
+        if official and model in ('deepseek-flash','deepseek-v4-pro'):
+            return 1_000_000
+        return 32_768
+
+    @staticmethod
+    def _configure_context_session(ctx, cfg: AppConfig, provider=None, *, gateway=None) -> None:
+        """Bind provider-specific session policy without persisting credentials."""
+        l=cfg.llm
+        provider=provider or ProviderCfg('primary',l.primary_base,l.primary_key,l.primary_model)
+        vision=BotRuntime._vision_provider(cfg)
+        search=configured_search(l)
+        fingerprint={'primary':{'base':l.primary_base,'model':l.primary_model,'key':l.primary_key},
+            'chat_mode':cfg.bot.chat_mode,
+            'vision':({'base':vision.base_url,'model':vision.model,'key':vision.api_key} if vision else None),
+            'search':{'enabled':l.search_enabled,'backend':type(search).__module__+'.'+type(search).__qualname__ if search else '',
+                      'model':l.search_model,'key':l.search_key},
+            'selected':{'base':provider.base_url,'model':provider.model,'key':provider.api_key}}
+        digest=hashlib.sha256(json.dumps(fingerprint,ensure_ascii=False,sort_keys=True,
+            separators=(',',':')).encode('utf-8')).hexdigest()
+        ctx.configure_session(context_window_tokens=BotRuntime._context_window_tokens(cfg,provider),
+            compact_ratio=l.context_compact_ratio,
+            output_reserve_tokens=provider.max_tokens,
+            provider_fingerprint=digest)
+        image_provider=vision or provider
+        ctx.image_context_window_tokens=BotRuntime._context_window_tokens(cfg,image_provider)
+        ctx.image_output_reserve_tokens=image_provider.max_tokens
+        try:
+            image_url=urlsplit(image_provider.base_url)
+            known_flash=(image_url.scheme=='https' and image_url.hostname=='api.deepseek.com'
+                and image_url.port in (None,443) and not image_url.username and not image_url.password
+                and image_provider.model=='deepseek-flash')
+        except (ValueError,TypeError):known_flash=False
+        # Official Flash image tokens/body/count limits only. Unknown providers
+        # retain a conservative token estimate, not invented protocol limits.
+        ctx.image_token_reserve=1024 if known_flash else 4096
+        ctx.max_request_bytes=46*1024*1024 if known_flash else 0
+        ctx.max_images=600 if known_flash else 0
+        ctx.tool_reserve_tokens=2000 if l.search_enabled else 0
+        if gateway is not None and getattr(ctx,'compactor',None) is not None:
+            ctx.compactor.session_gateway=gateway
+
+    @staticmethod
     def _judge_provider(cfg: AppConfig) -> ProviderCfg:
         l = cfg.llm
         return ProviderCfg(
             "judge", l.judge_base if l.judge_key else l.primary_base,
             l.judge_key or l.primary_key,
             l.judge_model if l.judge_key else l.primary_model,
-            timeout=8.0, max_tokens=600)
+            timeout=3.0, max_tokens=80)
+
+    @staticmethod
+    def _admission_provider(cfg: AppConfig) -> ProviderCfg:
+        l = cfg.llm
+        # A separate key activates the existing independent-provider settings.
+        # Otherwise reuse the main credentials, without changing the chat model.
+        # Only the official DeepSeek endpoint has a known compatible fast model;
+        # custom proxies/providers retain the user's configured main model.
+        model = l.judge_model if l.judge_key else l.primary_model
+        if not l.judge_key and urlsplit(l.primary_base).hostname == 'api.deepseek.com':
+            model = 'deepseek-flash'
+        return ProviderCfg(
+            "admission", l.judge_base if l.judge_key else l.primary_base,
+            l.judge_key or l.primary_key,
+            model,
+            timeout=3.0, max_tokens=80)
 
     @staticmethod
     def _memory_provider(cfg: AppConfig) -> ProviderCfg:
-        provider = BotRuntime._judge_provider(cfg)
-        provider.name = "memory"
-        provider.timeout = 30.0
-        provider.max_tokens = 1200
-        provider.temperature = 0.2
-        return provider
+        # Memory consolidation keeps its existing configured model and budget;
+        # fast foreground turn admission must not silently replace that model.
+        l = cfg.llm
+        return ProviderCfg("memory", l.judge_base if l.judge_key else l.primary_base,
+            l.judge_key or l.primary_key, l.judge_model if l.judge_key else l.primary_model,
+            timeout=30.0, max_tokens=1200, temperature=0.2)
 
     def start_learning(self) -> None:
-        self._ensure_memory().learner.start()
+        memory=self._ensure_memory()
+        memory._usage_stopped=False
+        if hasattr(self.conversations,'any_busy'):
+            memory.learner.foreground_busy=self.conversations.any_busy
+        memory.learner.start()
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:return
+        if hasattr(memory,'usage_flush_loop') and (self._memory_usage_task is None or self._memory_usage_task.done()):
+            self._memory_usage_task=asyncio.create_task(memory.usage_flush_loop())
+
+    def _orchestrators(self):
+        return [o for o in (self.wechat_orch,self.qq_orch,self.desktop_orch) if o is not None]
+
+    def _orchestrator_for(self,platform):
+        return self.wechat_orch if platform=='ilink' else self.qq_orch if platform=='onebot' else self.desktop_orch if platform=='desktop' else None
+
+    async def register_desktop(self,adapter):
+        """Attach the optional local surface to the same conversation kernel."""
+        async with self._desktop_lock:
+            if not self.cfg.companion.enabled:raise ValueError('请先启用桌面伙伴')
+            if not self.cfg.llm.primary_key:raise ValueError('请先配置大模型 API Key')
+            if self.desktop_orch is not None:
+                return self.desktop_orch
+            orch=self._build_orchestrator(adapter,platform='desktop')
+            try:await adapter.start()
+            except BaseException:
+                await orch.close()
+                raise
+            self.desktop_adapter=adapter
+            self.desktop_orch=orch
+            if not self.running:self._active_adapter_config=asdict(self.cfg.adapter)
+            self.platforms_running.add('desktop')
+            self.running=True
+            self.started_at=self.started_at or time.time()
+            self.start_learning()
+            self.proactive.start()
+            self._start_late_replies()
+            return orch
+
+    async def unregister_desktop(self):
+        async with self._desktop_lock:
+            orch,adapter=self.desktop_orch,self.desktop_adapter
+            self.desktop_orch=self.desktop_adapter=None
+            self.platforms_running.discard('desktop')
+            self.running=bool(self.platforms_running)
+            if orch is not None:await orch.close()
+            if adapter is not None:await adapter.stop()
+
+    async def handle_desktop(self,msg):
+        if not self.cfg.companion.enabled or self.desktop_orch is None:raise ValueError('桌面伙伴未启用')
+        if msg.platform!='desktop':raise ValueError('桌面对话通道无效')
+        return await self.desktop_orch.handle(msg)
 
     @staticmethod
     def _vision_provider(cfg):
@@ -576,8 +893,11 @@ class BotRuntime:
     def _build_orchestrator(self, adapter: BaseAdapter,
                             platform: str = "") -> Orchestrator:
         cfg = self.cfg
+        adapter.active_space=lambda:self.persona_spaces.active_key
+        adapter.legacy_space=self.persona_spaces.legacy_key
         # Ambiguous complete turns alone use this provider; clear requests stay local.
         judge_gw = LLMGateway(self._judge_provider(cfg))
+        admission_gw = LLMGateway(self._admission_provider(cfg))
         chat_gw = LLMGateway(
             primary=ProviderCfg(
                 name="primary", base_url=cfg.llm.primary_base,
@@ -591,8 +911,12 @@ class BotRuntime:
             vision=self._vision_provider(cfg),
             web_search=configured_search(cfg.llm),
         )
+        for gateway in (chat_gw,judge_gw,admission_gw):self._observe_gateway(gateway)
+        chat_gw.chat_mode=cfg.bot.chat_mode
+        judge_gw.chat_mode='fast'
+        admission_gw.chat_mode='fast'
         judge = JudgeLLM(judge_gw, timeout=8.0)
-        store = MemoryStore(path=self.data_dir/f"context-{platform or adapter.platform}.json")
+        store = MemoryStore(path=self.persona_spaces.directory()/f"context-{platform or adapter.platform}.json")
 
         memory = self._ensure_memory()
         store.sync_suppressions(getattr(memory,'suppressions',[]))
@@ -614,17 +938,43 @@ class BotRuntime:
             group_reply_at_sender=bool(cfg.bot.group_reply_at_sender),
             typing_indicator=bool(cfg.bot.typing_indicator),
             coordinator=self.conversations,
-            reply_decider=ReplyDecider(judge_gw,mode=cfg.bot.reply_mode,bot_name=cfg.bot.name),
+            reply_decider=ReplyDecider(admission_gw,mode=cfg.bot.reply_mode,bot_name=cfg.bot.name),
             late_reply_enabled=bool(cfg.bot.late_reply_enabled),
         )
         if hasattr(adapter,'configure_burst'):
             adapter.configure_burst(cfg.bot.message_merge_window,cfg.bot.message_merge_max_wait,
-                                    state_path=self.data_dir/'qq-bursts.json',human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
+                                    state_path=self.data_dir/('desktop-bursts.json' if adapter.platform=='desktop' else 'qq-bursts.json'),human=cfg.bot.humanized_wait,pause_timeout=cfg.bot.message_pause_timeout)
         orch.ctx.shared_context = self.proactive.shared_context
+        orch.context_filename=store.path.name
+        orch.persona_space=self.persona_spaces.active_key
+        orch._persona_contexts={self.persona_spaces.active_key:orch.ctx}
+        orch.inactive_handler=lambda msg:self._accept_inactive_turn(orch,msg)
+        if adapter.platform=='desktop':
+            adapter.active_space=lambda:self.persona_spaces.active_key
+            adapter.legacy_space=self.persona_spaces.legacy_key
+        orch.ctx.shared_history = self.proactive.shared_turns
+        orch.ctx.chat_mode=cfg.bot.chat_mode
+        self._configure_context_session(orch.ctx,cfg,chat_gw.primary,gateway=chat_gw)
+        adapter.prefetch_media=lambda msg:orch.images.prefetch_message(msg,adapter)
         if hasattr(adapter, 'on_activity'):
             adapter.on_activity(self._proactive_note_in)
         self._wire_logging(orch, adapter, platform)
         return orch
+
+    async def _accept_inactive_turn(self,orch,msg):
+        """Keep old-space inbox evidence without speaking as the newly chosen role."""
+        key=getattr(msg,'persona_space','') or self.persona_spaces.legacy_key
+        contexts=orch._persona_contexts
+        if key not in contexts:
+            storage=MemoryStore(path=self.persona_spaces.directory(key)/orch.context_filename)
+            storage.sync_suppressions(self._ensure_memory().suppressions)
+            contexts[key]=ContextManager(storage,compactor=orch.ctx.compactor)
+            self._configure_context_session(contexts[key],self.cfg,gateway=orch.llm)
+        ctx=contexts[key]
+        await ctx.accept_user(msg)
+        for original in members(msg):
+            await ctx.store.archive(original,direction='in')
+            self.log.add_in(original,'persona_inactive','已切换人格，原来话仅保留在原空间',False,platform=msg.platform)
 
     def _wire_logging(self, orch: Orchestrator, adapter: BaseAdapter,
                       platform: str = "") -> None:
@@ -634,7 +984,7 @@ class BotRuntime:
         plat = platform or adapter.platform
 
         orig_decide = orch.router.decide
-        orch.observe_decision=lambda d:last.set((d.layer,d.reason))
+        orch.observe_decision=lambda d:last.set((getattr(d,'layer','natural'),d.reason))
 
         async def decide_wrapped(msg: WxMessage):
             d = await orig_decide(msg)
@@ -685,7 +1035,7 @@ class BotRuntime:
             ), text, platform=plat)
             if not self._proactive_sending.get():
                 try:
-                    self.proactive.note_out(adapter.platform, chat_id, text)
+                    self.proactive.note_out(adapter.platform, chat_id, text,persona_space=orch.persona_space)
                 except Exception as exc:
                     # A stats/state failure must not turn an accepted QQ send into a retry.
                     log.warning('主动联系活动记录暂停 error_type=%s', type(exc).__name__)
@@ -697,6 +1047,9 @@ class BotRuntime:
 
     def _proactive_note_in(self, msg):
         self.conversations.ingest(msg)
+        learner=getattr(getattr(self,'memory',None),'learner',None)
+        if learner is not None and hasattr(learner,'yield_to_foreground'):
+            learner.yield_to_foreground()
         try:
             self.proactive.note_in(msg)
         except Exception as exc:
@@ -708,9 +1061,9 @@ class BotRuntime:
         candidates = []
         for row in rows:
             ilink = row['platform'] == 'ilink'
-            name = 'wechat' if ilink else 'qq'
-            adapter = self.wechat_adapter if ilink else self.qq_adapter
-            orch = self.wechat_orch if ilink else self.qq_orch
+            name = 'wechat' if ilink else 'desktop' if row['platform']=='desktop' else 'qq'
+            orch = self._orchestrator_for(row['platform'])
+            adapter = orch.adapter if orch is not None else None
             if adapter is None or orch is None or name not in self.platforms_running:
                 continue
             chat = row['chat_id']
@@ -728,21 +1081,31 @@ class BotRuntime:
                 if not row.get('context_token') or now - row['last_in'] > 86400 or not adapter._running:
                     continue
             else:
-                if adapter._bursts.typing_hints.get(key + ':' + row['owner_id'], {}).get('until', 0) > now:
-                    return None
-                if any(entries and entries[-1][0].chat_id == chat for entries in adapter._bursts.pending.values()):
-                    return None
-                if not adapter._running:
+                if row['platform']=='desktop' and not self._desktop_delivery_available():continue
+                bursts=getattr(adapter,'_bursts',getattr(adapter,'buffer',None))
+                if bursts is not None:
+                    prefix=key+':'+row['owner_id']
+                    if any((k==prefix or k.startswith(prefix+':space:')) and hint.get('until',0)>now for k,hint in bursts.typing_hints.items()):return None
+                    for pending_key,entries in bursts.pending.items():
+                        if entries and entries[-1][0].chat_id==chat:
+                            if bursts.typing_hints.get(pending_key,{}).get('until',0)>now:return None
+                            return None
+                if not getattr(adapter,'_running',getattr(adapter,'running',False)):
                     continue
             candidates.append(row)
         return max(candidates, key=lambda r: r['last_in'], default=None)
+
+    def _desktop_delivery_available(self):
+        adapter=self.desktop_adapter
+        return bool(self.cfg.companion.enabled and adapter is not None and
+                    getattr(adapter,'delivery_available',lambda:False)())
 
     async def _proactive_generate(self, row, messages):
         cfg = self.cfg
         memory = self._ensure_memory()
         recall = (memory.build_context(user_id=row['owner_id'], chat_id=row['chat_id'],
                   query=' '.join(e['text'] for e in self.proactive.timeline(self.proactive.rows_for(row['platform'], row['owner_id'])) if e['role']=='user')[-1800:],
-                  platform=row['platform']) if memory.enabled and memory.inject else '')
+                  platform=row['platform'],**({'mark_used':True} if hasattr(memory,'record_usage') else {})) if memory.enabled and memory.inject else '')
         system = build_system_prompt(cfg.bot.name, cfg.bot.persona, cfg.bot.persona_profile, cfg.bot.persona_relationship)
         prompt = [{'role': 'system', 'content': system}]
         if recall:
@@ -750,6 +1113,8 @@ class BotRuntime:
         prompt += messages
         gateway = LLMGateway(ProviderCfg('proactive', cfg.llm.primary_base, cfg.llm.primary_key,
                                        cfg.llm.primary_model, timeout=20, max_tokens=300))
+        gateway.chat_mode=cfg.bot.chat_mode
+        self._observe_gateway(gateway)
         try:
             return await gateway.chat(prompt, chat_id=row['chat_id'])
         finally:
@@ -757,10 +1122,11 @@ class BotRuntime:
 
     async def _proactive_deliver(self, row, text, attempt_id):
         ilink = row['platform'] == 'ilink'
-        adapter = self.wechat_adapter if ilink else self.qq_adapter
-        orch = self.wechat_orch if ilink else self.qq_orch
+        orch = self._orchestrator_for(row['platform'])
+        adapter = orch.adapter if orch is not None else None
         if adapter is None or orch is None:
             raise RuntimeError('channel stopped')
+        original_store=orch.store
         # Share normal reply rate limits; never split a proactive utterance.
         await orch.sender.global_bucket.acquire()
         await orch.sender.chat_buckets[row['chat_id']].acquire()
@@ -780,7 +1146,7 @@ class BotRuntime:
             self._proactive_sending.reset(marker)
         # This is an assistant-only turn, not a fabricated human message.
         key = f"ctx:{row['platform']}:private:{row['chat_id']}"
-        await orch.store.push(key, {'user': '', 'assistant': text, 'turn_id': 'proactive:' + attempt_id,
+        await original_store.push(key, {'user': '', 'assistant': text, 'turn_id': 'proactive:' + attempt_id,
                                     'ts': time.time(), 'proactive': True})
 
     # Optional continuations are a distinct job kind, not gated by random contact.
@@ -800,16 +1166,20 @@ class BotRuntime:
         if not self.cfg.bot.late_reply_enabled or any(r['muted'] or r['awaiting'] for r in rows):return False
         for row in rows:
             ilink=row['platform']=='ilink'
-            adapter=self.wechat_adapter if ilink else self.qq_adapter
-            orch=self.wechat_orch if ilink else self.qq_orch
+            orch=self._orchestrator_for(row['platform'])
+            adapter=orch.adapter if orch is not None else None
             if adapter is None or orch is None:continue
             key=f"ctx:{row['platform']}:private:{row['chat_id']}"
             if orch._locks.get(key) and orch._locks[key].locked():return False
             if ilink:
                 if any(str(raw.get('from_user_id'))==row['chat_id'] for raw in adapter._pending) or row['chat_id'] in adapter._jobs:return False
-            elif any(v and v[-1][0].chat_id==row['chat_id'] for v in adapter._bursts.pending.values()):return False
-        adapter=self.wechat_adapter if msg.platform=='ilink' else self.qq_adapter
-        if adapter is None or not adapter._running:return False
+            else:
+                bursts=getattr(adapter,'_bursts',getattr(adapter,'buffer',None))
+                if bursts is not None and any(v and v[-1][0].chat_id==row['chat_id'] for v in bursts.pending.values()):return False
+        orch=self._orchestrator_for(msg.platform)
+        adapter=orch.adapter if orch is not None else None
+        if adapter is None or not getattr(adapter,'_running',getattr(adapter,'running',False)):return False
+        if msg.platform=='desktop' and not self._desktop_delivery_available():return False
         if msg.platform=='ilink':
             row=next((r for r in rows if r['platform']==msg.platform and r['owner_id']==msg.sender_id),None)
             if not row or not row.get('context_token') or time.time()-row['last_in']>86400:return False
@@ -821,7 +1191,7 @@ class BotRuntime:
         memory=self._ensure_memory()
         identity=memory.identity_key(msg.platform,msg.sender_id)
         signature=(self.conversations.person(msg),tuple(sorted((r['platform'],r['owner_id'],r['revision']) for r in current)),
-                   getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(identity,0))
+                   str(getattr(memory,'path','')),getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(identity,0))
         if signature!=self.conversations.turns[tid].get('_late_signature'):
             raise ConversationChanged('Linked person activity or identity changed')
         if not self._late_available(msg,rows):raise ConversationChanged('Continuation yielded to current conversation')
@@ -849,27 +1219,30 @@ class BotRuntime:
                 rows=self.proactive.rows_for(msg.platform,msg.sender_id)
                 person=self.conversations.person(msg)
                 if self.conversations.busy(person) or not rows or not self._late_available(msg,rows):continue
-                orch=self.wechat_orch if msg.platform=='ilink' else self.qq_orch
+                orch=self._orchestrator_for(msg.platform)
                 if orch is None:continue
                 async with self.conversations.lock(person):
+                    original_store,original_ctx,original_space=orch.store,orch.ctx,getattr(orch,'persona_space',self.persona_spaces.active_key)
                     memory=self._ensure_memory()
                     turn['_late_signature']=(person,tuple(sorted((r['platform'],r['owner_id'],r['revision']) for r in rows)),
-                                             getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(person,0))
+                                             str(getattr(memory,'path','')),getattr(memory,'_generation',0),getattr(memory,'_revisions',{}).get(person,0))
                     self.conversations.reconsidered(tid)
                     try:
-                        recent=await orch.store.get_recent(msg.ctx_key)
+                        recent=await original_store.get_recent(msg.ctx_key)
                         decision=(ReplyDecision('reply','恢复未提交的补回决定') if turn.get('late_decision')=='reply' else
                                   await self._late_work(tid,msg,rows,orch.reply_decider.decide(msg,recent,revisit=True)))
                         if decision.action!='reply':
                             self.conversations.finish(tid,'context_only','稍后重判：没有需要补充的内容');continue
                         self.conversations.decide(tid,decision)
                         mem=self._ensure_memory()
-                        recall=mem.build_context(msg.sender_id,msg.chat_id,msg.content,platform=msg.platform) if mem.enabled and mem.inject else ''
-                        prompt=await orch.ctx.build(msg,memory_context=recall)
-                        prompt.insert(1,{'role':'system','content':
+                        recall=mem.build_context(msg.sender_id,msg.chat_id,msg.content,platform=msg.platform,
+                            **({'mark_used':True} if hasattr(mem,'record_usage') else {})) if mem.enabled and mem.inject else ''
+                        prompt=await original_ctx.build(msg,memory_context=recall)
+                        prompt.insert(max(1,len(prompt)-1),{'role':'system','content':
                             '这是对刚才一段普通分享的唯一一次稍后承接。用户没有发新消息。自然接着说一句，不道歉解释延迟、不提队列、不重复问候、不催回复。没有新的、有用的接话内容只输出<SKIP>。'})
                         async def generate():
-                            return ''.join([part async for part in orch.llm.stream(prompt,chat_id=msg.chat_id)])
+                            with task_scope('late_reply'):
+                                return ''.join([part async for part in orch.llm.stream(prompt,chat_id=msg.chat_id)])
                         text=normalize_reply_text(await self._late_work(tid,msg,rows,asyncio.wait_for(generate(),25))).strip()
                         if not text or text=='<SKIP>':
                             self.conversations.finish(tid,'context_only','稍后承接无新增内容');continue
@@ -890,9 +1263,9 @@ class BotRuntime:
                                 self.log.add_out(msg,text,platform='wechat')
                             else:await asyncio.wait_for(adapter.send_text(msg.chat_id,text),30)
                             attempt['status']='accepted'
-                            self.proactive.note_out(msg.platform,msg.chat_id,text)
+                            self.proactive.note_out(msg.platform,msg.chat_id,text,persona_space=original_space)
                             self.conversations.finish(tid)
-                            await orch.store.push(msg.ctx_key,{'user':'','assistant':text,'turn_id':'late:'+attempt['id'],
+                            await original_store.push(msg.ctx_key,{'user':'','assistant':text,'turn_id':'late:'+attempt['id'],
                                 'ts':time.time(),'source_ids':turn['source_ids'],'late':True})
                         except BaseException:
                             attempt['status']='uncertain'
@@ -906,6 +1279,10 @@ class BotRuntime:
                     except Exception as exc:
                         if turn['state']!='uncertain':self.conversations.finish(tid,'context_only','稍后整理未完成，保留经历不打扰')
                         log.warning('稍后承接结束 error_type=%s',type(exc).__name__)
+                    finally:
+                        # A continuation is an assistant-only experience below,
+                        # not a second user turn or an uncommitted main-session draft.
+                        if hasattr(original_ctx,'discard'):original_ctx.discard(msg)
 
     @staticmethod
     def _guess_chat_type(chat_id: str) -> str:
@@ -1218,14 +1595,20 @@ class BotRuntime:
         """知识库实例在机器人启动时创建；未启动时按需建一个只读实例，
         这样用户不启动机器人也能查看/编辑已有记忆。"""
         if self.memory is None:
-            self.memory = PersonaMemory(
-                self.data_dir / "memory.json", llm=LLMGateway(self._memory_provider(self.cfg)),
-                enabled=bool(self.cfg.bot.memory_enabled),
-            )
+            key=self.persona_spaces.active_key
+            self.memory=self._memory_cache.get(key)
+            if self.memory is None:
+                self.memory = PersonaMemory(
+                    self.persona_spaces.directory()/"memory.json", llm=LLMGateway(self._memory_provider(self.cfg)),
+                    enabled=bool(self.cfg.bot.memory_enabled),forget_path=self.data_dir/'memory-forgotten.json',
+                    identity_path=self.data_dir/'identity-links.json')
+                self._memory_cache[key]=self.memory
+            self.memory.refresh_shared_controls()
             self.memory.on_forget=self._on_memory_forget
             if hasattr(self,'proactive'):
                 self.proactive.filter_text=self.memory.filter_text
             for marker in self.memory.suppressions:self._on_memory_forget(marker)
+        self._observe_gateway(self.memory.llm)
         self.memory.enabled = bool(self.cfg.bot.memory_enabled)
         self.memory.inject = bool(self.cfg.bot.memory_inject)
         self.memory.extract_interval = max(1, int(self.cfg.bot.memory_extract_interval or 3))
@@ -1234,12 +1617,22 @@ class BotRuntime:
     def _on_memory_forget(self,marker):
         memory=self.memory
         if memory is None:return
+        self._purge_suppressed_spaces(marker.get('accounts',[]))
+        for other in self._memory_cache.values():
+            if other is not memory:
+                other.refresh_shared_controls()
+                for account in marker.get('accounts',[]):other.learner.clear('user',account.get('owner_id',''))
         live={}
-        for orch in (self.wechat_orch,self.qq_orch):
+        for orch in self._orchestrators():
             if orch is not None:
+                if hasattr(orch,'preparation'):
+                    orch.preparation.invalidate()
                 orch.store.suppress(marker)
                 if orch.store.path:live[str(orch.store.path)]=True
-        for path in self.data_dir.glob('context-*.json'):
+                for ctx in getattr(orch,'_persona_contexts',{}).values():
+                    ctx.store.suppress(marker)
+                    if ctx.store.path:live[str(ctx.store.path)]=True
+        for path in self.persona_spaces.context_paths():
             if str(path) not in live:MemoryStore(path=path).suppress(marker)
         if hasattr(self,'conversations'):
             accounts=marker.get('accounts',[])
@@ -1260,6 +1653,16 @@ class BotRuntime:
             self.proactive.applied_forgetting.append(marker['id'])
             self.proactive._save()
 
+    def _purge_suppressed_spaces(self,accounts=()):
+        cached={str(m.path):m for m in self._memory_cache.values()}
+        for path in self.persona_spaces.memory_paths():
+            memory=cached.get(str(path))
+            if memory is None:
+                memory=PersonaMemory(path,enabled=False,forget_path=self.data_dir/'memory-forgotten.json',
+                    identity_path=self.data_dir/'identity-links.json')
+            memory.refresh_shared_controls();memory.purge_suppressed()
+            for account in accounts:memory.learner.clear('user',account.get('owner_id',''))
+
     def memory_list(self, scope: str = "", owner_id: str = "",
                     category: str = "", keyword: str = "", include_history: bool = False) -> dict:
         m = self._ensure_memory()
@@ -1268,12 +1671,14 @@ class BotRuntime:
             "stats": m.stats(),
             "categories": CATEGORIES,
             "identities": m.identities,
+            "space":self.persona_spaces.info(),
         }
 
     def memory_graph(self,**filters):
         from .core.memory_graph import MemoryGraphSnapshot,context_rows,build_memory_graph
-        snapshot=MemoryGraphSnapshot(self.data_dir/'memory.json')
-        rows,omitted=context_rows(self.data_dir)
+        directory=self.persona_spaces.directory()
+        snapshot=MemoryGraphSnapshot(directory/'memory.json')
+        rows,omitted=context_rows(directory)
         graph=build_memory_graph(snapshot,rows,**filters)
         graph['coverage']['omitted_context_turns']=omitted
         return graph
@@ -1297,13 +1702,21 @@ class BotRuntime:
 
     def memory_allow_relearning(self,marker_id):
         memory=self._ensure_memory()
+        self._purge_suppressed_spaces()
         if not memory.release_suppression(marker_id):return False
+        for other in self._memory_cache.values():
+            other.refresh_shared_controls()
+            if other.suppressions!=memory.suppressions:other.suppressions=list(memory.suppressions)
+            other._save()
         live=set()
-        for orch in (self.wechat_orch,self.qq_orch):
+        for orch in self._orchestrators():
             if orch is not None:
                 orch.store.sync_suppressions(memory.suppressions)
                 if orch.store.path:live.add(str(orch.store.path))
-        for path in self.data_dir.glob('context-*.json'):
+                for ctx in getattr(orch,'_persona_contexts',{}).values():
+                    ctx.store.sync_suppressions(memory.suppressions)
+                    if ctx.store.path:live.add(str(ctx.store.path))
+        for path in self.persona_spaces.context_paths():
             if str(path) not in live:MemoryStore(path=path).sync_suppressions(memory.suppressions)
         return True
 

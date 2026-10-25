@@ -17,7 +17,7 @@ class NaturalConfigTests(unittest.TestCase):
         bot = AppConfig().bot
         self.assertEqual(bot.reply_mode, 'natural')
         self.assertTrue(bot.late_reply_enabled)
-        self.assertEqual(bot.message_merge_window, 4)
+        self.assertEqual(bot.message_merge_window, 2)
 
     def test_legacy_and_invalid_values(self):
         with tempfile.TemporaryDirectory() as d:

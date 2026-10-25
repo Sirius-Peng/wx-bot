@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>微信 AI 助手</title>
-<link rel="stylesheet" href="/static/style.css?v=20261016-graph2">
+<link rel="stylesheet" href="/static/style.css?v=3.0.0">
 </head>
 <body>
 
@@ -26,34 +26,23 @@
     </div>
 
     <nav class="nav">
-      <button class="nav-item active" data-page="overview" aria-label="概览">
+      <button class="nav-item active" data-page="overview" aria-label="首页">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
-        <span>概览</span>
+        <span>首页</span>
       </button>
-      <button class="nav-item" data-page="connect" aria-label="接入设置">
+      <button class="nav-item" data-page="connect" aria-label="连接">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v6"/><rect x="4" y="8" width="16" height="13" rx="3"/><circle cx="12" cy="15" r="2"/></svg>
-        <span>接入设置</span>
+        <span>连接</span>
       </button>
-      <button class="nav-item" data-page="memory" aria-label="人格知识库">
+      <button class="nav-item" data-page="memory" aria-label="人格与记忆">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 8 0v-1a3 3 0 0 0 0-6V7a4 4 0 0 0-4-4Z"/><path d="M12 3v18"/></svg>
-        <span>人格知识库</span>
+        <span>人格与记忆</span>
         <em class="nav-badge" id="nav-memory-count" hidden>0</em>
       </button>
-      <button class="nav-item" data-page="memory-graph" aria-label="记忆拓扑">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m7 7 10 10M7 17 17 7"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/></svg><span>记忆拓扑</span>
-      </button>
-      <button class="nav-item" data-page="messages" aria-label="消息记录">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12Z"/></svg>
-        <span>消息记录</span>
-      </button>
-      <button class="nav-item" data-page="statistics" aria-label="对话统计">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="9" r="5"/><circle cx="17" cy="15" r="4"/><circle cx="6" cy="19" r="2"/></svg><span>对话统计</span>
-      </button>
-      <button class="nav-item" data-page="settings" aria-label="模型与行为">
+      <button class="nav-item" data-page="settings" aria-label="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.5 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15.9H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9.5l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9.3a1.6 1.6 0 0 0 1-1.5V5a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></svg>
-        <span>模型与行为</span>
+        <span>设置</span>
       </button>
-      <button class="nav-item" data-page="guide" aria-label="上手引导"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h7c2 0 3 1 3 3v14c0-2-1-3-3-3H4zM14 7c0-2 1-3 3-3h3v14h-3c-2 0-3 1-3 3"/></svg><span>上手引导</span></button>
     </nav>
 
     <div class="sidebar-foot">
@@ -67,7 +56,7 @@
   <main class="main">
     <header class="topbar">
       <div class="topbar-title">
-        <h1 id="page-title">概览</h1>
+        <h1 id="page-title">首页</h1>
         <p id="page-sub">查看机器人运行状态与今日数据</p>
       </div>
       <div class="topbar-actions">
@@ -83,13 +72,14 @@
 
       <!-- ─────── 概览 ─────── -->
       <section class="page active" id="page-overview">
+<div class="card"><div class="card-head"><div><h3>v3 · 核心陪伴</h3><p class="hint">本地接话，轻量记忆。人格与数据沿用原目录。</p></div><button class="btn btn-primary" id="btn-companion-open">打开桌面伙伴</button></div><div class="card-body"><label><input type="checkbox" id="companion-enabled"> 启用独立桌面会话</label><p class="hint">默认不关联微信或QQ身份。未导入形象也能文字聊天。</p><button class="btn btn-ghost" id="btn-companion-import">导入Live2D模型</button><button class="btn btn-ghost" id="btn-open-history">查看消息记录</button><button class="btn btn-ghost" id="btn-open-guide">上手引导</button><p class="hint" id="companion-status"></p></div></div>
         <div class="hero" id="hero">
           <div class="hero-main">
             <div class="hero-status">
               <span class="pulse" id="hero-pulse"></span>
               <div>
                 <h2 id="hero-title">机器人未运行</h2>
-                <p id="hero-desc">完成接入设置后点击「启动机器人」即可开始工作</p>
+                <p id="hero-desc">完成连接后点击「启动机器人」即可开始工作</p>
               </div>
             </div>
           </div>
@@ -145,7 +135,7 @@
         </ol>
         <div class="card guide-panel" data-guide-panel="1">
           <div class="card-head"><h3>你想在哪里和机器人聊天？</h3></div>
-          <div class="guide-body"><p>可以只选一个，也可以两个都选。之后随时在「接入设置」调整。</p>
+          <div class="guide-body"><p>可以只选一个，也可以两个都选。之后随时在「连接」调整。</p>
             <div class="guide-platforms"><label><input type="checkbox" id="guide-qq"><strong>QQ</strong><span>私聊与群聊，需要 NapCat 网关。</span></label><label><input type="checkbox" id="guide-wechat"><strong>微信 iLink</strong><span>微信私聊，直接扫码，不用安装网关。</span></label></div>
           </div>
         </div>
@@ -168,7 +158,7 @@
             <details class="guide-help"><summary>第一次安装 Docker 怎么操作？</summary><ol><li>按安装程序完成 Docker Desktop 安装；Windows 按提示启用 WSL2，需要重启时先重启电脑。</li><li>打开 Docker Desktop，按界面提示完成首次启动，等它显示引擎已运行。</li><li>回到这里再次点「启动 QQ 网关并登录」。应用会继续，不会清空已有 QQ 登录数据。</li></ol></details>
             <button class="btn btn-primary" id="btn-guide-qq">启动 QQ 网关并登录</button>
             <p id="guide-qq-status" class="guide-status" role="status">二维码真正准备好后才会弹出；保存过的 QQ 可快速登录。</p>
-            <p class="hint">扫码后在手机 QQ 上确认。遇到额外验证时，请按手机提示完成。网关地址、Token、快速登录与日志仍保留在「接入设置」。</p>
+            <p class="hint">扫码后在手机 QQ 上确认。遇到额外验证时，请按手机提示完成。网关地址、Token、快速登录与日志仍保留在「连接」。</p>
             <button class="link" data-goto="connect">查看详细网关设置 →</button>
           </div>
         </div>
@@ -178,13 +168,13 @@
         </div>
         <div class="card guide-panel" data-guide-panel="5" hidden>
           <div class="card-head"><h3>检查配置，然后开始聊天</h3></div>
-          <div class="guide-body"><ul id="guide-review" class="guide-review"></ul><p>点「完成配置并启动」后，用已连接的平台给机器人发送「你好」。后端需要保持运行；QQ 网关以后可直接从首页启动。</p><p class="hint">人格与行为默认沿用当前设置，在「模型与行为」里可以逐项调整。</p></div>
+          <div class="guide-body"><ul id="guide-review" class="guide-review"></ul><p>点「完成配置并启动」后，用已连接的平台给机器人发送「你好」。后端需要保持运行；QQ 网关以后可直接从首页启动。</p><p class="hint">人格与行为默认沿用当前设置，在「设置」里可以逐项调整。</p></div>
         </div>
         <p id="guide-feedback" class="guide-feedback" role="status"></p>
         <div class="guide-footer"><button class="btn btn-ghost" id="btn-guide-later">暂时跳过</button><div><button class="btn btn-ghost" id="btn-guide-back">上一步</button><button class="btn btn-primary" id="btn-guide-next">下一步</button></div></div>
       </section>
 
-      <!-- ─────── 接入设置（向导式）─────── -->
+      <!-- ─────── 连接（向导式）─────── -->
       <section class="page" id="page-connect" data-settings-section="channels">
 
         <!-- 步骤 1：选接入方式 -->
@@ -396,12 +386,40 @@
 
       </section>
 
-      <!-- ─────── 人格知识库 ─────── -->
+      <!-- ─────── 人格与记忆 ─────── -->
       <section class="page" id="page-memory">
+        <div class="card" data-settings-section="persona">
+          <div class="card-head"><h3>人格与称呼</h3></div>
+          <div class="field-grid">
+            <label class="field">
+              <span>机器人名称</span>
+              <input type="text" id="bot-name" placeholder="弗洛洛">
+              <em>群里 @ 它时用的名字；也是它在对话里的自称</em>
+            </label>
+            <label class="field">
+              <span>人格预设</span>
+              <select id="persona-profile"><option value="phrolova">弗洛洛（鸣潮）</option><option value="custom">自定义人格</option></select>
+              <em>内置身份、行为与场景示例；不是模型权重微调</em>
+            </label>
+            <label class="field">
+              <span>关系模式</span>
+              <select id="persona-relationship"><option value="neutral">普通聊天（默认）</option><option value="trusted">信任日常</option><option value="rover">漂泊者剧情扮演</option></select>
+              <em>普通用户不会自动被当成漂泊者或恋人</em>
+            </label>
+            <div class="field field-full"><button type="button" class="btn btn-secondary" id="btn-phrolova-preset">填入弗洛洛预设</button></div>
+            <label class="field field-full">
+              <span>人设描述 / 预设补充偏好</span>
+              <textarea id="bot-persona" rows="4" placeholder="例如：你是「小助手」，说话简洁友好，喜欢用短句。回答技术问题时先给结论再给理由，不确定的就直说不知道。"></textarea>
+              <em>自定义模式决定全部人设；预设模式只补充偏好，不覆盖角色内核。保存后热更新。</em>
+            </label>
+          </div>
+          <div class="card-foot"><span class="save-state" data-save-status="persona">未修改</span><button class="btn btn-primary" data-save-section="persona">保存人格设置</button></div>
+        </div>
+
         <div class="notice notice-info">
           <strong>对用户的了解，不是人格设定</strong>
-          <p>人格身份、价值观和口吻由「模型与行为 → 人格与称呼」决定。真实对话先成为经历，累计至少三轮、空闲两分钟后才在后台整理为候选印象；至少两次独立对话、相隔24小时的一致证据才形成稳定认知。「请记住」也慢慢沉淀，管理页手动添加或固定才立即生效。关联的微信和 QQ 账号共享同一个人的了解。</p>
-          <p>形成中：14天无新依据淡化；已熟悉：180天无新依据淡化；临时状态最长24小时。助手复述和检索不会续期，已淡化只在明确追问往事时参考。删除表示明确遗忘，旧导入不会自动复活。</p>
+          <p>人格身份、价值观和口吻由本页「人格与称呼」决定。真实对话先成为经历，累计至少三轮、空闲两分钟后才在后台整理为候选印象；至少两次独立对话、相隔24小时的一致证据才形成稳定认知。「请记住」也慢慢沉淀，管理页手动添加或固定才立即生效。关联的微信和 QQ 账号共享同一个人的了解。</p>
+          <p>琐事3天、普通偏好7天、重要事实30天无新用户依据后淡化；临时状态最长24小时，手动固定不衰减。助手复述和检索不会续期，已淡化只在明确追问往事时参考。删除表示明确遗忘，旧导入不会自动复活。</p>
         </div>
 
         <div class="stat-grid" id="memory-stats">
@@ -418,7 +436,7 @@
           <div class="stat-card">
             <span class="stat-label">自动积累</span>
             <strong class="stat-value" id="mem-enabled">—</strong>
-            <span class="stat-foot">可在「模型与行为」调整</span>
+            <span class="stat-foot">可在「设置」调整</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">类别分布</span>
@@ -428,19 +446,21 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h3>微信 ↔ QQ 身份关联</h3></div>
-          <p class="hint">两个通道共用同一记忆库。把同一个人的账号关联后，偏好、经历、事实更新和主动联系计划会跨平台共享。使用消息发送者 ID，不是机器人自己的账号；不同用户与群聊仍独立。</p>
+          <div class="card-head"><h3>可选的跨端身份关联</h3></div>
+          <p class="hint">各端默认独立使用，无需关联。仅当这些账号属于同一个人时，填写至少两个账号，共享记忆与联系计划；不会自动换端补发旧回答。填写消息发送者 ID，而非机器人的账号。</p>
           <div class="field-grid">
             <label class="field"><span>微信发送者 ID</span><input type="text" id="identity-wechat" placeholder="从消息记录查看发送者 ID"></label>
             <label class="field"><span>QQ 号</span><input type="text" id="identity-qq" placeholder="同一个人的 QQ 号"></label>
+            <label class="field"><span>桌面账号（可选）</span><input type="text" id="identity-desktop" placeholder="默认 local；填写表示明确关联"></label>
           </div>
           <div class="card-foot"><button class="btn btn-primary" id="btn-identity-link">关联并共享记忆</button></div>
           <div id="identity-list" class="hint" style="padding:0 20px 16px"></div>
         </div>
         <div class="notice notice-info" id="memory-learning-status" role="status">自动积累状态加载中……</div>
+        <div class="notice notice-info" id="memory-space-status" role="status">人格预设与关系模式分别记录；保存切换后使用独立记忆文件，切回可恢复原空间。</div>
         <div class="card">
           <div class="card-head memory-list-head">
-            <h3>对用户的了解</h3><button class="btn btn-ghost btn-sm" data-goto="memory-graph">查看记忆拓扑</button>
+            <h3>对用户的了解</h3>
             <label><input type="checkbox" id="mem-history"> 显示历史、已淡化与过期信息</label>
             <div class="head-actions">
               <input type="text" id="mem-search" class="input-sm" placeholder="搜索内容或关键词">
@@ -456,76 +476,11 @@
           <p class="hint" style="padding:0 20px">这些内容已停止学习和使用。只有你明确允许，今后的新对话才会重新学习；解除不会恢复旧记忆，也不会删除聊天日志。</p>
           <div id="memory-forgotten" class="memory-list" aria-live="polite">加载中……</div>
         </div>
-      </section>
-
-      <!-- ─────── 消息记录 ─────── -->
-      <section class="page" id="page-messages">
-        <div class="card">
-          <div class="card-head">
-            <h3>消息记录</h3>
-            <div class="head-actions">
-              <div class="segmented segmented-sm" id="msg-filter">
-                <button data-value="" class="active">全部</button>
-                <button data-value="group">群聊</button>
-                <button data-value="private">私聊</button>
-                <button data-value="out">仅回复</button>
-              </div>
-              <button class="btn btn-ghost btn-sm" id="btn-clear-msgs">清空</button>
-            </div>
-          </div>
-          <div id="messages-list" class="feed feed-lg"></div>
-        </div>
-      </section>
-
-      <section class="page" id="page-memory-graph">
-        <div id="graph-workspace" class="graph-workspace" aria-label="记忆关联图工作区">
-          <div id="graph-canvas" class="graph-canvas"><p class="graph-empty">正在等待本地拓扑…</p></div>
-
-          <div class="graph-toolbar" aria-label="查找与视图">
-            <label class="graph-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="graph-search" type="search" maxlength="120" aria-label="搜索记忆、原话或关键词" placeholder="搜索记忆、对话、关键词…"></label>
-            <div class="graph-view-switch" role="group" aria-label="关联图范围"><button id="graph-mode-global" type="button" aria-pressed="true">全局</button><button id="graph-mode-local" type="button" aria-pressed="false" title="选择一个节点，探索它附近的关联">局部</button></div>
-          </div>
-
-          <details class="graph-settings" id="graph-settings">
-            <summary title="筛选与显示设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2.5" fill="currentColor"/><circle cx="16" cy="12" r="2.5" fill="currentColor"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg><span>图谱设置</span><svg class="graph-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></summary>
-            <div class="graph-settings-body graph-filters">
-              <h3>筛选</h3>
-              <div class="field-grid">
-                <label class="field"><span>对象</span><select id="graph-person"><option value="">所有对象</option></select></label>
-                <label class="field"><span>渠道</span><select id="graph-platform"><option value="">微信与 QQ</option><option value="ilink">微信</option><option value="onebot">QQ</option></select></label>
-                <label class="field"><span>记忆阶段</span><select id="graph-phase"><option value="">所有当前阶段</option><option value="candidate">形成中</option><option value="stable">已熟悉</option><option value="pinned">已固定</option><option value="temporary">临时状态</option><option value="dormant">已淡化（需显示历史）</option></select></label>
-                <label class="field"><span>节点上限</span><select id="graph-limit"><option value="60">60</option><option value="160" selected>160</option><option value="300">300</option></select></label>
-              </div>
-              <label class="graph-check"><input type="checkbox" id="graph-history">显示历史与已淡化记忆</label>
-              <fieldset class="graph-type-filters"><legend>显示节点</legend><label><input id="graph-show-person" type="checkbox" checked><i class="graph-dot person" aria-hidden="true"></i>对象</label><label><input id="graph-show-memory" type="checkbox" checked><i class="graph-dot memory" aria-hidden="true"></i>记忆</label><label><input id="graph-show-conversation" type="checkbox" checked><i class="graph-dot conversation" aria-hidden="true"></i>对话</label><label><input id="graph-show-topic" type="checkbox" checked><i class="graph-dot topic" aria-hidden="true"></i>关键词</label></fieldset>
-              <div class="graph-display-settings"><h3>显示</h3><label class="graph-setting-row"><span>局部关联深度</span><select id="graph-depth"><option value="1" selected>1 层</option><option value="2">2 层</option><option value="3">3 层</option></select></label><label class="graph-setting-row"><span>文字密度</span><input id="graph-label-density" type="range" min="0" max="2" step="1" value="1" aria-label="文字密度：0 简洁，1 随缩放，2 密集"></label><p class="graph-setting-caption">简洁 · 随缩放 · 密集</p><label class="graph-setting-row"><span>节点大小</span><input id="graph-node-scale" type="range" min="0.7" max="1.6" step="0.1" value="1" aria-label="节点大小"></label></div>
-              <button class="btn btn-secondary graph-refresh" id="btn-graph-refresh" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>刷新本地图谱</button>
-            </div>
-          </details>
-
-          <aside class="graph-details-shell" id="graph-details-shell" aria-label="节点详情" hidden>
-            <div class="graph-details-head"><span>节点详情</span><button class="icon-btn" id="graph-details-close" type="button" aria-label="关闭节点详情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-            <div class="graph-details" id="graph-details" aria-label="所选节点详情" aria-live="polite"><p class="hint">选择节点查看来源与关联。</p></div>
-            <div class="graph-details-foot"><button class="btn btn-ghost btn-sm" id="graph-clear-selection" type="button">取消选择</button></div>
-          </aside>
-
-          <div class="graph-footer">
-            <div class="graph-bottom-info">
-              <p id="graph-summary" role="status">尚未读取拓扑</p>
-              <div class="graph-legend" aria-label="拓扑图例"><span><i class="graph-dot person" aria-hidden="true"></i>对象</span><span><i class="graph-dot memory" aria-hidden="true"></i>记忆</span><span><i class="graph-dot conversation" aria-hidden="true"></i>对话</span><span><i class="graph-dot topic" aria-hidden="true"></i>关键词</span></div>
-              <p class="graph-coverage" id="graph-status" role="status"></p>
-              <details class="graph-about"><summary>图谱说明与键盘节点列表</summary><div class="graph-about-body"><p id="graph-notice">本地图谱展示原话依据与字面关联，并非模型内部思维。实线表示所属或原话依据，虚线表示关键词字面关联。查看不会强化记忆。</p><p>滚轮缩放 · 拖动空白平移 · 拖动节点整理 · 点选节点追溯来源</p><details class="graph-list"><summary>浏览节点列表</summary><div id="graph-node-list"></div></details></div></details>
-            </div>
-            <div class="graph-zoom" aria-label="图谱视图控制"><button class="graph-control" id="graph-zoom-out" type="button" aria-label="缩小拓扑" title="缩小">−</button><span id="graph-zoom-label">100%</span><button class="graph-control" id="graph-zoom-in" type="button" aria-label="放大拓扑" title="放大">＋</button><span class="graph-control-divider" aria-hidden="true"></span><button class="graph-control" id="graph-fit" type="button" aria-label="适应全部节点" title="适应全部节点"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/><path d="m3 3 6 6m12-6-6 6M3 21l6-6m12 6-6-6"/></svg></button><button class="graph-control" id="graph-fullscreen" type="button" aria-label="全屏查看图谱" title="全屏查看图谱"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"/></svg></button></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="page" id="page-statistics">
+            <div id="page-statistics" class="active memory-statistics">
         <div class="card stats-filters">
           <div class="card-head"><div><h3>看看你们常聊什么</h3><p class="hint">本地分析，不调用 LLM。默认只统计用户消息。</p></div><button class="btn btn-primary" id="btn-stats-refresh">刷新统计</button></div>
           <div class="field-grid">
-            <label class="field"><span>时间范围</span><select id="stats-days"><option value="7">近 7 天</option><option value="30" selected>近 30 天</option><option value="90">近 90 天</option><option value="0">全部记录</option></select></label>
+            <label class="field"><span>时间范围</span><select id="stats-days"><option value="7">近 7 天</option><option value="30" selected>近 30 天</option></select></label>
             <label class="field"><span>聊天平台</span><select id="stats-platform"><option value="">微信与 QQ</option><option value="wechat">微信</option><option value="qq">QQ</option></select></label>
             <label class="field"><span>消息方向</span><select id="stats-direction"><option value="in">用户消息</option><option value="out">机器人回复</option><option value="all">双方消息</option></select></label>
             <label class="field"><span>会话类型</span><select id="stats-chat-type"><option value="">全部会话</option><option value="private">私聊</option><option value="group">群聊</option></select></label>
@@ -546,9 +501,30 @@
           <div class="card"><div class="card-head"><h3>频率排行</h3><span class="tag" id="stats-rank-total">— 项</span></div><div id="stats-ranking" class="stats-ranking"></div></div>
         </div>
         <p class="hint stats-method">话题按本地关键词规则归类，不是 AI 语义理解；同一条文本可属于多个话题。统计以已保存的消息记录为准，清空消息记录后同步清空统计。</p>
+      </div></section>
+
+      <!-- ─────── 消息记录 ─────── -->
+      <section class="page" id="page-messages">
+        <div class="card">
+          <div class="card-head">
+            <h3>消息记录</h3>
+            <div class="head-actions">
+              <div class="segmented segmented-sm" id="msg-filter">
+                <button data-value="" class="active">全部</button>
+                <button data-value="group">群聊</button>
+                <button data-value="private">私聊</button>
+                <button data-value="out">仅回复</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="btn-clear-msgs">清空</button>
+            </div>
+          </div>
+          <div id="messages-list" class="feed feed-lg"></div>
+        </div>
       </section>
 
-      <!-- ─────── 模型与行为 ─────── -->
+
+
+      <!-- ─────── 设置 ─────── -->
       <section class="page" id="page-settings">
         <div class="card" id="card-user-data">
           <div class="card-head"><h3>本地数据与备份</h3></div>
@@ -587,14 +563,32 @@
             </label>
             <label class="field">
               <span>模型名称</span>
-              <input type="text" id="primary-model" placeholder="deepseek-chat">
+              <input type="text" id="primary-model" placeholder="deepseek-flash">
             </label>
             <label class="field field-full">
               <span>API Key</span>
               <input type="password" id="primary-key" placeholder="sk-...">
             </label>
+            <label class="field">
+              <span>上下文窗口（token；0 自动）</span>
+              <input type="number" id="context-window-tokens" min="0" step="1" value="0">
+            </label>
+            <label class="field">
+              <span>达到窗口多少百分比后压缩（%）</span>
+              <input type="number" id="context-compact-percent" min="10" max="80" step="0.1" value="40">
+            </label>
           </div>
           <p class="hint">默认 DeepSeek V4.1 Flash（API 名称 deepseek-flash），支持图文输入；也可使用其他 OpenAI 兼容接口。费用以供应商当前说明为准。</p>
+          <p class="hint">长期保留同一会话及稳定前缀，默认达到模型窗口的 40% 才压缩，不再每隔几轮重建上下文。窗口填 0 时，仅官方 DeepSeek 接口的 deepseek-flash、deepseek-v4-pro 自动识别为 1,000,000 token；其他未知模型按 32,768 token 处理，也可按供应商说明手填。图片会话按实际识图接口的窗口计算。缓存命中由供应商决定，不保证每次命中。</p>
+          <details class="help-panel help-panel-sm" id="usage-diagnostics-panel">
+            <summary>用量与缓存诊断</summary>
+            <div class="help-body">
+              <p class="help-lead">当前运行近期最多 500 条事件，不是账户历史账单。仅统计接口实际返回的用量；缺失显示未知，不按模型名称估算费用。</p>
+              <p class="help-note">缓存比例按已知输入 token 加权，不是按请求次数平均；覆盖不完整时，总体命中率未知。思考 token 属于输出子集，不要重复相加。</p>
+              <div><button type="button" class="btn btn-secondary btn-sm" id="btn-usage-refresh">手动刷新诊断</button></div>
+              <div id="usage-diagnostics" role="status" aria-live="polite">尚未获取。点击“手动刷新诊断”读取当前运行数据，不会自动轮询。</div>
+            </div>
+          </details>
           <div class="card-foot"><span class="save-state" data-save-status="primary">未修改</span><button class="btn btn-primary" data-save-section="primary">保存主模型</button></div>
         </div>
 
@@ -616,8 +610,8 @@
             <label class="field"><span>模型名称</span><input type="text" id="judge-model"></label>
             <label class="field field-full"><span>API Key</span><input type="password" id="judge-key"></label>
           </div>
-          <p class="hint">用于<b>后台记忆整理</b>，以及自然回复中<b>语义模糊、已经说完整的私聊</b>的轻量接话判断（限时2秒）。明确问题、请求和收尾由本地规则处理，不是每条消息都调用。
-            独立 Key 留空时复用主模型，无需额外 Key；也可配置独立判定/整理模型。费用以供应商说明为准。</p>
+          <p class="hint">用于<b>后台记忆整理</b>，以及自然回复中<b>语义模糊、已经说完整的私聊</b>的云端轻量接话判断（总限时3秒）。明确问题、请求和收尾由规则处理，不是每条消息都调用，不加载本地判定模型。
+            独立 Key 留空时复用主接口和 Key，无需额外 Key；官方 DeepSeek 接口默认用 deepseek-flash 判断，其他接口沿用主模型，不更改回复模型。填写独立 Key 可启用本卡的独立判定/整理配置。费用以供应商说明为准。</p>
           <div class="card-foot"><span class="save-state" data-save-status="judge">未修改</span><button class="btn btn-primary" data-save-section="judge">保存判定模型</button></div>
         </div>
 
@@ -636,43 +630,19 @@
           <div class="card-head"><h3>联网搜索与现实时间</h3></div>
           <label class="switch-row"><div><strong>允许 AI 按需联网搜索</strong><span>实时问题核实来源，普通聊天保持自然</span></div><input type="checkbox" id="search-enabled"></label>
           <div class="field-grid">
-            <label class="field"><span>搜索模型</span><input type="text" id="search-model" placeholder="deepseek-flash"></label>
+            <label class="field"><span>搜索方式</span><select id="search-backend"><option value="tools">官方 Search / Fetch · 推荐</option><option value="native">旧版原生搜索 · 兼容</option></select><em>Search / Fetch 直接获取网页依据，不额外调用辅助搜索模型。</em></label>
+            <label class="field" id="search-native-model-field"><span>旧版搜索模型（仅兼容方式使用）</span><input type="text" id="search-model" placeholder="deepseek-flash"><em>切换方式会保留此配置，不会更改主模型。</em></label>
             <label class="field"><span>会话时区</span><input type="text" id="context-timezone" placeholder="Asia/Shanghai" list="timezone-options"><datalist id="timezone-options"><option value="Asia/Shanghai"><option value="Asia/Hong_Kong"><option value="Asia/Tokyo"><option value="UTC"><option value="America/New_York"><option value="Europe/London"></datalist></label>
             <label class="field field-full"><span>DeepSeek 搜索 API Key（可选）</span><input type="password" id="search-key" placeholder="主模型为 DeepSeek 官方接口时，留空复用主模型 Key"></label>
           </div>
-          <p class="hint">问新闻、天气或“帮我查一下”时，AI 可调用 DeepSeek 官方搜索；普通闲聊不必搜索。使用其他主模型时，请单独填写 DeepSeek Key。搜索会产生额外模型费用；每轮最多 2 次，失败会如实说明，不打断正常回复。</p>
+          <p class="hint">问新闻、天气或“帮我查一下”时按需联网，普通闲聊不必搜索。使用其他主模型时，请单独填写 DeepSeek Key。Search / Fetch 按工具请求次数额外计费，不是免费或仅按 token 计费；主模型整合另有用量。每轮 Search + Fetch 合计最多 2 次，失败不会自动切到旧版搜索重复计费。兼容方式使用旧版辅助模型，按其服务规则计费。<a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noopener noreferrer">官方价格</a></p>
+          <p class="hint">上述上限指模型发起的工具操作；直接接口明确返回 408/429/5xx 时，单次操作最多重试一次 HTTP 请求，可能另有计费；无响应网络错误或超时不重试，避免重复付费。已有正文/摘要时直接整合，不为每个结果额外抓取；仅在成稿不合格时有界修订一次。</p>
           <p class="hint">每轮自动注入当前日期、星期、时间、时区和昨天/今天/明天，不写入长期记忆。默认中国标准时间；用户明确给出其他时区时以用户为准。<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">获取 DeepSeek API Key</a></p>
           <div class="card-foot"><span class="save-state" data-save-status="search">未修改</span><button class="btn btn-primary" data-save-section="search">保存搜索与时间</button></div>
         </div>
 
-        <div class="card" data-settings-section="persona">
-          <div class="card-head"><h3>人格与称呼</h3></div>
-          <div class="field-grid">
-            <label class="field">
-              <span>机器人名称</span>
-              <input type="text" id="bot-name" placeholder="弗洛洛">
-              <em>群里 @ 它时用的名字；也是它在对话里的自称</em>
-            </label>
-            <label class="field">
-              <span>人格预设</span>
-              <select id="persona-profile"><option value="phrolova">弗洛洛（鸣潮）</option><option value="custom">自定义人格</option></select>
-              <em>内置身份、行为与场景示例；不是模型权重微调</em>
-            </label>
-            <label class="field">
-              <span>关系模式</span>
-              <select id="persona-relationship"><option value="neutral">普通聊天（默认）</option><option value="trusted">信任日常</option><option value="rover">漂泊者剧情扮演</option></select>
-              <em>普通用户不会自动被当成漂泊者或恋人</em>
-            </label>
-            <div class="field field-full"><button type="button" class="btn btn-secondary" id="btn-phrolova-preset">填入弗洛洛预设</button></div>
-            <label class="field field-full">
-              <span>人设描述 / 预设补充偏好</span>
-              <textarea id="bot-persona" rows="4" placeholder="例如：你是「小助手」，说话简洁友好，喜欢用短句。回答技术问题时先给结论再给理由，不确定的就直说不知道。"></textarea>
-              <em>自定义模式决定全部人设；预设模式只补充偏好，不覆盖角色内核。保存后热更新。</em>
-            </label>
-          </div>
-          <div class="card-foot"><span class="save-state" data-save-status="persona">未修改</span><button class="btn btn-primary" data-save-section="persona">保存人格设置</button></div>
-        </div>
         <div class="card" data-settings-section="reply">
+<label class="field"><span>回复速度</span><select id="chat-mode"><option value="fast">快速 · 非思考模式</option><option value="deep">深度思考</option></select></label>
           <div class="card-head"><h3>回复与等待</h3></div>
           <label class="switch-row">
             <div><strong>群聊回复时 @ 提问者</strong><span>让群成员知道这条回复是给谁的（仅 QQ 群聊生效）</span></div>
@@ -680,7 +650,7 @@
           </label>
 
           <div class="field-grid">
-            <label class="field"><span>连续消息等待间隔（秒）</span><input type="number" id="message-merge-window" min="0" max="10" step="0.5"><em>默认4秒；碎片或附件说明6秒，按最近20次节奏上调至8秒，0关闭合并。</em></label>
+            <label class="field"><span>连续消息等待间隔（秒）</span><input type="number" id="message-merge-window" min="0" max="10" step="0.5"><em>默认2秒；碎片或附件说明4秒，按最近20次节奏上调至6秒，0关闭合并。</em></label>
             <label class="field"><span>持续输入评估间隔（秒）</span><input type="number" id="message-merge-max-wait" min="1" max="60" step="1"><em>默认10秒只内部评估，不强制发出旧回复；新输入继续使未提交稿失效。</em></label>
           </div>
           <div class="field-grid"><label class="field"><span>私聊接话方式</span><select id="reply-mode"><option value="natural">自然回复：克制但不冷落</option><option value="always">每轮必回：兼容模式</option></select><em>明确问题、请求和情绪诉求保障回应；简单确认与收尾可以静默，但保留上下文。</em></label></div>
@@ -693,7 +663,7 @@
         <div class="card" data-settings-section="proactive">
           <div class="card-head"><h3>主动联系 · 按联系人统一规划</h3></div>
           <label class="switch-row"><div><strong>不定时主动发消息</strong><span>开启后，还需选择下方联系人；只在机器人运行时私聊，不向群聊推送。</span></div><input type="checkbox" id="proactive-enabled"></label>
-          <p class="hint" style="padding:0 20px">只用微信或 QQ 也能直接使用，无需关联身份。若同一个人同时使用两端，可在「人格知识库 → 微信 ↔ QQ 身份关联」关联账号；关联后共享最近联系时间、每日额度与等待回复状态，每次只选一个渠道发送。</p>
+          <p class="hint" style="padding:0 20px">只用微信或 QQ 也能直接使用，无需关联身份。若同一个人同时使用两端，可在「人格与记忆 → 微信 ↔ QQ 身份关联」关联账号；关联后共享最近联系时间、每日额度与等待回复状态，每次只选一个渠道发送。</p>
           <div class="field-grid">
             <label class="field"><span>随机间隔最短（小时）</span><input type="number" id="proactive-min-hours" min="0.25" max="168" step="0.25"><em>从最近一次收发消息后计算，默认3～8小时。</em></label>
             <label class="field"><span>随机间隔最长（小时）</span><input type="number" id="proactive-max-hours" min="0.25" max="168" step="0.25"><em>不是固定闹钟；夜间、正在聊天或没有合适内容时会延后。</em></label>
@@ -811,7 +781,7 @@
         </div>
       </div>
 
-      <label class="field"><span>账号来源</span><select id="mm-platform"><option value="">通用 / 手动共享</option><option value="ilink">微信</option><option value="onebot">QQ</option></select></label>
+      <label class="field"><span>账号来源</span><select id="mm-platform"><option value="">通用 / 手动共享</option><option value="ilink">微信</option><option value="onebot">QQ</option><option value="desktop">桌面</option></select></label>
       <label class="field">
         <span>这是关于谁的</span>
         <input type="text" id="mm-owner" placeholder="对方的 ID（QQ 号 / 微信 wxid），留空表示所有人通用">
@@ -837,8 +807,7 @@
 
 <script src="/static/guide.js?v=20261013-guide1"></script>
 <script src="/static/statistics.js?v=20261014-stats2"></script>
-<script src="/static/memory-graph.js?v=20261016-graph2"></script>
 <script src="/static/confirmation.js?v=20261014-focus1"></script>
-<script src="/static/app.js?v=20261016-topology1"></script>
+<script src="/static/app.js?v=3.0.0"></script>
 </body>
 </html>

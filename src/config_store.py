@@ -12,6 +12,7 @@ import json
 import math
 import os
 import tempfile
+import copy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -74,8 +75,11 @@ class LLMConfig:
     vision_model: str = ""  # empty: primary must support images
     search_enabled: bool = True
     search_key: str = ""  # blank: reuse primary only when it is official DeepSeek
-    search_model: str = "deepseek-flash"
+    search_backend: str = "tools"  # tools: direct Search/Fetch; native: legacy model search
+    search_model: str = "deepseek-flash"  # used only by native; keep older settings intact
     context_timezone: str = "Asia/Shanghai"
+    context_window_tokens: int = 0   # 0: resolve known provider/model, otherwise 32K.
+    context_compact_ratio: float = 0.4
 
 
 @dataclass
@@ -95,11 +99,13 @@ class BotConfig:
 
     # ── 人格知识库 ────────────────────────────────────────────
     reply_mode: str = "natural"      # natural: 克制接话；always: 每轮必回
+    chat_mode: str = "fast"          # fast: direct response; deep: explicit reasoning
+    conversation_policy_version: int = 3
     late_reply_enabled: bool = True   # 普通分享可在1～3分钟内重判一次
     humanized_wait: bool = True
     typing_indicator: bool = True
     message_pause_timeout: float = 120.0
-    message_merge_window: float = 4.0
+    message_merge_window: float = 2.0
     message_merge_max_wait: float = 10.0
 
     # Shared across QQ/WeChat; private contacts are explicitly selected in the UI.
@@ -116,10 +122,22 @@ class BotConfig:
 
 
 @dataclass
+class CompanionConfig:
+    """Optional desktop surface; model assets remain outside the installation."""
+    enabled: bool = False
+    model_id: str = ""
+    owner_id: str = "local"
+    always_on_top: bool = True
+    click_through: bool = False
+    window_bounds: dict = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     adapter: AdapterConfig = field(default_factory=AdapterConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     bot: BotConfig = field(default_factory=BotConfig)
+    companion: CompanionConfig = field(default_factory=CompanionConfig)
 
 
 class ConfigStore:
@@ -137,14 +155,17 @@ class ConfigStore:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            # 配置损坏时回退到默认值，而不是让程序起不来
-            return AppConfig()
+            raise ValueError('配置文件需要恢复，原文件已保留；请从备份恢复后启动')
         return self._from_dict(raw)
 
     def _from_dict(self, raw: dict[str, Any]) -> AppConfig:
         cfg = AppConfig()
+        raw = raw if isinstance(raw, dict) else {}
+        # Unknown future/plugin keys survive a load/edit/save round trip without
+        # making them executable options or exposing possible secrets in masked().
+        cfg._unknown = copy.deepcopy(raw)
 
-        a = raw.get("adapter") or {}
+        a = dict(raw.get("adapter") or {}) if isinstance(raw.get('adapter'),dict) else {}
         # ── 旧版配置迁移 ──────────────────────────────────────
         # 旧版用 type 单选（gewechat/ilink/onebot）；新版用 wechat_enabled + qq_enabled
         old_type = a.get("type", "")
@@ -166,18 +187,30 @@ class ConfigStore:
         if cfg.adapter.wechat_type != "ilink":
             cfg.adapter.wechat_type = "ilink"
 
-        l = raw.get("llm") or {}
+        l = raw.get("llm") if isinstance(raw.get('llm'),dict) else {}
+        l = l or {}
         cfg.llm = LLMConfig(**{k: v for k, v in l.items()
                                if k in LLMConfig.__dataclass_fields__})
 
         from .core.reality import valid_timezone
         cfg.llm.context_timezone = valid_timezone(cfg.llm.context_timezone)
         cfg.llm.search_enabled = cfg.llm.search_enabled is True
+        if not isinstance(cfg.llm.search_backend, str) or cfg.llm.search_backend not in ("tools", "native"):
+            cfg.llm.search_backend = "tools"
         if not isinstance(cfg.llm.search_model, str) or not cfg.llm.search_model.strip():
             cfg.llm.search_model = "deepseek-flash"
         if not isinstance(cfg.llm.search_key, str): cfg.llm.search_key = ""
+        window = cfg.llm.context_window_tokens
+        if isinstance(window, bool) or not isinstance(window, int) or window < 0:
+            cfg.llm.context_window_tokens = 0
+        ratio = cfg.llm.context_compact_ratio
+        if (isinstance(ratio, bool) or not isinstance(ratio, (int, float))
+                or not .1 <= ratio <= .8):
+            cfg.llm.context_compact_ratio = .4
+        else:
+            cfg.llm.context_compact_ratio = float(ratio)
 
-        b = dict(raw.get("bot") or {})
+        b = dict(raw.get("bot") or {}) if isinstance(raw.get('bot'),dict) else {}
         # 旧的明确自定义人设保持自定义；不擅自覆写其他用户的角色卡。
         if "persona_profile" not in b and ("name" in b or "persona" in b):
             b["persona_profile"] = "custom"
@@ -185,7 +218,13 @@ class ConfigStore:
             b["persona_profile"] = "custom"
         if not isinstance(b.get("persona_relationship", "neutral"), str) or b.get("persona_relationship", "neutral") not in RELATIONSHIP_IDS:
             b["persona_relationship"] = "neutral"
-        for key,default,lo,hi in [('message_merge_window',4.0,0.0,10.0),('message_merge_max_wait',10.0,0.1,60.0),('message_pause_timeout',120.0,5.0,600.0)]:
+        # v2's default was four seconds; non-default custom windows stay intact.
+        # Once marked v3, choosing four seconds is an explicit user preference.
+        if 'conversation_policy_version' not in b and b.get('message_merge_window') == 4:
+            b['message_merge_window'] = 2.0
+        b['conversation_policy_version'] = 3
+        b['chat_mode'] = b.get('chat_mode') if b.get('chat_mode') in ('fast','deep') else 'fast'
+        for key,default,lo,hi in [('message_merge_window',2.0,0.0,10.0),('message_merge_max_wait',10.0,0.1,60.0),('message_pause_timeout',120.0,5.0,600.0)]:
             try:value=float(b.get(key,default));value=value if math.isfinite(value) else default
             except (TypeError,ValueError):value=default
             b[key]=min(hi,max(lo,value))
@@ -206,17 +245,34 @@ class ConfigStore:
         cfg.bot = BotConfig(**{k: v for k, v in b.items()
                                if k in BotConfig.__dataclass_fields__})
 
+        c = raw.get('companion') if isinstance(raw.get('companion'),dict) else {}
+        c = dict(c or {})
+        for key,default in [('enabled',False),('always_on_top',True),('click_through',False)]:
+            c[key] = c.get(key,default) is True
+        for key,default in [('model_id',''),('owner_id','local')]:
+            c[key] = c.get(key,default) if isinstance(c.get(key,default),str) else default
+        if not isinstance(c.get('window_bounds'),dict):c['window_bounds']={}
+        cfg.companion = CompanionConfig(**{k:v for k,v in c.items() if k in CompanionConfig.__dataclass_fields__})
+
         return cfg
 
     # ── 写 ────────────────────────────────────────────────────
 
     def save(self, cfg: AppConfig) -> None:
         """原子写入，避免中断导致配置损坏。"""
-        data = {
-            "adapter": asdict(cfg.adapter),
-            "llm": asdict(cfg.llm),
-            "bot": asdict(cfg.bot),
-        }
+        # Also retain unknown keys when an older API client reconstituted cfg
+        # through dataclasses.asdict(), which intentionally omits _unknown.
+        try:previous=json.loads(self.path.read_text(encoding='utf-8'))
+        except (OSError,ValueError):previous={}
+        data = copy.deepcopy(previous) if isinstance(previous,dict) else {}
+        for key,value in getattr(cfg,'_unknown',{}).items():
+            if key not in AppConfig.__dataclass_fields__:data[key]=copy.deepcopy(value)
+        for section in ('adapter','llm','bot','companion'):
+            values=data.get(section) if isinstance(data.get(section),dict) else {}
+            original=getattr(cfg,'_unknown',{}).get(section,{})
+            if isinstance(original,dict):values.update(copy.deepcopy(original))
+            values.update(asdict(getattr(cfg,section)))
+            data[section]=values
         text = json.dumps(data, ensure_ascii=False, indent=2)
 
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
@@ -237,6 +293,7 @@ class ConfigStore:
             "adapter": asdict(cfg.adapter),
             "llm": asdict(cfg.llm),
             "bot": asdict(cfg.bot),
+            "companion": asdict(cfg.companion),
         }
         for k in ("primary_key", "fallback_key", "judge_key", "vision_key", "search_key"):
             d["llm"][k] = _mask(d["llm"].get(k, ""))

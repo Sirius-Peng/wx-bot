@@ -39,6 +39,8 @@ class TurnCoordinator:
         self.conversations = {}
         self.turns = {}
         self.applied_forgetting=[]
+        self.active_space=lambda: ''
+        self.legacy_space=''
         self.load_error = False
         self._busy = {}
         self._locks = {}
@@ -77,6 +79,12 @@ class TurnCoordinator:
 
     def person(self, msg):
         return self.identity(msg.platform, msg.sender_id) if not msg.is_group else self.key(msg)
+
+    def _space(self):
+        return self.active_space()
+
+    def _row_space(self,row):
+        return row.get('persona_space',self.legacy_space)
 
     def lock(self, person):
         return self._locks.setdefault(person, asyncio.Lock())
@@ -142,6 +150,7 @@ class TurnCoordinator:
         dto['images']=[]
         dto['content_parts']=[]
         row = {'id': tid, 'key': self.key(msg), 'revision': self.conversations[self.key(msg)]['revision'],
+               'persona_space':self._space(),
                'message': dto, 'source_ids': ids, 'state': 'judging', 'reason': '', 'protected_ids': [],
                'created_at': existing['created_at'] if existing else now, 'updated_at': now,
                'revisit_at': 0, 'expires_at': now + 600, 'revisited': False, 'attempts': []}
@@ -158,6 +167,9 @@ class TurnCoordinator:
             return
         row = self.turns[tid]
         if row['state'] in ('sending', 'uncertain'):
+            return
+        if self._row_space(row)!=self._space():
+            self.cancel_other_spaces()
             return
         action = decision.action
         if action == 'defer' and (not late_enabled or decision.protected_ids):
@@ -177,6 +189,8 @@ class TurnCoordinator:
         row = self.turns.get(tid)
         if row is None or row['state'] in ('superseded', 'context_only'):
             raise ConversationChanged('Conversation decision superseded')
+        if row['state'] not in ('sending','uncertain','accepted') and self._row_space(row)!=self._space():
+            raise ConversationChanged('Conversation persona space changed')
         if row['state'] not in ('sending', 'uncertain') and self.conversations[row['key']]['revision'] != row['revision']:
             raise ConversationChanged('Conversation revision changed')
 
@@ -210,6 +224,10 @@ class TurnCoordinator:
     def busy(self, person):
         return person in self._busy or self.lock(person).locked()
 
+    def any_busy(self):
+        """Whether foreground processing or an identity's late-send lock is held."""
+        return any(count>0 for count in self._busy.values()) or any(lock.locked() for lock in self._locks.values())
+
     def enter(self, msg):
         person=self.person(msg)
         self._busy[person]=self._busy.get(person,0)+1
@@ -219,13 +237,31 @@ class TurnCoordinator:
         if self._busy.get(person,0)>1:self._busy[person]-=1
         else:self._busy.pop(person,None)
 
+    def cancel_other_spaces(self):
+        """Cancel only unsubmitted work; retain committed delivery credentials."""
+        if self.load_error:return 0
+        current=self._space()
+        before={tid:copy.deepcopy(row) for tid,row in self.turns.items()
+                if row['state'] in ('collecting','judging','deferred','replying')
+                and self._row_space(row)!=current}
+        for tid in before:
+            self.turns[tid].update(state='context_only',reason='人格与关系空间已切换，取消旧空间未提交回复',updated_at=self.clock())
+        if before:
+            try:self._save()
+            except BaseException:
+                self.turns.update(before)
+                raise
+        return len(before)
+
     def due(self, *, enabled=True):
         if self.load_error:
             return []
+        self.cancel_other_spaces()
         now = self.clock(); result = []; changed = False
         for row in self.turns.values():
             if row['state'] != 'deferred':
                 continue
+            if self._row_space(row)!=self._space():continue
             if not enabled or row['expires_at'] < now:
                 row.update(state='context_only', reason='稍后接话已关闭或到期', updated_at=now); changed=True
             elif row['revisit_at'] <= now and not row['revisited']:

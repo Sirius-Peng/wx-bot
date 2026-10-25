@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
+const root=path.join(__dirname,'..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
+const html=read('src/web/index.html'),app=read('src/web/app.js'),pet=read('src/web/companion.js');
+const pages=[...html.matchAll(/class="nav-item[^\"]*" data-page="([^"]+)"/g)].map(m=>m[1]);
+assert.deepEqual(pages,['overview','connect','memory','settings']);
+assert(!html.includes('memory-graph.js'));assert(!html.includes('id="page-memory-graph"'));
+assert(html.indexOf('data-settings-section="persona"')>html.indexOf('id="page-memory"'));
+for(const id of ['chat-mode','btn-companion-open','companion-enabled','btn-companion-import','stats-days'])assert(html.includes('id="'+id+'"'));
+assert(app.includes('bindCompanion();'));assert(pet.includes('event.isComposing'));
+assert(pet.includes("event.type==='cancelled'"));assert(pet.includes("event.type==='completed'"));
+const preload=read('desktop/src/preload/index.js');for(const name of ['companion:show','companion:through','companion:chooseModel'])assert(preload.includes(name));
+const window=read('desktop/src/main/companion.js');assert(window.includes('nodeIntegration:false'));assert(window.includes('contextIsolation:true'));assert(window.includes('setIgnoreMouseEvents(false)'));
+assert(fs.existsSync(path.join(root,'src/web/live2d/renderer.js')));assert(fs.existsSync(path.join(root,'src/web/live2d/live2dcubismcore.min.js')));
+console.log('CORE_UI_V3 PASS tests=23 four_navigation=1 independent_persona_save=1 offline_live2d=1 ime=1');

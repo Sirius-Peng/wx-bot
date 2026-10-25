@@ -79,6 +79,10 @@ config_store = ConfigStore(DATA_DIR / "config.json")
 runtime = BotRuntime(config_store, DATA_DIR)
 admin_auth = AdminAuth(DATA_DIR, HOST)
 onboarding_store = OnboardingStore(DATA_DIR / "onboarding.json")
+from .core.companion_models import CompanionModels
+from .adapters.desktop import DesktopAdapter
+companion_models=CompanionModels(DATA_DIR)
+_companion_lock=asyncio.Lock()
 _model_test_lock = asyncio.Lock()
 _backup_lock = asyncio.Lock()
 _import_previews = {}
@@ -110,6 +114,91 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="微信 AI 助手", lifespan=lifespan)
+
+@app.get('/companion')
+async def companion_page(request:Request):
+    response=FileResponse(WEB_DIR/'companion.html')
+    if admin_auth.can_bootstrap(request):admin_auth.set_cookie(request,response)
+    response.headers['Cache-Control']='no-store'
+    return response
+
+@app.get('/api/companion/status')
+async def companion_status():
+    return {'enabled':runtime.cfg.companion.enabled,'model_id':runtime.cfg.companion.model_id,
+            'models':companion_models.models(),'owner_id':runtime.cfg.companion.owner_id,
+            'persona_space':runtime.persona_spaces.active_key,
+            'local_decision':'disabled','decision_backend':'cloud'}
+
+@app.post('/api/companion/model/import')
+async def companion_import(request:Request):
+    body=await request.json()
+    try:
+        async with _companion_lock:
+            result=await asyncio.to_thread(companion_models.import_model,body.get('path',''),body.get('manifest',''))
+            if result.get('id'):
+                cfg=config_store.load();cfg.companion.model_id=result['id'];config_store.save(cfg);runtime.apply_config(cfg)
+        return result
+    except (OSError,ValueError,TypeError,KeyError) as error:raise HTTPException(400,str(error))
+
+@app.get('/api/companion/models/{mid}/{resource:path}')
+async def companion_resource(mid:str,resource:str):
+    try:return FileResponse(companion_models.resource(mid,resource))
+    except (OSError,ValueError):raise HTTPException(404,'模型资源不存在')
+
+@app.get('/api/diagnostics')
+async def diagnostics():
+    # Keep the legacy field stable, but never imply that an offline worker is
+    # loading or retrying. Only cloud admission and deterministic rules run.
+    return {'local_decision':{'ready':False,'reason':'disabled','backend':'cloud'},
+            'decision_backend':'cloud',
+            'usage':runtime.usage_diagnostics(),
+            'channels':{o.adapter.platform:{'budget':o.ctx.last_budget,
+                'requests':list(getattr(o.llm,'metrics',[])),
+                'decision':getattr(o.reply_decider,'last_status',{}),
+                'decision_requests':list(getattr(getattr(o.reply_decider,'gateway',None),'metrics',[]))}
+                for o in runtime._orchestrators()}}
+
+@app.websocket('/ws/companion')
+async def companion_socket(websocket:WebSocket):
+    # HTTP middleware does not run for a websocket handshake.
+    origin=websocket.headers.get('origin','')
+    from urllib.parse import urlsplit
+    if (urlsplit(origin).netloc!=websocket.headers.get('host','') or
+        urlsplit(origin).scheme not in ('http','https') or not admin_auth.authenticated(websocket)):
+        await websocket.close(code=1008);return
+    if not runtime.cfg.companion.enabled:
+        await websocket.close(code=1008,reason='桌面伙伴未启用');return
+    await websocket.accept();queue=asyncio.Queue(maxsize=256)
+    async with _companion_lock:
+        adapter=runtime.desktop_adapter
+        if adapter is None:
+            adapter=DesktopAdapter(DATA_DIR,runtime.cfg.companion.owner_id)
+            adapter.on_message(runtime.handle_desktop)
+            try:await runtime.register_desktop(adapter)
+            except ValueError as error:
+                await websocket.send_json({'version':1,'type':'error','message':str(error)})
+                await websocket.close();return
+        adapter.listeners.add(queue)
+    async def outgoing():
+        while True:await websocket.send_json(await queue.get())
+    sender=asyncio.create_task(outgoing())
+    try:
+        while True:
+            body=await websocket.receive_json()
+            if body.get('type')=='sync':
+                if body.get('persona_space') is not None and body['persona_space']!=adapter.current_persona_space():
+                    await queue.put({'version':1,'type':'space_changed','persona_space':adapter.current_persona_space()})
+                for event in adapter.snapshot(int(body.get('after',0))):await queue.put(event)
+            elif body.get('type')=='message':
+                try:
+                    result=await adapter.submit(body.get('text'),body.get('client_id'),body.get('persona_space'))
+                    await queue.put({'version':1,'type':'ack',**result})
+                except ValueError as error:
+                    await queue.put({'version':1,'type':'error','message':str(error),
+                                     'persona_space':adapter.current_persona_space()})
+    except (WebSocketDisconnect,ValueError,RuntimeError):pass
+    finally:
+        adapter.listeners.discard(queue);sender.cancel();await asyncio.gather(sender,return_exceptions=True)
 
 
 @app.middleware("http")
@@ -439,8 +528,9 @@ async def api_memory_retry() -> dict:
 async def api_memory_link(request: Request) -> dict:
     body = await request.json()
     try:
-        identity = runtime._ensure_memory().link_accounts(
-            str(body.get('wechat_id', '')), str(body.get('qq_id', '')), str(body.get('label', '')))
+        memory=runtime._ensure_memory()
+        identity = (memory.link_identity_accounts(body['accounts'],str(body.get('label',''))) if 'accounts' in body else
+                    memory.link_accounts(str(body.get('wechat_id','')),str(body.get('qq_id','')),str(body.get('label',''))))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {'ok': True, 'identity': identity}
@@ -667,16 +757,30 @@ async def api_data_backup_download(name:str):
 
 
 CONFIG_SECTIONS={
- 'primary':('llm',{'primary_base','primary_key','primary_model'}),
+ 'primary':('llm',{'primary_base','primary_key','primary_model','context_window_tokens','context_compact_ratio'}),
  'fallback':('llm',{'fallback_base','fallback_key','fallback_model'}),
  'judge':('llm',{'judge_base','judge_key','judge_model'}),
  'vision':('llm',{'vision_base','vision_key','vision_model'}),
- 'search':('llm',{'search_enabled','search_key','search_model','context_timezone'}),
+ 'search':('llm',{'search_enabled','search_backend','search_key','search_model','context_timezone'}),
  'persona':('bot',{'name','persona','persona_profile','persona_relationship'}),
  'proactive':('bot',{'proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end'}),
- 'reply':('bot',{'reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
+ 'reply':('bot',{'chat_mode','reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
+ 'companion':('companion',{'enabled','model_id','owner_id','always_on_top','click_through'}),
  'memory':('bot',{'memory_enabled','memory_inject','memory_extract_interval'}),
  'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror'})}
+
+def _validate_session_settings(values):
+    if 'search_backend' in values and (not isinstance(values['search_backend'],str) or values['search_backend'] not in ('tools','native')):
+        raise HTTPException(400,'搜索方式需要 tools 或 native')
+    if 'context_window_tokens' in values:
+        value=values['context_window_tokens']
+        if isinstance(value,bool) or not isinstance(value,int) or value<0:
+            raise HTTPException(400,'上下文窗口需要填写非负整数，0 表示自动识别')
+    if 'context_compact_ratio' in values:
+        value=values['context_compact_ratio']
+        if (isinstance(value,bool) or not isinstance(value,(int,float))
+                or not .1<=value<=.8):
+            raise HTTPException(400,'上下文压缩阈值需要在 10% 到 80% 之间')
 
 @app.patch('/api/config/section/{section}')
 async def api_config_section(section:str,request:Request):
@@ -684,6 +788,7 @@ async def api_config_section(section:str,request:Request):
     if section not in CONFIG_SECTIONS:raise HTTPException(404,'设置分区不存在')
     values=await request.json();root,allowed=CONFIG_SECTIONS[section]
     if not isinstance(values,dict) or set(values)-allowed:raise HTTPException(400,'包含其他分区或未知设置')
+    if root=='llm':_validate_session_settings(values)
     old=config_store.load();raw=asdict(old)
     for key,value in values.items():
         original=raw[root][key]
@@ -717,6 +822,8 @@ async def api_put_config(request: Request) -> dict:
     收到掩码时必须保留原值，否则会把用户的 Key 覆盖成掩码串。
     """
     incoming = await request.json()
+    if isinstance(incoming,dict) and isinstance(incoming.get('llm'),dict):
+        _validate_session_settings(incoming['llm'])
     old = config_store.load()
     cfg = _merge_config(old, incoming)
     config_store.save(cfg)
@@ -748,7 +855,7 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
             value=inc_llm.get(f) or ''
             setattr(cfg.llm,f,getattr(old.llm,f) if '•' in value else value)
     # Older whole-config clients must not reset newly introduced search/time fields.
-    for f in ('search_enabled','search_key','search_model','context_timezone'):
+    for f in ('search_enabled','search_backend','search_key','search_model','context_timezone','context_window_tokens','context_compact_ratio'):
         if f not in inc_llm:setattr(cfg.llm,f,getattr(old.llm,f))
     for f in ("onebot_token", "napcat_webui_token"):
         setattr(cfg.adapter, f,

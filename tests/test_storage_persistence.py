@@ -190,5 +190,5 @@ class DataAPITests(unittest.IsolatedAsyncioTestCase):
         for name in ['config.json','wxbot-backup-20261013T000000Z-1234abcd.zip','../config.json']:
             self.assertEqual((await self.c.get('/api/data/backup/'+name)).status_code,404)
     async def test_download_symlink_rejected(self):
-        directory=self.root/'.backups';directory.mkdir();name='wxbot-backup-20261013T000000Z-1234abcd.zip';(directory/name).symlink_to(self.root/'config.json')
+        directory=self.root/'.backups';directory.mkdir(exist_ok=True);name='wxbot-backup-20261013T000000Z-1234abcd.zip';(directory/name).symlink_to(self.root/'config.json')
         self.assertEqual((await self.c.get('/api/data/backup/'+name)).status_code,404)

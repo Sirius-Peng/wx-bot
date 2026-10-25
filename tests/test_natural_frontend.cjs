@@ -14,7 +14,7 @@ assert(!context.memoryEvidenceMarkup({evidence_sources:[{episode_id:'e',text:'<i
 assert(context.memoryEvidenceMarkup({evidence_count:3,independent_episodes:2}).includes('用户依据 3 次'));tests++;
 assert.equal(context.fmtMemoryTime('invalid'),'未知');tests++;
 for(const id of ['reply-mode','late-reply-enabled','memory-forgotten','btn-forgotten-refresh']){assert(html.includes('id="'+id+'"'));tests++;}
-assert(source.includes("reply: ['bot', ['reply_mode','late_reply_enabled'"));assert(source.includes("$('#reply-mode').value = c.bot.reply_mode"));assert(source.includes("c.bot.late_reply_enabled = $('#late-reply-enabled').checked"));tests++;
+assert(source.includes("reply: ['bot', ['chat_mode','reply_mode','late_reply_enabled'"));assert(source.includes("$('#reply-mode').value = c.bot.reply_mode"));assert(source.includes("c.bot.late_reply_enabled = $('#late-reply-enabled').checked"));tests++;
 assert(html.includes('data-save-section="reply"'));assert(html.includes('data-save-section="persona"'));assert(html.includes('data-save-section="memory"'));tests++;
 assert(html.includes('至少两次独立对话、相隔24小时'));assert(!html.includes('首次、明确要求记住时立即抽取'));assert(html.includes('10秒只内部评估'));tests++;
 assert(source.includes('data-pin="${esc(it.id)}"'));assert(source.includes('data-pinned="${it.pinned'));assert(source.includes("body:JSON.stringify({pinned})"));tests++;
@@ -22,5 +22,6 @@ assert(source.includes('/api/memory/forgotten/${encodeURIComponent(button.datase
 assert(!source.includes('私聊必回，QQ 群里 @ 它才回'));tests++;
 const css=fs.readFileSync(path.join(root,'src/web/style.css'),'utf8');
 assert(/@media \(max-width: 600px\)\s*\{\s*\.memory-item\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\)/.test(css));assert(css.includes('.memory-item > .mem-actions { width: 100%; margin-left: 0; justify-content: flex-end; }'));tests++;
-assert(html.includes('语义模糊、已经说完整的私聊'));assert(html.includes('限时2秒'));assert(html.includes('不是每条消息都调用'));assert(html.includes('无需额外 Key'));tests++;
+assert(html.includes('语义模糊、已经说完整的私聊'));assert(html.includes('总限时3秒'));assert(html.includes('不是每条消息都调用'));assert(html.includes('独立 Key 留空时复用主接口和 Key'));tests++;
+assert(html.includes('不加载本地判定模型'));assert(html.includes('deepseek-flash 判断'));assert(html.includes('不更改回复模型'));tests++;
 console.log(`natural settings frontend PASS tests=${tests}`);

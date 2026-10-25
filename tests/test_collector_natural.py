@@ -38,19 +38,19 @@ async def eventually(predicate,timeout=.8):
 
 class PlanTests(unittest.TestCase):
     def test_default_normal_fragment_media_and_done_windows(self):
-        self.assertEqual(plan_wait([(message(),0)]).delay,4)
+        self.assertEqual(plan_wait([(message(),0)]).delay,2)
         for text in ('然后','刚刚','这句话还没说完，'):
-            self.assertEqual(plan_wait([(message(text),0)]).delay,6)
+            self.assertEqual(plan_wait([(message(text),0)]).delay,4)
         picture=message('[图片]说明');picture.images=[{}]
         video=message('[视频]');video.msg_type='video'
-        self.assertEqual(plan_wait([(picture,0)]).delay,6)
-        self.assertEqual(plan_wait([(video,0)]).delay,6)
+        self.assertEqual(plan_wait([(picture,0)]).delay,4)
+        self.assertEqual(plan_wait([(video,0)]).delay,4)
         self.assertEqual(plan_wait([(message('说完了'),0)]).delay,.3)
 
-    def test_last_twenty_historical_gaps_raise_window_with_eight_second_cap(self):
-        self.assertEqual(plan_wait([(message(),100)],cadence=[5]*20).delay,7.5)
-        self.assertEqual(plan_wait([(message(),100)],cadence=[20]*20).delay,8)
-        self.assertEqual(plan_wait([(message(),100)],cadence=[20]*20+[1]*20).delay,4)
+    def test_last_twenty_historical_gaps_raise_window_with_six_second_cap(self):
+        self.assertEqual(plan_wait([(message(),100)],cadence=[5]*20).delay,6)
+        self.assertEqual(plan_wait([(message(),100)],cadence=[20]*20).delay,6)
+        self.assertEqual(plan_wait([(message(),100)],cadence=[20]*20+[1]*20).delay,2)
 
     def test_long_bursts_never_force_readiness(self):
         for duration in (12,20,30):

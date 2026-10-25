@@ -76,12 +76,16 @@ class ParserTests(unittest.TestCase):
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def request(self,handler,query='今日公开新闻'):
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        with patch('src.core.web_search.make_client',return_value=client):r=await DeepSeekWebSearch('dummy-only-key').search(query)
+        provider=DeepSeekWebSearch('dummy-only-key')
+        try:
+            with patch('src.core.web_search.make_client',return_value=client):r=await provider.search(query)
+            self.assertFalse(client.is_closed)
+        finally:await provider.aclose()
         self.assertTrue(client.is_closed);return r
     async def test_native_contract_no_conversation(self):
         def handler(req):
             self.assertEqual(str(req.url),ENDPOINT);self.assertEqual(req.headers['x-api-key'],'dummy-only-key');self.assertEqual(req.headers['anthropic-version'],'2023-06-01')
-            body=json.loads(req.content);self.assertEqual(body['tools'],[{'type':'web_search_20250305','name':'web_search','max_uses':1}]);self.assertEqual(len(body['messages']),1);self.assertNotIn('memory',str(body));self.assertIn('当前时间',body['system'])
+            body=json.loads(req.content);self.assertEqual(body['tools'],[{'type':'web_search_20250305','name':'web_search','max_uses':1}]);self.assertEqual(len(body['messages']),1);self.assertNotIn('memory',str(body));self.assertNotIn('当前时间',body['system']);self.assertIn('当前时间',str(body['messages']));self.assertEqual(body['thinking'],{'type':'disabled'});self.assertEqual(body['max_tokens'],1024)
             return httpx.Response(200,json=payload())
         self.assertTrue((await self.request(handler))['ok'])
     async def test_missing_key_no_network(self):
@@ -106,9 +110,11 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         started=asyncio.Event()
         async def handler(req):started.set();await asyncio.sleep(60)
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider=DeepSeekWebSearch('dummy')
         with patch('src.core.web_search.make_client',return_value=client):
-            t=asyncio.create_task(DeepSeekWebSearch('dummy').search('公开新闻'));await started.wait();t.cancel()
+            t=asyncio.create_task(provider.search('公开新闻'));await started.wait();t.cancel()
             with self.assertRaises(asyncio.CancelledError):await t
+        await provider.aclose()
         self.assertTrue(client.is_closed)
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
@@ -128,7 +134,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         second=c.call_args_list[1].kwargs['messages'];self.assertEqual(second[-2]['reasoning_content'],'thinking');self.assertEqual(second[-1]['tool_call_id'],'tool1');self.assertIn('事实片段',second[-1]['content'])
     async def test_tool_budget_two_calls(self):
         g,s,c=self.gateway([response('',[call(),call(cid='tool2'),call(cid='tool3')]),response('',[call(cid='tool4')]),response('最终')]);out=[v async for v in g.stream([])]
-        self.assertEqual(s.search.call_count,2);self.assertEqual(c.call_count,3);self.assertEqual(c.call_args.kwargs['tool_choice'],'none');self.assertEqual(len(out),1)
+        self.assertEqual(s.search.call_count,2);self.assertEqual(c.call_count,3)
+        self.assertEqual(c.call_args_list[1].kwargs['tool_choice'],'none')
+        # A provider ignoring tool_choice=none gets one plain synthesis request,
+        # not additional fake tool results or another search opportunity.
+        self.assertNotIn('tools',c.call_args.kwargs);self.assertEqual(len(out),1)
     async def test_invalid_arguments_and_unknown_tool(self):
         for t in [call(args='{bad'),call(name='other')]:
             g,s,c=self.gateway([response('',[t]),response('继续')]);await g.chat([],chat_id='p');s.search.assert_not_called()

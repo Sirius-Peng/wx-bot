@@ -67,7 +67,7 @@ class PersonaAsyncTests(unittest.IsolatedAsyncioTestCase):
   ctx=ContextManager(MemoryStore(),bot_name='弗洛洛',persona_profile='phrolova')
   msg=WxMessage('1','onebot','private','p_u','u','用户','bot','请帮我检查Python报错')
   messages=await ctx.build(msg,memory_context='用户喜欢阅读')
-  self.assertEqual(messages[-1],{'role':'user','content':msg.render()});self.assertTrue(any('不是角色官设' in m['content'] and m['role']!='system' for m in messages));self.assertIn('弗洛洛',messages[0]['content']);self.assertTrue(any('technical' in m['content'] for m in messages if m['role']=='system'))
+  self.assertEqual(messages[-1],{'role':'user','content':msg.render()});self.assertTrue(any('不是角色官设' in m['content'] and m['role']!='system' for m in messages));self.assertIn('弗洛洛',messages[0]['content']);self.assertTrue(any('technical' in m['content'] for m in messages if m['role']=='user'))
  async def test_live_mode_update(self):
   class Adapter:
    platform="fake"

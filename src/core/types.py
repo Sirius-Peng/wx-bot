@@ -39,6 +39,7 @@ class WxMessage:
     images: list[dict] = field(default_factory=list)  # refs only, never base64 pixels
     content_parts: list[dict] = field(default_factory=list)  # text/image-index in original order
     batch_messages: list[dict] = field(default_factory=list)  # original envelopes
+    persona_space: str = ""              # preset × relationship at real ingress; old DTOs remain readable
 
     @property
     def is_group(self) -> bool:

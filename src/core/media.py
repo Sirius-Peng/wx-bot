@@ -1,6 +1,7 @@
 """Bounded image fetch/decrypt/normalization; image bytes never enter chat logs."""
 from __future__ import annotations
-import asyncio,base64,io,ipaddress,socket,warnings,logging
+import asyncio,base64,io,ipaddress,socket,warnings,logging,json,hashlib,time
+from collections import OrderedDict
 from urllib.parse import urlsplit,urljoin,urlencode
 import httpx
 from PIL import Image,ImageOps,UnidentifiedImageError
@@ -61,6 +62,61 @@ class ImageLoader:
     def __init__(self,allowed_origins=(),transport=None):
         self.allowed_origins={self.origin(u) for u in allowed_origins if u}
         self.transport=transport
+        self._client=None
+        self._downloads=asyncio.Semaphore(3)
+        self._decodes=asyncio.Semaphore(2)
+        self._cache=OrderedDict(); self._cache_bytes=0; self._jobs={}
+
+    async def aclose(self):
+        for task in self._jobs.values(): task.cancel()
+        await asyncio.gather(*self._jobs.values(),return_exceptions=True)
+        self._jobs.clear();self._cache.clear();self._cache_bytes=0
+        if self._client:await self._client.aclose();self._client=None
+
+    @staticmethod
+    def _key(ref):
+        return hashlib.sha256(json.dumps(ref,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+    def prefetch_message(self,msg,adapter):
+        resolver=None
+        if hasattr(adapter,'resolve_images'):
+            async def resolver(ref):
+                values=await adapter.resolve_images([ref])
+                if not values: raise MediaError('Image reference missing')
+                return values[0]
+        for ref in msg.images[:MAX_IMAGES]:self._start(ref,resolver)
+
+    def _start(self,ref,resolver=None):
+        key=self._key(ref);now=time.monotonic()
+        for old,(at,value,size) in list(self._cache.items()):
+            if now-at>180:self._cache.pop(old);self._cache_bytes-=size
+        if key in self._cache:
+            self._cache.move_to_end(key);return None
+        if key in self._jobs:return self._jobs[key]
+        if len(self._jobs)>=24:return None
+        async def work():
+            async with self._downloads:
+                resolved=await resolver(ref) if resolver else ref
+                data=await self.fetch(resolved)
+            async with self._decodes:url=await asyncio.to_thread(image_data_url,data)
+            result={'type':'image_url','image_url':{'url':url,'detail':'auto'}}
+            size=len(url)
+            self._cache[key]=(time.monotonic(),result,size);self._cache_bytes+=size
+            while self._cache_bytes>64*1024*1024:
+                _,(_,_,removed)=self._cache.popitem(last=False);self._cache_bytes-=removed
+            return result
+        task=asyncio.create_task(asyncio.wait_for(work(),35));self._jobs[key]=task
+        def finished(done):
+            self._jobs.pop(key,None)
+            if not done.cancelled():done.exception()  # consume errors even for prefetch-only jobs
+        task.add_done_callback(finished)
+        return task
+
+    async def _cached(self,ref,resolver=None):
+        task=self._start(ref,resolver);key=self._key(ref)
+        if key in self._cache:return self._cache[key][1]
+        if task is None:raise MediaError('Image preparation queue full')
+        return await asyncio.shield(task)
     @staticmethod
     def origin(url):
         u=urlsplit(url);return (u.scheme,u.hostname,u.port or (443 if u.scheme=='https' else 80))
@@ -79,8 +135,10 @@ class ImageLoader:
             try:return base64.b64decode(inline,validate=True)
             except ValueError as exc:raise MediaError('Invalid inline image') from exc
         url=ref.get('url') or (CDN+'/download?'+urlencode({'encrypted_query_param':ref['encrypt_query_param']}) if ref.get('encrypt_query_param') else '')
-        async with httpx.AsyncClient(timeout=15,follow_redirects=False,trust_env=False,transport=self.transport) as client:
-            for _ in range(4):
+        if self._client is None:
+            self._client=httpx.AsyncClient(timeout=15,follow_redirects=False,trust_env=False,transport=self.transport)
+        client=self._client
+        for _ in range(4):
                 await self.validate_url(url)
                 async with client.stream('GET',url) as r:
                     if r.status_code in (301,302,303,307,308):
@@ -112,20 +170,12 @@ class ImageLoader:
 
     async def load_partial(self,images,resolver=None):
         """Keep original indices; one corrupt/late image cannot erase its siblings."""
-        semaphore=asyncio.Semaphore(2)
+        existing=set(self._jobs)
         async def one(ref):
-            async with semaphore:
-                phase='resolve'
-                try:
-                    if resolver:ref=await resolver(ref)
-                    phase='download'
-                    data=await self.fetch(ref)
-                    phase='decode'
-                    url=await asyncio.to_thread(image_data_url,data)
-                    return {'type':'image_url','image_url':{'url':url,'detail':'auto'}}
-                except Exception as error:
-                    log.warning('Media input skipped phase=%s error_type=%s status=%s',phase,type(error).__name__,getattr(getattr(error,'response',None),'status_code',None))
-                    return None  # Transport/config details belong in the host log.
+            try:return await self._cached(ref,resolver)
+            except Exception as error:
+                log.warning('Media input skipped error_type=%s status=%s',type(error).__name__,getattr(getattr(error,'response',None),'status_code',None))
+                return None
         tasks=[asyncio.create_task(one(ref)) for ref in images[:MAX_IMAGES]]
         try:
             await asyncio.wait(tasks,timeout=35) if tasks else None
@@ -134,3 +184,6 @@ class ImageLoader:
             for task in tasks:
                 if not task.done():task.cancel()
             await asyncio.gather(*tasks,return_exceptions=True)
+            owned=[job for key,job in self._jobs.items() if key not in existing and not job.done()]
+            for job in owned:job.cancel()
+            await asyncio.gather(*owned,return_exceptions=True)
