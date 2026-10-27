@@ -1,6 +1,6 @@
 # v3.0.2：轻量陪伴内核
 
-更新：2026-10-28。v3.0.2 正在构建与验收，平台、摘要与本轮结果见[新版发布记录](../release-v3.0.2.json)。当前公开发布仍为[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)，其[历史发布清单](../release-v3.0.0.json)及v2.1.7附件保持不变，不将旧验收记为新版结果。
+更新：2026-10-28。当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，Windows x64 Setup/Portable及macOS arm64 DMG的平台、摘要与本轮结果见[发布清单](../release-v3.0.2.json)。[v3.0.0历史清单](../release-v3.0.0.json)及v2.1.7附件保持不变，不将旧验收记为新版结果。
 
 ## v3.0.2 更新
 

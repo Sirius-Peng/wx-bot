@@ -1,24 +1,140 @@
 {
   "version": "3.0.2",
   "tag": "v3.0.2",
-  "status": "preparing",
-  "released_date": null,
+  "status": "published",
+  "released_date": "2026-10-28",
   "timezone": "Asia/Shanghai",
-  "runtime_commit": null,
-  "runtime_commit_note": "Populate from verified v3.0.2 build-source checkpoint before publication; historical v3.0.0 evidence is not reused.",
+  "runtime_commit": "37cb904d477c536174b0df594df1b97019b7bd98",
+  "runtime_commit_note": "Runtime fixed at 37cb904d477c536174b0df594df1b97019b7bd98; 70eba5fbfda2683151cd492190f397609b6f8fd9 only updates packaged THIRD_PARTY_NOTICES.md. Final release commit additionally records documentation and manifests.",
   "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2",
   "planned_platforms": [
     "windows-x64-setup",
     "windows-x64-portable",
     "macos-arm64-dmg"
   ],
-  "published_platforms": [],
-  "artifacts": [],
-  "validation": {},
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "artifacts": [
+    {
+      "name": "WxBot-3.0.2-Windows-x64-Setup.exe",
+      "bytes": 131683123,
+      "sha256": "5571b9d147815a8c7ffa1b68b5b396aeafb6ea5efa7b8cbab9c06e773d6fa3c3",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-Windows-x64-Setup.exe"
+    },
+    {
+      "name": "WxBot-3.0.2-Windows-x64-Portable.exe",
+      "bytes": 131448182,
+      "sha256": "314a706f7fcc6e97073b29bb08996f7adce3bd40e3c2f068abc3579584efc38f",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-3.0.2-macOS-arm64.dmg",
+      "bytes": 158892753,
+      "sha256": "5ed82baedf4fca56e61a5237ee058bc67ca99ff0cf5ef9a8469dd802f068e63b",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "08fe7abe9aa501a78071d59a2db608581e45f5208c2a15d0edcafc006baea646",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/SHA256SUMS.txt"
+    }
+  ],
+  "validation": {
+    "python_macos": 1620,
+    "python_macos_skipped": 3,
+    "python_macos_seconds": 20.592,
+    "python_macos_full_regression_passed": true,
+    "node_suites_macos": 21,
+    "node_macos_all_passed": true,
+    "proactive_frontend_behavior_checks": 12,
+    "fish_paid_synthesis_tested": false,
+    "real_wechat_audio_receipt_or_phone_playback_tested": false,
+    "wechat_audio_delivery_format": "wav-file-attachment",
+    "macos_dmg_arch": "arm64",
+    "macos_dmg_hdiutil_verify": "VALID",
+    "macos_final_dmg_resources_byte_matched": true,
+    "macos_final_asar_source_files_matched": 9,
+    "macos_final_outer_web_files_matched": 29,
+    "macos_final_frozen_carchive_web_files_matched": 29,
+    "third_party_inventory_components_macos": 41,
+    "third_party_license_files_macos": 65,
+    "macos_frozen_http_resources_checked": 6,
+    "macos_frozen_config_restart_unknown_file_preservation_and_mock_tts_preview_loops": 2,
+    "macos_frozen_companion_http_ws_single_reply_duplicate_reconnect_persona_switch_passed": true,
+    "macos_final_native_companion_button_escape_cmd_w_reopen_main_app_retained_passed": true,
+    "macos_native_chinese_clipboard_input_passed": true,
+    "macos_no_fish_key_preview_diagnostic_passed": true,
+    "macos_settings_native_test_build_note": "Settings verified in same runtime before notice-only outer-package update; companion close verified again in final DMG.",
+    "macos_audio_tests_use_local_stubs_no_paid_api": true,
+    "interactive_macos_ime_composition_tested": false,
+    "real_account_login_tested": false,
+    "code_signed_or_notarized": false,
+    "python_windows_native": 1620,
+    "python_windows_skipped": 9,
+    "python_windows_seconds": 253.881,
+    "python_windows_full_regression_passed": true,
+    "windows_companion_close_fixture_path_fix_commit": "a657a08560db5344e182d0b971d2b60723977952",
+    "windows_companion_close_fixture_fix_note": "Only makes the test fixture cache key use platform path.join; no runtime change. All 21 Windows Node suites passed after this test-only correction.",
+    "macos_companion_close_after_fixture_fix_checks_passed": 26,
+    "python_full_regression_each_platform_passed": true,
+    "node_suites_windows": 21,
+    "node_windows_all_passed": true,
+    "node_suites_each_platform": 21,
+    "twenty_fixed_conversation_timelines_windows_passed": true,
+    "windows_final_asar_source_files_matched": 9,
+    "windows_final_outer_web_files_matched": 29,
+    "windows_final_frozen_carchive_web_files_matched": 29,
+    "third_party_inventory_components_windows": 41,
+    "third_party_license_files_windows": 64,
+    "windows_frozen_backend_restart_runs": 3,
+    "windows_frozen_backend_auth_statistics_jieba_timezone_onboarding_backup_memory_shutdown_passed": true,
+    "windows_native_http_ui_and_mock_tts_frozen_cycles": 2,
+    "windows_native_http_ui_and_mock_tts_unpacked_passed": true,
+    "windows_native_http_ui_and_mock_tts_portable_passed": true,
+    "windows_isolated_config_save_and_unknown_file_preservation_passed": true,
+    "windows_native_frozen_startup_ms": [
+      3202.98,
+      3348.23,
+      3345.92
+    ],
+    "windows_native_frozen_startup_median_ms": 3345.92,
+    "windows_packaged_api_startup_ms": {
+      "frozen": [
+        3132.16,
+        2854.2
+      ],
+      "unpacked": 4027.37,
+      "portable_first_cold_launch": 40411.61
+    },
+    "windows_startup_measurement_note": "Single-machine samples, not LLM response latency. Portable includes first self-extraction; no general performance guarantee.",
+    "external_paid_api_calls": 0,
+    "windows_setup_pe_version_verified": true,
+    "windows_setup_install_uninstall_cycle_run": false,
+    "interactive_windows_ui_tested": false,
+    "interactive_windows_ime_tested": false,
+    "windows_electron_gui_exit_note": "Unpacked and Portable isolated process trees were cleaned with taskkill; no interactive or graceful GUI-exit claim.",
+    "retired_local_decision_weights_and_training_frameworks_excluded": true,
+    "windows_setup_and_portable_embedded_7z_payloads_verified": true,
+    "windows_embedded_payload_asar_source_files_each": 9,
+    "windows_embedded_payload_web_files_each": 29,
+    "windows_embedded_payload_notices_sha256_each": "52f2749128d4ed31567159c19c3dbde9acb700c8b1f0c8c12eb191072c83db78",
+    "windows_embedded_payload_note": "Both final PE overlay 7z payloads were extracted and checked; this does not exercise NSIS installation/uninstallation UI."
+  },
   "limitations": [
-    "Fish paid synthesis, real WeChat account receipt and phone playback have not been exercised; tests use local mocks and synthetic PCM.",
+    "Windows x64 Setup/Portable and macOS arm64 DMG only; other desktop architectures were not built.",
+    "Windows executables have no Authenticode signature; macOS has no Developer ID signature or notarization.",
+    "NSIS interactive installation/uninstallation and Windows OS IME or interactive UI were not exercised in this release; frozen-backend, Unpacked and Portable HTTP/API tests are separate evidence.",
+    "Mac native tests include companion close/reopen and Chinese clipboard input, not manual OS IME composition. Settings were tested on identical runtime before the notice-only outer-package patch.",
+    "Fish paid synthesis, real WeChat account receipt and phone playback have not been exercised; integration tests use local mocks and synthetic PCM with zero external paid API calls.",
     "WeChat audio is a WAV file attachment, not a verified native voice-message bubble.",
-    "Per-platform native build and test evidence must be recorded before adding artifacts; historical v3.0.0 test results do not validate this release."
+    "Portable first cold launch took 40.41 seconds in one Windows sample, including self-extraction; Unpacked was 4.03 seconds and frozen backend approximately 2.9–3.3 seconds. These are single-machine startup observations, not LLM latency or general performance guarantees.",
+    "Runtime remains fixed to 37cb904d477c536174b0df594df1b97019b7bd98. Packaging checkpoint 70eba5fbfda2683151cd492190f397609b6f8fd9 only changes THIRD_PARTY_NOTICES.md; a657a08560db5344e182d0b971d2b60723977952 is a test-fixture path correction, not a runtime change.",
+    "Existing data paths and application ID are preserved; synthetic upgrade/import regression is not a full interactive lifecycle test of every historic installation. Back up user data before covering an installation.",
+    "macOS binary minimum deployment target is 11.0; this release was not run on macOS 11 hardware. Real account login and long-term companion quality remain untested."
   ],
   "default_model": {
     "base_url": "https://api.deepseek.com",
@@ -26,14 +142,25 @@
   },
   "documentation_updated": "2026-10-28",
   "source_checkpoint": {
-    "runtime_source_checkpoint": null,
+    "runtime_source_checkpoint": "37cb904d477c536174b0df594df1b97019b7bd98",
     "stable_app_id": "com.siriuspeng.wxbot",
-    "existing_user_data_paths_preserved": true
+    "existing_user_data_paths_preserved": true,
+    "runtime_source_archive_sha256": "4a75515d5e969552533938dc9e82197fed64dcaabf1b402357be92a447a04daf",
+    "post_build_changes": "Only THIRD_PARTY_NOTICES.md was added after runtime checkpoint for outer packaging; remaining changes are release documentation and manifest evidence.",
+    "build_checkpoint": "70eba5fbfda2683151cd492190f397609b6f8fd9",
+    "packaged_notice_sha256": "52f2749128d4ed31567159c19c3dbde9acb700c8b1f0c8c12eb191072c83db78",
+    "test_fixture_checkpoint": "a657a08560db5344e182d0b971d2b60723977952"
   },
   "release_changes": [
     "Optional Fish Audio WeChat character voice with independent key and preview; text-first background WAV attachments, cooldown, opt-out and cancellation.",
     "Absolute history dates and independent user, receive and assistant-delivery times; unknown legacy dates stay unknown.",
     "Home and settings layout redesign with independent saves and retained drafts.",
     "Companion-only close via button, keyboard and tray without stopping the backend."
+  ],
+  "build_checkpoint": "70eba5fbfda2683151cd492190f397609b6f8fd9",
+  "built_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
   ]
 }

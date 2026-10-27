@@ -142,8 +142,29 @@ Windows使用`.venv\Scripts\python.exe`及PowerShell逐项运行Node套件。训
 - Upgrade synthetic fixtures and one frozen v1.3.6 import are not a full lifecycle test of every historic installation; back up user data before covering an installation.
 - macOS binary minimum deployment target is 11.0; this release was not run on macOS 11 hardware. Long-term companion quality remains an observation task.
 
-## 2026-10-28：v3.0.2 发布准备
+## 2026-10-28：v3.0.2 本次发布记录
 
 本次整合首页/设置重排、桌面伙伴关闭、历史日期和微信角色语音。源码、冻结后端、原生窗口、安装包与上传分别记录于[新版发布记录](../release-v3.0.2.json)，未执行项不沿用 v3.0.0 数字。v3.0.1 仅本地构建，不新增或修改其公开附件。
 
 语音回归使用临时配置、模拟 Fish/微信服务与合成 PCM 夹具：可验证配置脱敏、显式引擎、WAV 校验、后台调度、冷却、退订、取消、上传加密和投递凭据复用。尚无真实 Fish Key 的付费合成、真实微信账号收件或手机端播放结果；文件附件不写成已验证的原生语音气泡。
+
+冻结源码：`37cb904d477c536174b0df594df1b97019b7bd98`，源码归档 SHA256 为 `4a75515d5e969552533938dc9e82197fed64dcaabf1b402357be92a447a04daf`。本轮 macOS 源码回归 Python **1620项、跳过3项，20.592秒**通过；Node **21组**全部通过，主动联系前端专项为实际执行输入/变更处理器的12项行为检查。Windows 本机回归与安装包另按实际结果记录，这些源码数字不是实际客户端语音播放成绩。
+
+### macOS arm64 本轮包验证
+
+- 最终 `WxBot-3.0.2-macOS-arm64.dmg` 为 **158,892,753 bytes**，SHA256：`5ed82baedf4fca56e61a5237ee058bc67ca99ff0cf5ef9a8469dd802f068e63b`；`hdiutil verify` 返回 `VALID`。运行时保持上述冻结提交，外壳取 `70eba5fbfda2683151cd492190f397609b6f8fd9`，仅补新版根第三方声明。
+- ASAR 9份源码、外层 web 29份和冻结后端 CArchive 中 web 29份逐字节匹配；实际第三方清单41组件、65份许可原文。
+- 最终冻结应用实际 HTTP 六项资源、配置重启、未知文件保留与模拟 TTS 试听完成2次循环；HTTP/WS 伙伴单气泡、重复去重、重连和人格切换通过。
+- 最终包原生伙伴的按钮、Esc、Cmd+W、重新打开及主程序继续运行通过。设置中文剪贴板输入和无Key试听诊断在相同运行时、声明补丁前的包验证；不写成手工IME组合输入测试。
+- 所有 TTS/聊天/平台集成仍使用本地桩；未使用真实 Fish Key、未向真实微信联系人投递，也未验证手机端播放。安装包验证不等于这些账号级功能已经完成。
+
+### Windows x64 本轮源码回归
+
+原生 Python **1620项、跳过9项，253.881秒**通过。Node 中伙伴关闭测试首次遇到测试夹具硬编码 POSIX 缓存键与 Windows `path.join` 不一致；提交 `a657a08560db5344e182d0b971d2b60723977952` 只修正测试键的一行，不改变运行时。该专项在 macOS 重跑26项通过；Windows 全部21组Node已重跑通过，20组固定对话时间线独立补跑通过。不将此夹具修正记为运行时故障修复。
+
+### Windows x64 最终包与当前边界
+
+- 本次原生构建 Setup/Portable；ASAR 9份、外层 web 29份及冻结后端 CArchive 内 web 29份匹配，实际依赖41组件、64份许可。最终 Setup/Portable 各自 PE 内嵌7z再次解出核验：各9份ASAR源码、29份web及新版第三方声明逐字节一致；这是内嵌内容检查，不是NSIS安装/卸载交互。两端安装包的字节与SHA256列于[发布清单](../release-v3.0.2.json)，校验文件为本次独立生成，不覆盖旧版。
+- 冻结后端3次重启验证鉴权、统计、Jieba、时区、引导、备份、记忆保留及正常shutdown；随后冻结后端2循环、Unpacked和Portable各1次实际HTTP验证六项资源逐字节一致、独立配置保存、未知文件保留与模拟TTS试听。付费外部API调用为0，测试资料与真实用户资料隔离。
+- 本次单机启动样本：冻结后端约2.9—3.3秒、Unpacked 4.03秒、Portable首次冷展开40.41秒。Portable包含自解压，常用用户建议安装版；数字不是LLM响应延迟，也不泛化为所有硬件的承诺。
+- Windows未执行交互界面、系统IME组合输入和NSIS完整安装/卸载；Unpacked/Portable测试结束按隔离进程树清理，不写成手动或优雅GUI退出验收。两端均未真实账号登录、Fish付费合成或微信手机端播放；包未配置代码签名/公证。

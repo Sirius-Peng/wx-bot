@@ -1,8 +1,8 @@
 # WxBot 桌面版 · v3.0.2
 
-v3.0.2 正在构建与验收，包含微信角色语音、历史日期修正、重新设计的首页与分组设置，以及桌面伙伴关闭修复。v3.0.1 仅为此前本地构建，未单独公开发布；历史发布附件保持原版本。
+v3.0.2 包含微信角色语音、历史日期修正、重新设计的首页与分组设置，以及桌面伙伴关闭修复。v3.0.1 仅为此前本地构建，未单独公开发布；历史发布附件保持原版本。
 
-当前发布[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)。本次平台、真实摘要、资源及未执行项目见[发布清单](../docs/release-v3.0.0.json)。已弃用本地判定模型，运行与安装包不使用ONNX。文档更新：2026-10-28。v3.0.2 的平台与本轮结果见[新版发布记录](../docs/release-v3.0.2.json)。
+当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)。本次平台、真实摘要、资源及未执行项目见[发布清单](../docs/release-v3.0.2.json)。已弃用本地判定模型，运行与安装包不使用ONNX。文档更新：2026-10-28。历史[v3.0.0清单](../docs/release-v3.0.0.json)与附件保留原版本。
 
 v3复用微信/QQ内核增加独立桌面文字会话、默认静态形象和本地Live2D导入；桌面伙伴仍仅文字；v3.0.2 可选的微信角色语音使用独立 Fish Audio Key、页内试听与后台 WAV 文件附件，见[语音说明](../docs/v3/wechat-voice.md)；它不等同于桌面语音或微信原生语音条。管理界面收敛为首页、接入设置、人格与记忆、设置；原数据路径、凭证、应用ID保持不变。详见[v3总览](../docs/v3/README.md)、[接话策略与历史研究](../docs/v3/local-decision.md)及[验收状态](../docs/v3/validation.md)。
 
@@ -26,20 +26,32 @@ node desktop/scripts/verify-runtime-resources.cjs --source-only
 node tests/test_cloud_package.cjs
 ```
 
-浏览器、原生开发窗口、冻结应用及安装生命周期属于不同验证层。本次平台与完成范围见[发布清单](../docs/release-v3.0.0.json)，开发历史见[v3验收记录](../docs/v3/validation.md)。未执行的Windows交互IME、真实账号登录或NSIS完整安装/卸载不记为通过；云端速度和费用以实际API usage为准，不沿用历史ONNX成绩。
+浏览器、原生开发窗口、冻结应用及安装生命周期属于不同验证层。本次平台与完成范围见[发布清单](../docs/release-v3.0.2.json)，开发历史见[v3验收记录](../docs/v3/validation.md)。未执行的Windows交互IME、真实账号登录或NSIS完整安装/卸载不记为通过；云端速度和费用以实际API usage为准，不沿用历史ONNX成绩。
 
 主回复保留fast/deep和已有模型/Key；判定使用独立配置或原有复用规则。上下文采用稳定会话前缀，窗口自动/手填、默认40%后压缩；官方DeepSeek 1M与未知模型32K自动值及真实缓存统计见[会话与KV缓存](../docs/v3/context-session.md)。
 
-## 当前发布产物：v3.0.0
+## 当前发布产物：v3.0.2
 
 | 平台 | 文件 | 状态 |
 |---|---|---|
-| Windows x64安装版 | `WxBot-3.0.0-Windows-x64-Setup.exe` | 原生构建；具体通过/未执行范围见本次清单 |
-| Windows x64便携版 | `WxBot-3.0.0-Windows-x64-Portable.exe` | 原生构建；具体通过/未执行范围见本次清单 |
-| macOS Apple Silicon | `WxBot-3.0.0-macOS-arm64.dmg` | 原生构建；具体通过/未执行范围见本次清单 |
+| Windows x64安装版 | `WxBot-3.0.2-Windows-x64-Setup.exe` | 原生构建；具体通过/未执行范围见本次清单 |
+| Windows x64便携版 | `WxBot-3.0.2-Windows-x64-Portable.exe` | 原生构建；具体通过/未执行范围见本次清单 |
+| macOS Apple Silicon | `WxBot-3.0.2-macOS-arm64.dmg` | 原生构建；具体通过/未执行范围见本次清单 |
 | 校验文件 | `SHA256SUMS.txt` | 对应本次实际发布平台 |
 
-下载见[项目首页](../README.md#下载与平台)，精确摘要及未执行项目见[本次清单](../docs/release-v3.0.0.json)。未列出的架构没有本次桌面包；以下v2.1.7表保留历史，不是当前下载。
+下载见[项目首页](../README.md#下载与平台)，精确摘要及未执行项目见[本次清单](../docs/release-v3.0.2.json)。未列出的架构没有本次桌面包；以下v3.0.0/v2.1.7表保留历史，不是当前下载。
+
+常用 Windows 用户建议选 Setup；Portable 首次启动包含自解压，本次单机样本约40.41秒，Unpacked约4.03秒、冻结后端约2.9—3.3秒。这些是启动观察，不是 LLM 响应速度或所有机器的时延保证。
+
+## 历史已发布产物：v3.0.0
+
+| 平台 | 文件 | 状态 |
+|---|---|---|
+| Windows x64安装版 | `WxBot-3.0.0-Windows-x64-Setup.exe` | 保留历史发布及其验收 |
+| Windows x64便携版 | `WxBot-3.0.0-Windows-x64-Portable.exe` | 保留历史发布及其验收 |
+| macOS Apple Silicon | `WxBot-3.0.0-macOS-arm64.dmg` | 保留历史发布及其验收 |
+
+历史下载见[v3.0.0 Release](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)，摘要与未执行项目见[原清单](../docs/release-v3.0.0.json)，不以本次文档覆盖原验收。
 
 ## 历史已发布产物：v2.1.7
 
@@ -159,4 +171,4 @@ Electron 自身 profile/cache 与应用长期数据不是同一个目录。普�
 | 首次打开系统拦截 | 包未配置代码签名，按系统对本次下载的验证/打开流程处理；不要把文件存在当成校验成功 |
 | 安装退出后仍有后台 | 检查本版本的退出守卫/认证shutdown与日志；关闭窗口≠退出 |
 
-本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。当前v3.0.0的运行时验证和文件摘要见[发布清单](../docs/release-v3.0.0.json)；历史v2.1.7与v2.1.4记录保持原版本；文档更新不会修改已发布安装包或移动发布标签。
+本项目未签名发布，不承诺某个系统提示或绕过步骤在所有系统版本上相同。当前v3.0.2的运行时验证和文件摘要见[发布清单](../docs/release-v3.0.2.json)；历史v3.0.0、v2.1.7与v2.1.4记录保持原版本；文档更新不会修改已发布安装包或移动发布标签。
