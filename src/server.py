@@ -757,6 +757,7 @@ async def api_data_backup_download(name:str):
 
 
 CONFIG_SECTIONS={
+ 'voice':('voice',{'enabled','provider','base_url','api_key','fish_model','model_id','reference_audio','reference_text','prompt_language','text_language','reply_rate','cooldown_seconds','max_chars','timeout_seconds','clear_api_key'}),
  'primary':('llm',{'primary_base','primary_key','primary_model','context_window_tokens','context_compact_ratio'}),
  'fallback':('llm',{'fallback_base','fallback_key','fallback_model'}),
  'judge':('llm',{'judge_base','judge_key','judge_model'}),
@@ -782,6 +783,44 @@ def _validate_session_settings(values):
                 or not .1<=value<=.8):
             raise HTTPException(400,'上下文压缩阈值需要在 10% 到 80% 之间')
 
+def _validate_voice_settings(values):
+    import math
+    from .core.voice import FISH_MODELS
+    from urllib.parse import urlsplit
+    if 'provider' in values and values['provider'] not in ('fish','gpt_sovits'):raise HTTPException(400,'语音服务类型无效')
+    if 'fish_model' in values and (not isinstance(values['fish_model'],str) or values['fish_model'] not in FISH_MODELS):raise HTTPException(400,'请选择支持的 Fish 模型')
+    for name,lo,hi in [('reply_rate',0,1),('cooldown_seconds',0,3600),('max_chars',20,500),('timeout_seconds',3,60)]:
+        if name not in values:continue
+        value=values[name]
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not lo<=value<=hi:
+            raise HTTPException(400,'语音数值设置超出范围')
+        if name=='max_chars' and not isinstance(value,int):raise HTTPException(400,'语音字数上限需要整数')
+    if 'clear_api_key' in values and not isinstance(values['clear_api_key'],bool):raise HTTPException(400,'清除Key开关需要布尔值')
+    if 'base_url' in values:
+        try:
+            if not isinstance(values['base_url'],str):raise ValueError('not a URL')
+            url=urlsplit(values['base_url']);url.port
+            valid=url.scheme in ('http','https') and bool(url.hostname) and not url.username and not url.password and not url.query and not url.fragment
+        except (ValueError,TypeError):valid=False
+        if not valid:raise HTTPException(400,'语音服务地址格式错误，不含账号、查询参数或片段')
+
+@app.get('/api/voice/status')
+async def api_voice_status():return runtime.voice.status()
+
+@app.post('/api/voice/preview')
+async def api_voice_preview(request:Request):
+    try:
+        body=await request.json()
+        if not isinstance(body,dict) or set(body)-{'text'}:raise ValueError('试听请求格式错误')
+        audio=await runtime.voice.preview(body.get('text',''))
+        return Response(audio.data,media_type=audio.mime_type,headers={'Cache-Control':'no-store',
+            'Content-Disposition':'inline; filename="voice-preview.wav"','X-Content-Type-Options':'nosniff'})
+    except ValueError as error:raise HTTPException(400,str(error))
+    except asyncio.CancelledError:raise
+    except Exception as error:
+        log.warning('Voice preview ended error_type=%s',type(error).__name__)
+        raise HTTPException(502,'语音试听未完成，请检查语音服务状态、Key、额度和音色ID')
+
 @app.patch('/api/config/section/{section}')
 async def api_config_section(section:str,request:Request):
     from dataclasses import asdict
@@ -789,13 +828,16 @@ async def api_config_section(section:str,request:Request):
     values=await request.json();root,allowed=CONFIG_SECTIONS[section]
     if not isinstance(values,dict) or set(values)-allowed:raise HTTPException(400,'包含其他分区或未知设置')
     if root=='llm':_validate_session_settings(values)
+    if root=='voice':_validate_voice_settings(values)
     old=config_store.load();raw=asdict(old)
+    clear_voice_key=values.pop('clear_api_key',False) if root=='voice' else False
     for key,value in values.items():
         original=raw[root][key]
         if isinstance(original,str):
             if not isinstance(value,str):raise HTTPException(400,'文本设置格式错误')
             value=value.strip()
             if (key.endswith('_key') or key.endswith('_token')) and '•' in value:value=original
+            if root=='voice' and key=='api_key' and not value:value=original
         elif isinstance(original,bool):
             if not isinstance(value,bool):raise HTTPException(400,'开关设置需要布尔值')
         elif isinstance(original,(float,int)):
@@ -810,7 +852,15 @@ async def api_config_section(section:str,request:Request):
             import re
             if value and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?',value):raise HTTPException(400,'镜像源请填写域名，可附端口，不含协议或路径')
         raw[root][key]=value
-    cfg=config_store._from_dict(raw);config_store.save(cfg);restart=runtime.apply_config(cfg)
+    if clear_voice_key:
+        raw['voice']['api_key']=''
+        if raw['voice']['provider']=='fish':raw['voice']['enabled']=False
+    cfg=config_store._from_dict(raw)
+    if root=='voice':
+        from .core.voice import validate_voice_config
+        try:validate_voice_config(cfg.voice,require_ready=cfg.voice.enabled)
+        except (ValueError,TypeError) as error:raise HTTPException(400,str(error))
+    config_store.save(cfg);restart=runtime.apply_config(cfg)
     return {'ok':True,'section':section,'requires_restart':restart,'config':config_store.masked(cfg),
             'message':'本区设置已保存'+('，通道需重启机器人生效' if restart else '并应用')}
 
@@ -824,8 +874,15 @@ async def api_put_config(request: Request) -> dict:
     incoming = await request.json()
     if isinstance(incoming,dict) and isinstance(incoming.get('llm'),dict):
         _validate_session_settings(incoming['llm'])
+    if isinstance(incoming,dict) and 'voice' in incoming:
+        if not isinstance(incoming['voice'],dict):raise HTTPException(400,'语音设置格式错误')
+        _validate_voice_settings(incoming['voice'])
     old = config_store.load()
     cfg = _merge_config(old, incoming)
+    if isinstance(incoming,dict) and 'voice' in incoming:
+        from .core.voice import validate_voice_config
+        try:validate_voice_config(cfg.voice,require_ready=cfg.voice.enabled)
+        except (ValueError,TypeError) as error:raise HTTPException(400,str(error))
     config_store.save(cfg)
     requires_restart = runtime.apply_config(cfg)
     return {"ok": True, "requires_restart": requires_restart,
@@ -840,6 +897,11 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     def keep_masked(new_val: str, old_val: str) -> str:
         return old_val if (not new_val or "•" in new_val) else new_val
 
+    inc_voice=incoming.get('voice') or {}
+    from dataclasses import fields
+    for field in fields(old.voice):
+        if field.name not in inc_voice:setattr(cfg.voice,field.name,getattr(old.voice,field.name))
+    cfg.voice.api_key=keep_masked(inc_voice.get('api_key',''),old.voice.api_key)
     inc_bot = incoming.get('bot') or {}
     from .core.proactive import PROACTIVE_FIELDS
     for field in PROACTIVE_FIELDS:

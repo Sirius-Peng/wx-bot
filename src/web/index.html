@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>微信 AI 助手</title>
-<link rel="stylesheet" href="/static/style.css?v=3.0.0">
+<link rel="stylesheet" href="/static/style.css?v=3.0.2">
 </head>
 <body>
 
@@ -54,33 +54,29 @@
 
   <!-- ══════════ 主区域 ══════════ -->
   <main class="main">
-    <header class="topbar">
+    <header class="topbar"><div class="topbar-inner">
       <div class="topbar-title">
         <h1 id="page-title">首页</h1>
         <p id="page-sub">查看机器人运行状态与今日数据</p>
       </div>
       <div class="topbar-actions">
-        <button class="btn btn-ghost" id="btn-refresh" title="刷新">
+        <button class="btn btn-ghost" id="btn-refresh" title="刷新" aria-label="刷新">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
         </button>
         <button class="btn btn-danger" id="btn-stop" hidden>停止</button>
         <button class="btn btn-primary" id="btn-start">启动机器人</button>
       </div>
-    </header>
+    </div></header>
 
     <div class="content">
 
       <!-- ─────── 概览 ─────── -->
       <section class="page active" id="page-overview">
-<div class="card"><div class="card-head"><div><h3>v3 · 核心陪伴</h3><p class="hint">本地接话，轻量记忆。人格与数据沿用原目录。</p></div><button class="btn btn-primary" id="btn-companion-open">打开桌面伙伴</button></div><div class="card-body"><label><input type="checkbox" id="companion-enabled"> 启用独立桌面会话</label><p class="hint">默认不关联微信或QQ身份。未导入形象也能文字聊天。</p><button class="btn btn-ghost" id="btn-companion-import">导入Live2D模型</button><button class="btn btn-ghost" id="btn-open-history">查看消息记录</button><button class="btn btn-ghost" id="btn-open-guide">上手引导</button><p class="hint" id="companion-status"></p></div></div>
         <div class="hero" id="hero">
           <div class="hero-main">
             <div class="hero-status">
-              <span class="pulse" id="hero-pulse"></span>
-              <div>
-                <h2 id="hero-title">机器人未运行</h2>
-                <p id="hero-desc">完成连接后点击「启动机器人」即可开始工作</p>
-              </div>
+              <div class="hero-indicator"><span class="pulse" id="hero-pulse"></span></div>
+              <div class="hero-copy"><span class="eyebrow">运行状态</span><h2 id="hero-title">机器人未运行</h2><p id="hero-desc">完成连接后点击「启动机器人」即可开始工作</p></div>
             </div>
           </div>
           <div class="hero-meta">
@@ -88,44 +84,36 @@
             <div><span>会话能力</span><strong id="hero-groupcap">—</strong></div>
             <div><span>运行时长</span><strong id="hero-uptime">—</strong></div>
           </div>
+          <details class="home-runtime-details" id="hero-runtime-details" hidden><summary><span id="hero-diagnostic-summary">投递与会话状态</span></summary><ul id="hero-diagnostics" aria-live="polite"></ul></details>
         </div>
 
-        <div class="notice notice-info setup-resume" id="setup-resume" hidden><div><strong>还差几步就能开始聊天</strong><p>继续上次的配置，模型、QQ 与微信各自都有清楚的操作说明。</p></div><button class="btn btn-secondary" data-goto="guide">继续配置</button></div>
-        <div class="card home-qq-card" id="home-qq-card">
-          <div><h3>QQ 网关</h3><p id="home-qq-status" role="status">点击即可启动网关；已登录的账号会直接复用。</p></div>
-          <button class="btn btn-primary" id="btn-home-qq">一键启动 QQ 网关</button>
-        </div>
+        <div class="notice notice-info setup-resume" id="setup-resume" hidden><div><strong>还差几步就能开始聊天</strong><p>连接模型与账号，即可开启第一段对话。</p></div><button class="btn btn-secondary" data-goto="guide">继续配置</button></div>
 
         <div class="stat-grid">
-          <div class="stat-card">
-            <span class="stat-label">收到消息</span>
-            <strong class="stat-value" id="st-in">0</strong>
-            <span class="stat-foot" id="st-in-foot">群 0 · 私聊 0</span>
-          </div>
-          <div class="stat-card accent">
-            <span class="stat-label">已回复</span>
-            <strong class="stat-value" id="st-out">0</strong>
-            <span class="stat-foot" id="st-out-foot">回复率 0%</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">未回复</span>
-            <strong class="stat-value" id="st-silent">0</strong>
-            <span class="stat-foot">无需回复的消息</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">活跃会话</span>
-            <strong class="stat-value" id="st-chats">0</strong>
-            <span class="stat-foot" id="st-chats-foot">群 0 · 私聊 0</span>
-          </div>
+          <div class="stat-card"><span class="stat-label">收到消息</span><strong class="stat-value" id="st-in">0</strong><span class="stat-foot" id="st-in-foot">群 0 · 私聊 0</span></div>
+          <div class="stat-card accent"><span class="stat-label">已回复</span><strong class="stat-value" id="st-out">0</strong><span class="stat-foot" id="st-out-foot">回复率 0%</span></div>
+          <div class="stat-card"><span class="stat-label">未回复</span><strong class="stat-value" id="st-silent">0</strong><span class="stat-foot">无需回复的消息</span></div>
+          <div class="stat-card"><span class="stat-label">活跃会话</span><strong class="stat-value" id="st-chats">0</strong><span class="stat-foot" id="st-chats-foot">群 0 · 私聊 0</span></div>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <h3>最近动态</h3>
-            <button class="link" data-goto="messages">查看全部 →</button>
+        <div class="overview-section-head"><div><h2>连接与陪伴</h2><p>管理聊天入口，随时开启对话。</p></div><div class="head-actions"><button class="btn btn-ghost btn-sm" id="btn-open-history">消息记录</button><button class="btn btn-ghost btn-sm" id="btn-open-guide">上手引导</button></div></div>
+        <div class="home-tools-grid">
+          <div class="card home-tool-card" id="home-companion-card">
+            <div class="home-tool-heading"><span class="tool-symbol companion-symbol" aria-hidden="true">✦</span><div><h3>桌面伙伴</h3><p>在桌面上，留一个随时可以说话的位置。</p></div></div>
+            <div class="companion-body">
+              <label class="switch-row"><div><strong>启用桌面会话</strong><span>独立聊天，不自动关联微信或 QQ 身份。</span></div><input type="checkbox" id="companion-enabled"></label>
+              <p class="hint">默认形象即可文字聊天，也可导入自己的 Live2D 模型。</p>
+              <div id="companion-status" class="companion-status" role="status" aria-live="polite"></div>
+            </div>
+            <div class="card-foot"><button class="btn btn-primary" id="btn-companion-open">打开桌面伙伴</button><button class="btn btn-ghost" id="btn-companion-import">导入 Live2D</button></div>
           </div>
-          <div id="recent-list" class="feed"></div>
+          <div class="card home-qq-card home-tool-card" id="home-qq-card">
+            <div class="home-tool-heading"><span class="tool-symbol qq-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 8V6a4 4 0 0 1 8 0v2"/><rect x="4" y="8" width="16" height="13" rx="4"/><circle cx="9" cy="14" r=".7"/><circle cx="15" cy="14" r=".7"/><path d="M9 17h6"/></svg></span><div><h3>QQ 网关</h3><p>一次启动，继续熟悉的对话。</p></div></div>
+            <div class="gateway-body"><p id="home-qq-status" role="status">点击即可启动网关；已登录的账号会直接复用。</p><p class="hint">账号登录、二维码和连接详情可在「连接」中查看。</p></div>
+            <div class="card-foot"><button class="btn btn-primary" id="btn-home-qq">一键启动 QQ 网关</button></div>
+          </div>
         </div>
+        <div class="card recent-card"><div class="card-head"><div><h3>最近动态</h3><p class="card-description">最近收到的消息与回复</p></div><button class="link" data-goto="messages">查看全部 →</button></div><div id="recent-list" class="feed"></div></div>
       </section>
 
       <section class="page" id="page-guide">
@@ -526,36 +514,17 @@
 
       <!-- ─────── 设置 ─────── -->
       <section class="page" id="page-settings">
-        <div class="card" id="card-user-data">
-          <div class="card-head"><h3>本地数据与备份</h3></div>
-          <div class="guide-body">
-            <p>记忆、人格、模型设置、聊天上下文与微信登录状态默认保存在独立用户目录，不随应用更新或普通卸载清理。</p>
-            <label class="field"><span>实际数据目录</span><input type="text" id="storage-path" readonly aria-label="实际数据目录"></label>
-            <p class="hint" id="storage-status" role="status">正在读取数据位置…</p>
-            <p class="hint">备份包含 API Key、登录凭证和聊天内容，请保存在你自己的设备。QQ 登录资料仍由 NapCat 的持久卷管理，应用卸载不会删除这些卷。</p>
-          </div>
-          <div class="card-foot">
-            <div class="head-actions"><button class="btn btn-ghost" id="btn-copy-storage">复制路径</button><button class="btn btn-ghost" id="btn-open-storage" hidden>打开目录</button><a class="btn btn-ghost" id="storage-download" hidden>下载刚创建的备份</a></div>
-            <button class="btn btn-primary" id="btn-storage-backup">创建本地备份</button>
-          </div>
-        </div>
-        <div class="card" id="card-data-import">
-          <div class="card-head"><h3>导入旧版数据</h3><span class="tag">v2.1.4</span></div>
-          <div class="guide-body">
-            <p>从你选择的旧数据目录恢复整套配置、人格、记忆、聊天记录、上下文和目录内的微信状态。请先退出旧版本。</p>
-            <label class="field"><span>旧数据目录（包含 config.json）</span><input type="text" id="import-source" placeholder="旧数据目录的绝对路径"></label>
-            <div class="head-actions"><button class="btn btn-ghost" id="btn-import-choose" hidden>选择旧目录…</button><button class="btn btn-secondary" id="btn-import-preview">预览导入内容</button></div>
-            <p class="hint" id="import-status" role="status" aria-live="polite">支持已配置过的新版；导入前自动备份当前数据，旧目录保持不变。</p>
-            <div id="import-preview" hidden>
-              <p id="import-summary"></p>
-              <p class="hint">采用整套替换，不混合两套记忆。历史日志与备份保留在独立子目录；内部锁和迁移控制文件不作为配置导入。QQ Docker 卷和目录外的微信资料不包含在本次导入中。</p>
-              <label class="field"><span><input type="checkbox" id="import-confirm"> 我确认替换当前配置与记忆，并已退出旧版本</span></label>
-            </div>
-          </div>
-          <div class="card-foot"><button class="btn btn-ghost" id="btn-import-cancel" hidden>取消待导入任务</button><div class="head-actions"><button class="btn btn-secondary" id="btn-import-restart" hidden>重启后台并完成导入</button><button class="btn btn-primary" id="btn-import-prepare" disabled>准备导入</button></div></div>
-        </div>
+        <div class="settings-layout">
+          <div class="settings-sidebar"><span class="settings-nav-label">偏好设置</span><div class="settings-nav" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+            <button type="button" id="settings-tab-models" class="settings-tab active" role="tab" data-settings-tab="models" aria-selected="true" aria-controls="settings-panel-models"><span class="settings-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="5" width="14" height="14" rx="4"/><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg></span><span><strong>模型接入</strong><small>聊天、识图与联网</small></span><i class="settings-dirty" hidden aria-label="有未保存的修改"></i></button>
+            <button type="button" id="settings-tab-conversation" class="settings-tab" role="tab" data-settings-tab="conversation" aria-selected="false" aria-controls="settings-panel-conversation" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 11a8 8 0 0 1-8 8H6l-4 3V11a9 9 0 0 1 19 0Z"/><path d="M7 10h10M7 14h6"/></svg></span><span><strong>对话行为</strong><small>接话与记忆</small></span><i class="settings-dirty" hidden aria-label="有未保存的修改"></i></button>
+            <button type="button" id="settings-tab-data" class="settings-tab" role="tab" data-settings-tab="data" aria-selected="false" aria-controls="settings-panel-data" tabindex="-1"><span class="settings-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg></span><span><strong>数据与应用</strong><small>备份与迁移</small></span><i class="settings-dirty" hidden aria-label="有未保存的修改"></i></button>
+          </div><p class="settings-save-note">每张卡片独立保存。<br>切换分类会保留未保存的修改。</p></div>
+          <div class="settings-panels">
+            <div class="settings-panel" id="settings-panel-models" role="tabpanel" aria-labelledby="settings-tab-models" data-settings-panel="models">
+              <div class="settings-panel-intro"><h2>模型接入</h2><p>先连接主模型，其他能力按需配置。</p></div>
         <div class="card" data-settings-section="primary">
-          <div class="card-head"><h3>主模型</h3></div>
+          <div class="card-head"><div><h3>主模型</h3><p class="card-description">日常对话使用的模型，其他能力可复用此配置。</p></div><span class="tag on">主要配置</span></div>
           <div class="field-grid">
             <label class="field">
               <span>接口地址</span>
@@ -579,7 +548,7 @@
             </label>
           </div>
           <p class="hint">默认 DeepSeek V4.1 Flash（API 名称 deepseek-flash），支持图文输入；也可使用其他 OpenAI 兼容接口。费用以供应商当前说明为准。</p>
-          <p class="hint">长期保留同一会话及稳定前缀，默认达到模型窗口的 40% 才压缩，不再每隔几轮重建上下文。窗口填 0 时，仅官方 DeepSeek 接口的 deepseek-flash、deepseek-v4-pro 自动识别为 1,000,000 token；其他未知模型按 32,768 token 处理，也可按供应商说明手填。图片会话按实际识图接口的窗口计算。缓存命中由供应商决定，不保证每次命中。</p>
+          <details class="settings-help"><summary>上下文与缓存如何工作？</summary><p class="hint">长期保留同一会话及稳定前缀，默认达到模型窗口的 40% 才压缩，不再每隔几轮重建上下文。窗口填 0 时，仅官方 DeepSeek 接口的 deepseek-flash、deepseek-v4-pro 自动识别为 1,000,000 token；其他未知模型按 32,768 token 处理，也可按供应商说明手填。图片会话按实际识图接口的窗口计算。缓存命中由供应商决定，不保证每次命中。</p></details>
           <details class="help-panel help-panel-sm" id="usage-diagnostics-panel">
             <summary>用量与缓存诊断</summary>
             <div class="help-body">
@@ -635,15 +604,43 @@
             <label class="field"><span>会话时区</span><input type="text" id="context-timezone" placeholder="Asia/Shanghai" list="timezone-options"><datalist id="timezone-options"><option value="Asia/Shanghai"><option value="Asia/Hong_Kong"><option value="Asia/Tokyo"><option value="UTC"><option value="America/New_York"><option value="Europe/London"></datalist></label>
             <label class="field field-full"><span>DeepSeek 搜索 API Key（可选）</span><input type="password" id="search-key" placeholder="主模型为 DeepSeek 官方接口时，留空复用主模型 Key"></label>
           </div>
-          <p class="hint">问新闻、天气或“帮我查一下”时按需联网，普通闲聊不必搜索。使用其他主模型时，请单独填写 DeepSeek Key。Search / Fetch 按工具请求次数额外计费，不是免费或仅按 token 计费；主模型整合另有用量。每轮 Search + Fetch 合计最多 2 次，失败不会自动切到旧版搜索重复计费。兼容方式使用旧版辅助模型，按其服务规则计费。<a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noopener noreferrer">官方价格</a></p>
+          <details class="settings-help"><summary>联网计费、重试与时间说明</summary><p class="hint">问新闻、天气或“帮我查一下”时按需联网，普通闲聊不必搜索。使用其他主模型时，请单独填写 DeepSeek Key。Search / Fetch 按工具请求次数额外计费，不是免费或仅按 token 计费；主模型整合另有用量。每轮 Search + Fetch 合计最多 2 次，失败不会自动切到旧版搜索重复计费。兼容方式使用旧版辅助模型，按其服务规则计费。<a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noopener noreferrer">官方价格</a></p>
           <p class="hint">上述上限指模型发起的工具操作；直接接口明确返回 408/429/5xx 时，单次操作最多重试一次 HTTP 请求，可能另有计费；无响应网络错误或超时不重试，避免重复付费。已有正文/摘要时直接整合，不为每个结果额外抓取；仅在成稿不合格时有界修订一次。</p>
           <p class="hint">每轮自动注入当前日期、星期、时间、时区和昨天/今天/明天，不写入长期记忆。默认中国标准时间；用户明确给出其他时区时以用户为准。<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">获取 DeepSeek API Key</a></p>
+</details>
           <div class="card-foot"><span class="save-state" data-save-status="search">未修改</span><button class="btn btn-primary" data-save-section="search">保存搜索与时间</button></div>
         </div>
 
+        <div class="card" data-settings-section="voice" data-settings-group="models">
+          <div class="card-head"><h3>微信角色语音</h3></div>
+          <label class="switch-row"><div><strong>部分短回复附带弗洛洛语音</strong><span>文字始终保留；只在微信私聊中按频率与冷却发送</span></div><input type="checkbox" id="voice-enabled"></label>
+          <div class="field-grid">
+            <label class="field"><span>语音服务</span><select id="voice-provider"><option value="fish">Fish Audio · 现成弗洛洛音色</option><option value="gpt_sovits">本地 GPT-SoVITS · 无需新 Key</option></select></label>
+            <label class="field"><span>服务地址</span><input type="url" id="voice-base-url" placeholder="https://api.fish.audio"><em>本地模式填写已启动的 GPT-SoVITS API 地址；Fish 默认 https://api.fish.audio。</em></label>
+            <label class="field field-full" id="voice-fish-key-field" hidden><span>Fish Audio API Key</span><input type="password" id="voice-api-key" autocomplete="new-password" placeholder="留空保留已保存 Key"><em id="voice-key-status">尚未保存 Key</em></label>
+            <label class="field field-full" id="voice-fish-clear-field" hidden><span><input type="checkbox" id="voice-clear-key"> 清除已保存的语音 API Key</span><em>仅在勾选并保存本卡片后清除，不影响聊天模型 Key。</em></label>
+            <label class="field field-full" id="voice-fish-model-field" hidden><span>Fish 声音模型 ID</span><input type="text" id="voice-model-id" placeholder="5b432f747d00419aba7cb12fa50e4af0"><em>预填公开社区弗洛洛模型；音色与可用性以对应服务实际结果为准。</em></label>
+            <label class="field field-full" id="voice-fish-engine-field" hidden><span>Fish 合成引擎</span><select id="voice-fish-model"><option value="s2.1-pro">S2.1 Pro</option><option value="s2-pro">S2 Pro</option><option value="s1">S1</option><option value="s2.1-pro-free">S2.1 Pro Free</option><option value="drama-3">Drama 3</option></select><em>显式选择引擎，不会失败后自动切换另一个付费模型。Fish API 单独计费，不复用 DeepSeek Key。</em></label>
+            <label class="field field-full" id="voice-local-audio-field"><span>参考音频路径</span><input type="text" id="voice-reference-audio" placeholder="例如 D:\GPT-SoVITS\references\phrolova.wav"><em>这是 GPT-SoVITS 服务所在机器可读取的文件路径，不是网页上传路径。</em></label>
+            <label class="field field-full" id="voice-local-text-field"><span>参考音频对应的原文</span><textarea id="voice-reference-text" rows="3" placeholder="逐字填写参考音频中的台词"></textarea></label>
+            <label class="field" id="voice-local-language-field"><span>参考音频语言</span><select id="voice-prompt-language"><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option><option value="yue">粤语</option><option value="auto">自动</option></select></label>
+            <label class="field"><span>回复语音语言</span><select id="voice-text-language"><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option><option value="yue">粤语</option><option value="auto">自动</option></select></label>
+            <label class="field"><span>短回复转语音比例</span><input type="number" id="voice-reply-percent" min="0" max="100" step="1" value="25"><em>百分比；默认25%，不额外调用 LLM 作语音判定。</em></label>
+            <label class="field"><span>同一联系人的语音冷却（秒）</span><input type="number" id="voice-cooldown-seconds" min="0" max="3600" step="1" value="300"></label>
+            <label class="field"><span>可转语音的回复最长字数</span><input type="number" id="voice-max-chars" min="20" max="500" step="1" value="160"><em>长回答、代码与链接说明继续使用文字。</em></label>
+            <label class="field"><span>合成最长等待（秒）</span><input type="number" id="voice-timeout-seconds" min="3" max="60" step="1" value="20"></label>
+          </div>
+          <p class="hint">微信以可播放的音频附件发送。官方通道的原生语音气泡尚未确认，本功能不把“接口已接受”当作手机已显示。语音服务异常时保留正常文字回复，不向聊天对方发送配置报错。</p>
+          <div class="field-grid"><label class="field field-full"><span>试听文本</span><input type="text" id="voice-preview-text" maxlength="160" value="别急，这场演出还没有结束。" placeholder="最多160字；保存配置后试听"></label><div class="field field-full"><button type="button" class="btn btn-ghost" id="btn-voice-preview">生成试听</button><em>先保存本卡片；试听只在本页播放，不发送微信。Fish 合成会使用已保存 Key，按对应服务计费。</em><audio id="voice-preview-audio" controls hidden preload="none" aria-label="角色语音试听"></audio><span id="voice-preview-status" role="status"></span></div></div>
+          <div class="card-foot"><span class="save-state" data-save-status="voice">未修改</span><button class="btn btn-primary" data-save-section="voice">保存微信语音设置</button></div>
+        </div>
+
+            </div>
+            <div class="settings-panel" id="settings-panel-conversation" role="tabpanel" aria-labelledby="settings-tab-conversation" data-settings-panel="conversation" hidden>
+              <div class="settings-panel-intro"><h2>对话行为</h2><p>调整回应的节奏，保留你想要的相处方式。</p></div>
         <div class="card" data-settings-section="reply">
-<label class="field"><span>回复速度</span><select id="chat-mode"><option value="fast">快速 · 非思考模式</option><option value="deep">深度思考</option></select></label>
           <div class="card-head"><h3>回复与等待</h3></div>
+          <div class="field-grid"><label class="field"><span>回复速度</span><select id="chat-mode"><option value="fast">快速 · 非思考模式</option><option value="deep">深度思考</option></select></label></div>
           <label class="switch-row">
             <div><strong>群聊回复时 @ 提问者</strong><span>让群成员知道这条回复是给谁的（仅 QQ 群聊生效）</span></div>
             <input type="checkbox" id="group-at-sender">
@@ -701,6 +698,37 @@
           </div>
         </div>
 
+            </div>
+            <div class="settings-panel" id="settings-panel-data" role="tabpanel" aria-labelledby="settings-tab-data" data-settings-panel="data" hidden>
+              <div class="settings-panel-intro"><h2>数据与应用</h2><p>资料独立保存在本机，备份与迁移集中管理。</p></div>
+        <div class="card" id="card-user-data">
+          <div class="card-head"><h3>本地数据与备份</h3></div>
+          <div class="guide-body">
+            <p>记忆、人格、模型设置、聊天上下文与微信登录状态默认保存在独立用户目录，不随应用更新或普通卸载清理。</p>
+            <label class="field"><span>实际数据目录</span><input type="text" id="storage-path" readonly aria-label="实际数据目录"></label>
+            <p class="hint" id="storage-status" role="status">正在读取数据位置…</p>
+            <p class="hint">备份包含 API Key、登录凭证和聊天内容，请保存在你自己的设备。QQ 登录资料仍由 NapCat 的持久卷管理，应用卸载不会删除这些卷。</p>
+          </div>
+          <div class="card-foot">
+            <div class="head-actions"><button class="btn btn-ghost" id="btn-copy-storage">复制路径</button><button class="btn btn-ghost" id="btn-open-storage" hidden>打开目录</button><a class="btn btn-ghost" id="storage-download" hidden>下载刚创建的备份</a></div>
+            <button class="btn btn-primary" id="btn-storage-backup">创建本地备份</button>
+          </div>
+        </div>
+        <div class="card" id="card-data-import">
+          <div class="card-head"><h3>导入旧版数据</h3><span class="tag">旧版迁移</span></div>
+          <div class="guide-body">
+            <p>从你选择的旧数据目录恢复整套配置、人格、记忆、聊天记录、上下文和目录内的微信状态。请先退出旧版本。</p>
+            <label class="field"><span>旧数据目录（包含 config.json）</span><input type="text" id="import-source" placeholder="旧数据目录的绝对路径"></label>
+            <div class="head-actions"><button class="btn btn-ghost" id="btn-import-choose" hidden>选择旧目录…</button><button class="btn btn-secondary" id="btn-import-preview">预览导入内容</button></div>
+            <p class="hint" id="import-status" role="status" aria-live="polite">支持已配置过的新版；导入前自动备份当前数据，旧目录保持不变。</p>
+            <div id="import-preview" hidden>
+              <p id="import-summary"></p>
+              <p class="hint">采用整套替换，不混合两套记忆。历史日志与备份保留在独立子目录；内部锁和迁移控制文件不作为配置导入。QQ Docker 卷和目录外的微信资料不包含在本次导入中。</p>
+              <label class="field"><span><input type="checkbox" id="import-confirm"> 我确认替换当前配置与记忆，并已退出旧版本</span></label>
+            </div>
+          </div>
+          <div class="card-foot"><button class="btn btn-ghost" id="btn-import-cancel" hidden>取消待导入任务</button><div class="head-actions"><button class="btn btn-secondary" id="btn-import-restart" hidden>重启后台并完成导入</button><button class="btn btn-primary" id="btn-import-prepare" disabled>准备导入</button></div></div>
+        </div>
         <!-- 仅桌面版显示：由 preload 注入 window.wxbotDesktop 后激活 -->
         <div class="card" id="card-desktop" hidden>
           <div class="card-head">
@@ -725,6 +753,9 @@
             <div><span>数据目录</span><strong id="desk-datadir">—</strong></div>
           </div>
           <pre class="log-view" id="desk-logview" hidden></pre>
+        </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -808,6 +839,6 @@
 <script src="/static/guide.js?v=20261013-guide1"></script>
 <script src="/static/statistics.js?v=20261014-stats2"></script>
 <script src="/static/confirmation.js?v=20261014-focus1"></script>
-<script src="/static/app.js?v=3.0.0"></script>
+<script src="/static/app.js?v=3.0.2"></script>
 </body>
 </html>

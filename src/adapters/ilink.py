@@ -41,12 +41,14 @@ import json
 import logging
 import os
 import random
+import re
 import struct
 import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -65,6 +67,9 @@ CHANNEL_VERSION = "1.3.4"
 ILINK_APP_ID = "bot"
 MAX_PENDING = 200
 MAX_ACTIVE_CHATS = 4
+MAX_AUDIO_BYTES = 8 * 1024 * 1024
+MAX_AUDIO_PENDING = 32
+MAX_AUDIO_CACHE_BYTES = 64 * 1024 * 1024
 
 # proto: MessageType
 MSG_TYPE_USER = 1
@@ -135,6 +140,12 @@ class ILinkAdapter(BaseAdapter):
         self._poll_client = None
         self._reply_context: ContextVar = ContextVar("ilink_reply_context", default=None)
         self._outbox: dict[str, dict] = {}
+        # Optional audio never changes the primary text receipt or retry status.
+        self._audio_outbox: dict[str, dict] = {}
+        self._audio_outbox_loaded = False
+        self._audio_lock = asyncio.Lock()
+        self._audio_delivery = {'attempts':0,'accepted':0,'failed':0,'network_retries':0,
+                                'last_status':'idle','transport':'audio_file'}
         self._wakeup = asyncio.Event()
         self._capacity_changed = asyncio.Event()
         self._jobs: dict[str, asyncio.Task] = {}
@@ -521,7 +532,7 @@ class ILinkAdapter(BaseAdapter):
         return bool(self._typing_active.get(chat_id))
 
     def delivery_status(self) -> dict:
-        return {**self._delivery, "typing":dict(self._typing_status), "pending_inbound": len(self._pending),
+        return {**self._delivery, "audio":dict(self._audio_delivery), "typing":dict(self._typing_status), "pending_inbound": len(self._pending),
                 "active_chats": len(self._jobs)-len(self._collecting), "collecting_chats":len(self._collecting),
                 "pending_replies": sum(d.get("status") != "api_accepted"
                                        for d in self._outbox.values()),
@@ -643,6 +654,199 @@ class ILinkAdapter(BaseAdapter):
             raise
         finally:
             self._delivery["last_send_ms"] = round((time.monotonic() - started) * 1000, 1)
+
+    async def send_audio(self, chat_id: str, audio: bytes, filename: str = "弗洛洛-合成语音.wav",
+                         mime_type: str = "audio/wav", *, check_current=None, attempt_id: str = "", on_submit=None) -> str:
+        """Upload a playable audio FILE, not an unverified native WeChat voice bubble.
+
+        Tencent's current client routes audio through FILE. Independent durable
+        metadata pins bytes, context, encryption key and client_id through retries.
+        A successful return means API acceptance, not client playback/read receipt.
+        """
+        async with self._audio_lock:
+            self._load_audio_outbox()
+            bound=self._reply_context.get()
+            if bound is not None and bound.chat_id!=chat_id:
+                raise ValueError('audio: conversation mismatch')
+            key=('audio:'+self._reply_key(bound) if bound is not None else
+                 'audio:manual:'+hashlib.sha256(((self.bot_id or '')+':'+chat_id+':'+attempt_id).encode()).hexdigest()
+                 if attempt_id else 'audio:manual:'+uuid.uuid4().hex)
+            draft=self._audio_outbox.get(key)
+            def current():
+                if draft and draft.get('send_started'):return
+                if bound is not None:
+                    if hasattr(self,'active_space') and self.message_persona_space(bound)!=self.current_persona_space():
+                        raise ConversationChanged('Audio persona changed before submission')
+                    self.check_reply_current(bound)
+                if check_current is not None:check_current()
+            if draft and draft.get('status')=='api_accepted':
+                self._save_audio_outbox()
+                self._audio_delivery.update(last_status='api_accepted')
+                self._cleanup_audio_file(draft)
+                return draft.get('server_message_id') or draft['client_id']
+            if draft and draft.get('status')=='cancelled':
+                raise ConversationChanged('Audio draft was cancelled before submission')
+            current()
+            if draft is None:
+                filename,mime_type=self._validate_audio(audio,filename,mime_type)
+                token=(bound.context_token if bound is not None else None) or self._ctx_tokens.get(chat_id)
+                if not token:raise RuntimeError('audio: missing context_token')
+                pending=[d for d in self._audio_outbox.values() if d.get('status') not in ('api_accepted','cancelled')]
+                if len(pending)>=MAX_AUDIO_PENDING or sum(d.get('size',0) for d in pending)+len(audio)>MAX_AUDIO_CACHE_BYTES:
+                    raise RuntimeError('audio: pending queue full')
+                client_id='wxbot-audio-'+uuid.uuid4().hex
+                draft={'to':chat_id,'context_token':token,'client_id':client_id,'status':'pending',
+                       'created':time.time(),'filename':filename,'mime_type':mime_type,
+                       'source_file':client_id+Path(filename).suffix.lower(),
+                       'size':len(audio),'md5':hashlib.md5(audio).hexdigest(),'sha256':hashlib.sha256(audio).hexdigest(),
+                       'filekey':uuid.uuid4().hex,'aeskey':os.urandom(16).hex(),'send_started':False,'attempt_id':attempt_id}
+                target=self._audio_path(draft);target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+                fd,tmp=tempfile.mkstemp(dir=target.parent,suffix='.tmp')
+                try:
+                    with os.fdopen(fd,'wb') as stream:stream.write(audio);stream.flush();os.fsync(stream.fileno())
+                    os.replace(tmp,target)
+                finally:Path(tmp).unlink(missing_ok=True)
+                self._audio_outbox[key]=draft
+            # If a previous atomic save failed, no network is attempted until it succeeds.
+            self._save_audio_outbox()
+            self._audio_delivery['attempts']+=1
+            try:
+                if not draft.get('item'):
+                    current()
+                    raw=self._audio_path(draft).read_bytes()
+                    if not 0<len(raw)<=MAX_AUDIO_BYTES or len(raw)!=draft['size'] or hashlib.sha256(raw).hexdigest()!=draft['sha256']:
+                        raise RuntimeError('audio: cached file integrity mismatch')
+                    from cryptography.hazmat.primitives import padding
+                    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                    padder=padding.PKCS7(128).padder();padded=padder.update(raw)+padder.finalize()
+                    encryptor=Cipher(algorithms.AES(bytes.fromhex(draft['aeskey'])),modes.ECB()).encryptor()
+                    encrypted=encryptor.update(padded)+encryptor.finalize()
+                    response=await self._audio_post('ilink/bot/getuploadurl',{
+                        'filekey':draft['filekey'],'media_type':3,'to_user_id':draft['to'],
+                        'rawsize':len(raw),'rawfilemd5':draft['md5'],'filesize':len(encrypted),
+                        'no_need_thumb':True,'aeskey':draft['aeskey']})
+                    self._check_response(response,'audio getuploadurl')
+                    full=response.get('upload_full_url');param=response.get('upload_param')
+                    url=full.strip() if isinstance(full,str) and full.strip() else (
+                        CDN_BASE_URL+'/upload?'+urlencode({'encrypted_query_param':param,'filekey':draft['filekey']})
+                        if isinstance(param,str) and param else '')
+                    parsed=urlsplit(url)
+                    if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
+                        raise RuntimeError('audio: invalid CDN upload URL')
+                    current()
+                    # Official CDN uses POST and no bot Authorization header.
+                    uploaded=await self._client.post(url,content=encrypted,
+                        headers={'Content-Type':'application/octet-stream'},timeout=httpx.Timeout(15,connect=3,pool=2),
+                        follow_redirects=False)
+                    if uploaded.status_code!=200:raise RuntimeError('audio: CDN upload rejected '+str(uploaded.status_code))
+                    download=uploaded.headers.get('x-encrypted-param')
+                    if not download:raise RuntimeError('audio: CDN response missing download parameter')
+                    draft['item']={'type':ITEM_FILE,'file_item':{
+                        'media':{'encrypt_query_param':download,
+                                 'aes_key':base64.b64encode(draft['aeskey'].encode('ascii')).decode('ascii'),
+                                 'encrypt_type':1},'file_name':draft['filename'],'len':str(draft['size'])}}
+                    draft['status']='uploaded';self._save_audio_outbox()
+                current()
+                previous_status=draft['status'];already_started=bool(draft.get('send_started'))
+                draft['send_started']=True;draft['status']='submitting'
+                try:self._save_audio_outbox()
+                except BaseException:
+                    draft['send_started']=already_started;draft['status']=previous_status
+                    raise
+                if on_submit is not None:on_submit()
+                response=await self._audio_post('ilink/bot/sendmessage',{'msg':{
+                    'from_user_id':'','to_user_id':draft['to'],'client_id':draft['client_id'],
+                    'message_type':MSG_TYPE_BOT,'message_state':STATE_FINISH,
+                    'context_token':draft['context_token'],'item_list':[draft['item']]}})
+                self._check_response(response,'audio sendmessage')
+                if not any(field in response for field in ('ret','errcode','message_id')):
+                    raise RuntimeError('audio: missing acknowledgement fields')
+                draft.update(status='api_accepted',server_message_id=str(response.get('message_id') or ''))
+                self._save_audio_outbox();self._cleanup_audio_file(draft)
+                self._audio_delivery.update(last_status='api_accepted',accepted=self._audio_delivery['accepted']+1)
+                return draft['server_message_id'] or draft['client_id']
+            except asyncio.CancelledError:
+                if not draft.get('send_started'):
+                    draft['status']='cancelled';self._save_audio_outbox();self._cleanup_audio_file(draft)
+                self._audio_delivery.update(last_status='submission_interrupted' if draft.get('send_started') else 'cancelled')
+                raise
+            except ConversationChanged:
+                if not draft.get('send_started'):
+                    draft['status']='cancelled';self._save_audio_outbox();self._cleanup_audio_file(draft)
+                self._audio_delivery.update(last_status='cancelled')
+                raise
+            except BaseException:
+                self._audio_delivery.update(last_status='retry_pending',failed=self._audio_delivery['failed']+1)
+                raise
+
+    @staticmethod
+    def _validate_audio(audio,filename,mime_type):
+        if not isinstance(audio,bytes) or not 0<len(audio)<=MAX_AUDIO_BYTES:
+            raise ValueError('audio: expected nonempty bytes up to 8 MiB')
+        if not isinstance(filename,str) or len(filename)>120 or any(ord(c)<32 for c in filename):
+            raise ValueError('audio: invalid filename')
+        filename=filename.replace('\\','/').rsplit('/',1)[-1]
+        suffix=Path(filename).suffix.lower()
+        wav=suffix=='.wav' and mime_type in ('audio/wav','audio/x-wav') and audio[:4]==b'RIFF' and audio[8:12]==b'WAVE'
+        mp3=suffix=='.mp3' and mime_type in ('audio/mpeg','audio/mp3') and (audio[:3]==b'ID3' or (len(audio)>1 and audio[0]==255 and audio[1]&224==224))
+        if not (wav or mp3):raise ValueError('audio: only matching WAV or MP3 is accepted')
+        return filename,('audio/wav' if wav else 'audio/mpeg')
+
+    def _audio_path(self,draft):
+        name=draft.get('source_file','')
+        if not isinstance(name,str) or not re.fullmatch(r'wxbot-audio-[a-f0-9]{32}\.(?:wav|mp3)',name):
+            raise RuntimeError('audio: invalid cached filename')
+        directory=self.state_dir/'voice-outbox'
+        if directory.is_symlink():raise RuntimeError('audio: cache directory link rejected')
+        path=directory/name
+        if path.is_symlink():raise RuntimeError('audio: cached file link rejected')
+        return path
+
+    def _cleanup_audio_file(self,draft):
+        try:self._audio_path(draft).unlink(missing_ok=True)
+        except (OSError,RuntimeError):log.warning('Audio cache cleanup deferred')
+
+    async def discard_audio(self, attempt_id: str) -> bool:
+        """Discard only pre-submission audio; uncertain submitted bytes stay durable."""
+        if not attempt_id:return False
+        async with self._audio_lock:
+            self._load_audio_outbox();discarded=False
+            for draft in list(self._audio_outbox.values()):
+                if draft.get('attempt_id')!=attempt_id or draft.get('send_started'):
+                    continue
+                if draft.get('status') not in ('api_accepted','cancelled'):
+                    draft['status']='cancelled';self._save_audio_outbox();self._cleanup_audio_file(draft);discarded=True
+            return discarded
+
+    def _load_audio_outbox(self):
+        if self._audio_outbox_loaded:return
+        path=self.state_dir/'audio-outbox.json'
+        if path.exists():
+            data=json.loads(path.read_text(encoding='utf-8'))
+            if data.get('version')!=1 or not isinstance(data.get('replies'),dict):
+                raise RuntimeError('audio: invalid durable queue')
+            self._audio_outbox=data['replies']
+        self._audio_outbox_loaded=True
+
+    def _save_audio_outbox(self):
+        completed=[key for key,d in self._audio_outbox.items() if d.get('status') in ('api_accepted','cancelled')]
+        for key in completed[:-128]:
+            self._cleanup_audio_file(self._audio_outbox[key]);del self._audio_outbox[key]
+        self._atomic_json(self.state_dir/'audio-outbox.json',{'version':1,'replies':self._audio_outbox})
+
+    async def _audio_post(self,endpoint,body):
+        """Same verified API transport, with audio-only retry accounting."""
+        base=(self.bot_base_url or self.base_url).rstrip('/')
+        payload={**body,'base_info':self._base_info()};url=base+'/'+endpoint
+        timeout=httpx.Timeout(15,connect=3,pool=2)
+        try:response=await self._client.post(url,json=payload,headers=self._headers(),timeout=timeout)
+        except (httpx.TimeoutException,httpx.NetworkError,httpx.RemoteProtocolError):
+            if not endpoint.endswith('/sendmessage'):raise
+            self._audio_delivery['network_retries']+=1
+            await asyncio.sleep(.25)
+            async with make_client(base,timeout=15) as client:
+                response=await client.post(url,json=payload,headers=self._headers(),timeout=timeout)
+        response.raise_for_status();return response.json()
 
     def _save_outbox(self) -> None:
         # 限制已确认记录数量；任何未确认回复都不被清理。

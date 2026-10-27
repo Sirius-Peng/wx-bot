@@ -300,7 +300,10 @@ class RuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         turns=await self.rt.qq_orch.store.get_recent('ctx:onebot:private:p_123')
         self.assertEqual(turns[-1]['user'],'');self.assertTrue(turns[-1]['proactive'])
         history=self.rt.qq_orch.ctx._fit_budget(turns,5000)
-        self.assertEqual(history,[{'role':'assistant','content':'那首曲子，听完了吗？'}])
+        self.assertEqual(history[1:],[{'role':'assistant','content':'那首曲子，听完了吗？'}])
+        self.assertEqual(history[0]['role'],'system')
+        self.assertIn('助手发送时间',history[0]['content'])
+        self.assertEqual(turns[-1]['assistant_at'],turns[-1]['ts'])
         self.assertEqual(self.rt.log.stats()['total_out'],1)
     async def test_planner_to_qq_transport_and_wechat_followup_end_to_end(self):
         import time

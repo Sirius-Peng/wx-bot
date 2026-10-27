@@ -52,7 +52,10 @@ try {
   }, /missing_pack_guard/);
   // Verify no path/app identity drift accompanies retiring inference resources.
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8'));
-  assert.equal(pkg.version, '3.0.0'); tests++;
+  assert.match(pkg.version, /^3\.\d+\.\d+$/); tests++;
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package-lock.json'), 'utf8'));
+  assert.equal(lock.version, pkg.version); tests++;
+  assert.equal(lock.packages[''].version, pkg.version); tests++;
   assert(fs.readFileSync(path.join(root, 'desktop/electron-builder.yml'), 'utf8').includes('appId: com.siriuspeng.wxbot')); tests++;
   verifyRuntimeResources(root); tests++;
   console.log(`CLOUD_PACKAGE PASS tests=${tests} missing_model=accepted model_assets=excluded training_dependencies=excluded user_data=unchanged`);

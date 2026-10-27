@@ -24,8 +24,8 @@ class TrayManager {
    * @param {Function} handlers.onRestart 重启后端
    * @param {Function} handlers.onQuit    退出应用
    */
-  create({ onOpen, onRestart, onQuit, onCompanion }) {
-    this._handlers = { onOpen, onRestart, onQuit, onCompanion };
+  create({ onOpen, onRestart, onQuit, onCompanion, onCloseCompanion }) {
+    this._handlers = { onOpen, onRestart, onQuit, onCompanion, onCloseCompanion };
 
     const icon = this._loadIcon();
     if (!icon || icon.isEmpty()) {
@@ -79,6 +79,7 @@ class TrayManager {
     const menu = Menu.buildFromTemplate([
       { label: '打开主界面', click: () => this._handlers.onOpen() },
       ...(this._handlers.onCompanion?[{label:'显示桌面伙伴／恢复鼠标',click:()=>this._handlers.onCompanion()}]:[]),
+      ...(this._handlers.onCloseCompanion?[{label:'关闭桌面伙伴',click:()=>this._handlers.onCloseCompanion()}]:[]),
       { type: 'separator' },
       { label: this._statusLabel(), enabled: false },
       { label: '重启后台服务', click: () => this._handlers.onRestart() },

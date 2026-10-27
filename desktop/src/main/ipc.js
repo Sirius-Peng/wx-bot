@@ -27,6 +27,7 @@ function registerIpc({ windowMgr, backend, trayMgr, companionMgr, quit }) {
     ipcMain.handle('companion:show',event=>{if(trusted(event))companionMgr.show(backend.url);});
     ipcMain.handle('companion:reload',event=>{if(trusted(event))companionMgr.reload(backend.url);});
     ipcMain.handle('companion:hide',event=>{if(trusted(event))companionMgr.hide();});
+    ipcMain.handle('companion:close',event=>{if(!trusted(event))return {ok:false};companionMgr.close();return {ok:true};});
     ipcMain.handle('companion:top',(event,value)=>{if(trusted(event))companionMgr.top(value===true);});
     ipcMain.handle('companion:through',(event,value)=>{if(trusted(event))companionMgr.through(value===true);});
     ipcMain.handle('companion:chooseModel',async event=>{

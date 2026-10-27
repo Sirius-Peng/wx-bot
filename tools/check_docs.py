@@ -66,8 +66,8 @@ def audit(root,metadata=None):
     check(re.findall(r'class="nav-item[^\"]*" data-page="([^\"]+)"',html)==['overview','connect','memory','settings'],'v3 four-page navigation mismatch')
     check('data-goto="memory-graph"' not in html and 'memory-graph.js' not in html,'retired graph frontend still linked')
     sections=re.findall(r'data-settings-section="([^"]+)"',html)
-    check(len(set(sections)-{'channels'})==9,'settings section count changed; update NapCat docs')
-    check('九个配置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
+    check(len(set(sections)-{'channels'})==10,'settings section count changed; update NapCat docs')
+    check('十个独立设置卡片' in (root/'docs/napcat-fixes.md').read_text(),'settings card docs mismatch')
     check("'--onedir'" in (root/'desktop/scripts/build-backend.ps1').read_text(encoding='utf-8-sig') and 'onedir' in desktop,'Windows layout mismatch')
     check('--onefile' in (root/'desktop/scripts/build-backend.sh').read_text() and 'onefile' in desktop,'macOS layout mismatch')
     paths=[root/'README.md',root/'CHANGELOG.md',root/'CONTRIBUTORS.md',root/'CONTRIBUTING.md',root/'desktop/README.md',*sorted((root/'docs').rglob('*.md'))]

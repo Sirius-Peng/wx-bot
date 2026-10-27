@@ -1,6 +1,6 @@
 # v3 验收记录与发布边界
 
-初次记录：2026-10-19；本次发布记录：2026-10-25。以下开发阶段历史逐项保留，本次真实安装包与未执行范围以[发布清单](../release-v3.0.0.json)为准，历史[v2.1.7](../validation.md)不自动适用于v3。
+初次记录：2026-10-19；更新：2026-10-28。v3.0.2 本轮构建和验收见[新版发布记录](../release-v3.0.2.json)；以下开发阶段历史逐项保留，v3.0.0 的真实安装包与未执行范围仍以[历史发布清单](../release-v3.0.0.json)为准，历史[v2.1.7](../validation.md)不自动适用于v3。
 
 ## 已观察的阶段性与历史结果
 
@@ -141,3 +141,9 @@ Windows使用`.venv\Scripts\python.exe`及PowerShell逐项运行Node套件。训
 - Frozen model/search/media integration used local stubs without paid API calls; no fixed latency or bill-savings guarantee is inferred.
 - Upgrade synthetic fixtures and one frozen v1.3.6 import are not a full lifecycle test of every historic installation; back up user data before covering an installation.
 - macOS binary minimum deployment target is 11.0; this release was not run on macOS 11 hardware. Long-term companion quality remains an observation task.
+
+## 2026-10-28：v3.0.2 发布准备
+
+本次整合首页/设置重排、桌面伙伴关闭、历史日期和微信角色语音。源码、冻结后端、原生窗口、安装包与上传分别记录于[新版发布记录](../release-v3.0.2.json)，未执行项不沿用 v3.0.0 数字。v3.0.1 仅本地构建，不新增或修改其公开附件。
+
+语音回归使用临时配置、模拟 Fish/微信服务与合成 PCM 夹具：可验证配置脱敏、显式引擎、WAV 校验、后台调度、冷却、退订、取消、上传加密和投递凭据复用。尚无真实 Fish Key 的付费合成、真实微信账号收件或手机端播放结果；文件附件不写成已验证的原生语音气泡。

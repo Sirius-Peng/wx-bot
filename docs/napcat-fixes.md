@@ -36,3 +36,7 @@
 - [NapCat Docker 持久化配置](https://github.com/NapNeko/NapCat-Docker)
 - [DaoCloud 大陆镜像](https://github.com/DaoCloud/public-image-mirror)
 - [清华 PyPI 使用说明](https://mirrors.tuna.tsinghua.edu.cn/help/pypi/)
+
+## 当前设置卡片
+
+新增微信角色语音后，当前共有十个独立设置卡片（不含通道），语音单独保存，不与模型或人格草稿混存。v2.1.5 的九卡历史说明保持不变。

@@ -13,6 +13,8 @@ import tempfile
 import time
 import uuid
 
+from .reality import message_timing
+
 log = logging.getLogger(__name__)
 
 
@@ -244,8 +246,13 @@ class MemoryLearningQueue:
             'chat_id':msg.chat_id, 'chat_type':msg.chat_type, 'platform':msg.platform, 'turns':[],
             'due_at':now + self.IDLE_SECONDS, 'retry_at':0.0, 'failures':0})
         event = hashlib.sha256('|'.join(event_ids).encode()).hexdigest()
+        # Date annotations are separate from the evidence clock and verbatim
+        # source text. They never change consolidation, confidence or retention.
+        timing=message_timing(msg,now)
         job['turns'].append({'id':event, 'source_ids':event_ids, 'user':msg.render(), 'assistant':'',
-                             'observed_at':observed_at, 'episode_id':episode['id']})
+                             'observed_at':observed_at, 'episode_id':episode['id'],
+                             **{field:timing[field] for field in ('user_at','user_end_at','received_at',
+                                 'user_time_source','source_times')}})
         self.seen.extend(event_ids)
         self.seen = self.seen[-5000:]
         # Every meaningful turn restarts the idle window; neither a first message

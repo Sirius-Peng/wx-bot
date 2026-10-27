@@ -59,7 +59,11 @@ class SessionReview(unittest.IsolatedAsyncioTestCase):
         context.capture_request(message, actual, {'prompt_tokens':100})
         await context.append(message, '根据正文概括。')
         persisted = await store.get_session(message.ctx_key)
-        self.assertEqual(persisted['messages'][:-1], actual)
+        self.assertEqual(persisted['messages'][:len(actual)], actual)
+        self.assertEqual(persisted['messages'][len(actual)],{'role':'assistant','content':'根据正文概括。'})
+        self.assertEqual(len(persisted['messages']),len(actual)+2)
+        self.assertEqual(persisted['messages'][-1]['role'],'system')
+        self.assertIn('投递时间',persisted['messages'][-1]['content'])
         self.assertEqual(persisted['prompt_tokens'], 100)
 
     async def test_post_forget_delivery_completion_cannot_reintroduce_paraphrased_reply(self):

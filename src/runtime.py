@@ -231,6 +231,8 @@ class MessageLog:
 #  运行时
 # ═══════════════════════════════════════════════════════════════════
 
+from .core.voice import VoiceReplies
+
 class BotRuntime:
     """机器人运行时 —— 微信（官方 iLink）与 QQ（OneBot）可同时运行。"""
 
@@ -246,6 +248,7 @@ class BotRuntime:
         self._proactive_sending = ContextVar('proactive_sending', default=False)
 
         self.cfg: AppConfig = store.load()
+        self.voice=VoiceReplies(self.data_dir/'voice-replies.json',lambda:self.cfg.voice)
         original_persona=(self.cfg.bot.name,self.cfg.bot.persona)
         self.persona_spaces=PersonaSpaces(self.data_dir,self.cfg.bot)
         if original_persona!=(self.cfg.bot.name,self.cfg.bot.persona):store.save(self.cfg)
@@ -536,6 +539,7 @@ class BotRuntime:
             return await self._stop()
 
     async def _stop(self) -> dict:
+        await self.voice.close()
         if self._late_task:
             self._late_task.cancel()
             await asyncio.gather(self._late_task,return_exceptions=True)
@@ -586,6 +590,8 @@ class BotRuntime:
 
     def apply_config(self, cfg: AppConfig) -> bool:
         """行为/模型设置热更新；接入通道设置变更明确要求重启。"""
+        if asdict(cfg.voice)!=asdict(self.cfg.voice) or (cfg.bot.persona_profile,cfg.bot.persona_relationship,cfg.bot.persona)!=(self.cfg.bot.persona_profile,self.cfg.bot.persona_relationship,self.cfg.bot.persona):
+            self.voice.cancel_pending()
         previous_space=self.persona_spaces.active_key
         restore=(cfg.bot.name,cfg.bot.persona)==(self.cfg.bot.name,self.cfg.bot.persona)
         original_persona=(cfg.bot.name,cfg.bot.persona)
@@ -673,6 +679,7 @@ class BotRuntime:
                 admission.fallback=None
                 admission.chat_mode='fast'
         if self.memory is not None:
+            self.memory.context_timezone = cfg.llm.context_timezone
             self.memory.enabled = bool(cfg.bot.memory_enabled)
             self.memory.inject = bool(cfg.bot.memory_inject)
             self.memory.extract_interval = max(1, int(cfg.bot.memory_extract_interval or 3))
@@ -697,6 +704,7 @@ class BotRuntime:
             "stats": self.log.stats(),
             "bot": {"name": self.cfg.bot.name, "persona": self.cfg.bot.persona},
             "conversation": self.conversations.status(),
+            "voice":self.voice.status(),
             "chat_mode": self.cfg.bot.chat_mode,
             "desktop_running": self.desktop_orch is not None and self.cfg.companion.enabled,
             "decision_backend": "cloud",
@@ -762,6 +770,7 @@ class BotRuntime:
     def _configure_context_session(ctx, cfg: AppConfig, provider=None, *, gateway=None) -> None:
         """Bind provider-specific session policy without persisting credentials."""
         l=cfg.llm
+        if getattr(ctx,'compactor',None) is not None:ctx.compactor.context_timezone=l.context_timezone
         provider=provider or ProviderCfg('primary',l.primary_base,l.primary_key,l.primary_model)
         vision=BotRuntime._vision_provider(cfg)
         search=configured_search(l)
@@ -893,6 +902,7 @@ class BotRuntime:
     def _build_orchestrator(self, adapter: BaseAdapter,
                             platform: str = "") -> Orchestrator:
         cfg = self.cfg
+        self.voice.start()
         adapter.active_space=lambda:self.persona_spaces.active_key
         adapter.legacy_space=self.persona_spaces.legacy_key
         # Ambiguous complete turns alone use this provider; clear requests stay local.
@@ -958,6 +968,7 @@ class BotRuntime:
         adapter.prefetch_media=lambda msg:orch.images.prefetch_message(msg,adapter)
         if hasattr(adapter, 'on_activity'):
             adapter.on_activity(self._proactive_note_in)
+        orch.on_voice_reply=lambda msg,text:self._voice_reply(orch,msg,text)
         self._wire_logging(orch, adapter, platform)
         return orch
 
@@ -1046,6 +1057,7 @@ class BotRuntime:
     # ── 跨渠道主动联系：只有一个规划器 ────────────────────────
 
     def _proactive_note_in(self, msg):
+        self.voice.note_in(msg)
         self.conversations.ingest(msg)
         learner=getattr(getattr(self,'memory',None),'learner',None)
         if learner is not None and hasattr(learner,'yield_to_foreground'):
@@ -1054,6 +1066,13 @@ class BotRuntime:
             self.proactive.note_in(msg)
         except Exception as exc:
             log.warning('主动联系活动记录暂停 error_type=%s', type(exc).__name__)
+
+    def _voice_reply(self,orch,msg,text):
+        space=orch.persona_space
+        def current():
+            if self.persona_spaces.active_key!=space:raise ConversationChanged('Voice persona changed')
+            orch._check_current(msg)
+        return self.voice.schedule(msg,text,orch.adapter,sender=orch.sender,check_current=current)
 
     def _proactive_channel(self, rows, now):
         if not self.running:
@@ -1146,8 +1165,9 @@ class BotRuntime:
             self._proactive_sending.reset(marker)
         # This is an assistant-only turn, not a fabricated human message.
         key = f"ctx:{row['platform']}:private:{row['chat_id']}"
+        sent_at=time.time()
         await original_store.push(key, {'user': '', 'assistant': text, 'turn_id': 'proactive:' + attempt_id,
-                                    'ts': time.time(), 'proactive': True})
+                                    'ts': sent_at, 'assistant_at':sent_at, 'proactive': True})
 
     # Optional continuations are a distinct job kind, not gated by random contact.
     def _start_late_replies(self):
@@ -1265,8 +1285,9 @@ class BotRuntime:
                             attempt['status']='accepted'
                             self.proactive.note_out(msg.platform,msg.chat_id,text,persona_space=original_space)
                             self.conversations.finish(tid)
+                            sent_at=time.time()
                             await original_store.push(msg.ctx_key,{'user':'','assistant':text,'turn_id':'late:'+attempt['id'],
-                                'ts':time.time(),'source_ids':turn['source_ids'],'late':True})
+                                'ts':sent_at,'assistant_at':sent_at,'source_ids':turn['source_ids'],'late':True})
                         except BaseException:
                             attempt['status']='uncertain'
                             self.conversations.finish(tid,'uncertain','补回提交状态待核查，不重试或换端发送')
@@ -1611,10 +1632,12 @@ class BotRuntime:
         self._observe_gateway(self.memory.llm)
         self.memory.enabled = bool(self.cfg.bot.memory_enabled)
         self.memory.inject = bool(self.cfg.bot.memory_inject)
+        self.memory.context_timezone = self.cfg.llm.context_timezone
         self.memory.extract_interval = max(1, int(self.cfg.bot.memory_extract_interval or 3))
         return self.memory
 
     def _on_memory_forget(self,marker):
+        if hasattr(self,'voice'):self.voice.cancel_pending()
         memory=self.memory
         if memory is None:return
         self._purge_suppressed_spaces(marker.get('accounts',[]))

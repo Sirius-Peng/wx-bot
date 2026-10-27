@@ -8,6 +8,8 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 let STATE = {
   config: null,
   page: 'overview',
+  settingsGroup: 'models',
+  overviewError: '',
   msgFilter: '',
   qrTimer: null,
   pollTimer: null,
@@ -69,13 +71,15 @@ const PAGE_META = {
   memory:   ['人格与记忆', '对用户的了解：经历慢慢沉淀，人格始终优先'],
   messages: ['消息记录', '查看收发消息与触发判定结果'],
   statistics: ['对话统计', '以气泡图和排行查看高频词与常聊话题'],
-  settings: ['设置', '配置大模型与机器人性格'],
+  settings: ['设置', '模型、对话与本地数据，分区独立保存'],
 };
 
 function switchPage(name) {
   if (name==='memory-graph'||name==='statistics') name='memory';
   if (!PAGE_META[name]) name = 'overview';
+  const pageChanged = STATE.page !== name;
   STATE.page = name;
+  if (pageChanged) $('.content').scrollTop = 0;
   $('#btn-start').hidden = !!STATE.status?.running || name === 'guide';
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === name));
   $$('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
@@ -94,6 +98,47 @@ function switchPage(name) {
   // 连接页需要持续刷新 QQ 网关状态
   if (name === 'connect') startConnectPolling();
   else stopConnectPolling();
+}
+
+/* Settings navigation only changes visibility; saved state and drafts stay put. */
+function setSettingsGroup(name, { focus = false } = {}) {
+  const tabs = $$('[data-settings-tab]');
+  if (!tabs.some(tab => tab.dataset.settingsTab === name)) name = 'models';
+  const changed = STATE.settingsGroup !== name;
+  STATE.settingsGroup = name;
+  for (const tab of tabs) {
+    const selected = tab.dataset.settingsTab === name;
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) tab.focus({ preventScroll: true });
+  }
+  for (const panel of $$('[data-settings-panel]')) panel.hidden = panel.dataset.settingsPanel !== name;
+  if (changed && STATE.page === 'settings') $('.content').scrollTop = 0;
+}
+
+function bindSettingsNavigation() {
+  const tabs = $$('[data-settings-tab]');
+  for (const [index, tab] of tabs.entries()) {
+    tab.addEventListener('click', () => setSettingsGroup(tab.dataset.settingsTab));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index + tabs.length - 1) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      setSettingsGroup(tabs[next].dataset.settingsTab, { focus: true });
+    });
+  }
+  const compact = window.matchMedia?.('(max-width: 1100px)');
+  if (compact) {
+    const orient = () => $('[role="tablist"][aria-label="设置分类"]').setAttribute('aria-orientation', compact.matches ? 'horizontal' : 'vertical');
+    orient();
+    compact.addEventListener('change', orient);
+  }
+  setSettingsGroup(STATE.settingsGroup || 'models');
 }
 
 // ⚠️ 必须先声明：删掉「Docker 面板」那段时把 let 声明一起删了，
@@ -154,24 +199,40 @@ async function refreshStatus() {
     : '先听完整段表达，再自然接话';
   $('#hero-desc').textContent = running
     ? `正在接收消息：${rule}`
-    : (s.last_error || '完成连接后点击「启动机器人」即可开始工作');
+    : (s.last_error ? '启动未完成，请查看下方运行详情。' : '完成连接后点击「启动机器人」即可开始工作');
+  const diagnostics = [];
   if (running && s.wechat_delivery) {
     const d = s.wechat_delivery;
-    const label = { api_accepted: '接口已接受', retry_pending: '发送网络异常，等待重试', generation_retry_pending: '模型网络异常，保留消息待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status;
-    if(d.typing?.last_status==='on')$('#hero-desc').textContent += '；微信正在输入';
-    $('#hero-desc').textContent += `；微信排队 ${d.pending_inbound}，待重试 ${d.pending_replies}，${label}（提交 ${d.last_send_ms}ms）`;
+    const label = { api_accepted: '接口已接受', retry_pending: '发送网络异常，等待重试', generation_retry_pending: '模型网络异常，保留消息待重试', missing_context: '缺少会话令牌', idle: '等待消息' }[d.last_status] || d.last_status || '等待消息';
+    if (d.typing?.last_status === 'on') diagnostics.push('微信正在输入');
+    const elapsed = Number.isFinite(d.last_send_ms) ? `${d.last_send_ms}ms` : '未知';
+    diagnostics.push(`微信排队 ${d.pending_inbound ?? 0}，待重试 ${d.pending_replies ?? 0}，${label}（提交耗时 ${elapsed}）`);
   }
-  if (running && s.conversation) $('#hero-desc').textContent += '；' + conversationStatusText(s.conversation);
-  if (running && s.last_error) $('#hero-desc').textContent += `；${s.last_error}`;
-
+  if (running && s.conversation) diagnostics.push(conversationStatusText(s.conversation));
+  if (s.last_error) diagnostics.push(s.last_error);
+  const details = $('#hero-runtime-details');
+  details.hidden = diagnostics.length === 0;
+  details.classList.toggle('has-error', !!s.last_error);
+  $('#hero-diagnostic-summary').textContent = s.last_error ? '运行详情 · 需要留意' : '投递与会话状态';
+  const diagnosticSignature = JSON.stringify(diagnostics);
+  if (STATE.overviewDiagnostics !== diagnosticSignature) {
+    $('#hero-diagnostics').replaceChildren(...diagnostics.map(text => {
+      const item = document.createElement('li'); item.textContent = text; return item;
+    }));
+    STATE.overviewDiagnostics = diagnosticSignature;
+  }
+  if (s.last_error && STATE.overviewError !== s.last_error) details.open = true;
+  STATE.overviewError = s.last_error || '';
 
   const platforms = s.platforms || [];
-  const platNames = platforms.map(p => p === 'wechat' ? '微信' : 'QQ').join(' · ');
+  const platformNames = { wechat: '微信', qq: 'QQ', desktop: '桌面伙伴' };
+  const platNames = platforms.map(p => platformNames[p] || p).join(' · ');
   $('#hero-platform').textContent = platNames || '—';
 
   const caps = [];
   if (s.wechat_running) caps.push('微信私聊');
   if (s.qq_running) caps.push('QQ 私聊 + 群聊');
+  if (s.desktop_running) caps.push('桌面文字会话');
   $('#hero-groupcap').textContent = running ? (caps.join(' · ') || '—') : '—';
 
   $('#hero-uptime').textContent = fmtUptime(s.uptime);
@@ -402,6 +463,7 @@ const SECTION_FIELDS = {
   judge: ['llm', ['judge_base','judge_model','judge_key']],
   vision: ['llm', ['vision_base','vision_model','vision_key']],
   search: ['llm', ['search_enabled','search_backend','search_key','search_model','context_timezone']],
+  voice: ['voice', ['enabled','provider','base_url','api_key','model_id','fish_model','reference_audio','reference_text','prompt_language','text_language','reply_rate','cooldown_seconds','max_chars','timeout_seconds']],
   persona: ['bot', ['name','persona','persona_profile','persona_relationship']],
   proactive: ['bot', ['proactive_enabled','proactive_min_hours','proactive_max_hours','proactive_daily_limit','proactive_quiet_start','proactive_quiet_end']],
   reply: ['bot', ['chat_mode','reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout']],
@@ -411,6 +473,11 @@ const SECTION_FIELDS = {
 function sectionStatus(section, text, dirty = false) {
   const el = $(`[data-save-status="${section}"]`);
   if (el) { el.textContent = text; el.classList.toggle('dirty', dirty); }
+  const panel = el?.closest('[data-settings-panel]');
+  if (panel) {
+    const indicator = $(`[data-settings-tab="${panel.dataset.settingsPanel}"] .settings-dirty`);
+    if (indicator) indicator.hidden = !panel.querySelector('.save-state.dirty');
+  }
 }
 function markSectionDirty(section) { DIRTY_SECTIONS.add(section); sectionStatus(section, '有修改，尚未保存', true); }
 function captureDrafts() {
@@ -462,6 +529,25 @@ async function loadConfig() {
   $('#search-model').value = c.llm.search_model || 'deepseek-flash';
   $('#context-timezone').value = c.llm.context_timezone || 'Asia/Shanghai';
 
+  // 微信语音单独保存，不借用聊天模型 Key 或人格文件。
+  const voice = c.voice || {};
+  $('#voice-enabled').checked = voice.enabled === true;
+  $('#voice-provider').value = voice.provider ?? 'fish';
+  $('#voice-base-url').value = voice.base_url ?? 'https://api.fish.audio';
+  $('#voice-api-key').value = '';
+  $('#voice-key-status').textContent = voice.api_key ? '已保存 Key（留空保持不变）' : '尚未保存 Key';
+  $('#voice-clear-key').checked = false;
+  $('#voice-model-id').value = voice.model_id ?? '5b432f747d00419aba7cb12fa50e4af0';
+  $('#voice-fish-model').value = voice.fish_model ?? 's2.1-pro';
+  $('#voice-reference-audio').value = voice.reference_audio || '';
+  $('#voice-reference-text').value = voice.reference_text || '';
+  $('#voice-prompt-language').value = voice.prompt_language || 'zh';
+  $('#voice-text-language').value = voice.text_language || 'zh';
+  $('#voice-reply-percent').value = (voice.reply_rate ?? .25) * 100;
+  $('#voice-cooldown-seconds').value = voice.cooldown_seconds ?? 300;
+  $('#voice-max-chars').value = voice.max_chars ?? 160;
+  $('#voice-timeout-seconds').value = voice.timeout_seconds ?? 20;
+
   // 机器人行为
   $('#chat-mode').value = c.bot.chat_mode || 'fast';
   $('#companion-enabled').checked=!!c.companion?.enabled;
@@ -497,6 +583,7 @@ async function loadConfig() {
 
   for (const draft of drafts) { const el = $('#'+draft.id); if(el){el.value=draft.value;el.checked=draft.checked;} }
   syncSearchBackend();
+  syncVoiceProvider();
   CHANNELS.wechat = $('#adapter-type input[value="wechat"]').checked;
   CHANNELS.qq = $('#adapter-type input[value="qq"]').checked;
   renderPlatformCards();
@@ -506,6 +593,38 @@ async function loadConfig() {
 
 function syncSearchBackend() {
   $('#search-model').disabled = $('#search-backend').value !== 'native';
+}
+
+function syncVoiceProvider(changed = false) {
+  const fish = $('#voice-provider').value === 'fish';
+  for (const id of ['voice-fish-key-field','voice-fish-clear-field','voice-fish-model-field','voice-fish-engine-field']) $('#'+id).hidden = !fish;
+  for (const id of ['voice-local-audio-field','voice-local-text-field','voice-local-language-field']) $('#'+id).hidden = fish;
+  if (changed) {
+    const base = $('#voice-base-url');
+    if (fish && (!base.value.trim() || base.value.trim() === 'http://127.0.0.1:9880')) base.value = 'https://api.fish.audio';
+    else if (!fish && base.value.trim() === 'https://api.fish.audio') base.value = 'http://127.0.0.1:9880';
+  }
+}
+
+let voicePreviewUrl = '';
+async function previewVoice() {
+  const button=$('#btn-voice-preview'), status=$('#voice-preview-status'), audio=$('#voice-preview-audio');
+  const text=$('#voice-preview-text').value.trim();
+  if (!text || text.length>160) { status.textContent='请输入1至160字的试听文本'; return; }
+  if (DIRTY_SECTIONS.has('voice')) { status.textContent='请先保存微信语音设置，再生成试听'; return; }
+  button.disabled=true;status.textContent='正在合成试听…';
+  try {
+    const response=await fetch('/api/voice/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    if (response.status===401) throw new Error('管理会话已过期，请刷新页面并重新登录');
+    if (!response.ok) { let error;try { error=await response.json(); } catch (_) {} throw new Error(typeof error?.detail==='string'?error.detail:`HTTP ${response.status}`); }
+    if (!(response.headers.get('Content-Type') || '').toLowerCase().startsWith('audio/')) throw new Error('语音服务没有返回可播放音频');
+    const blob=await response.blob();
+    if (!blob.size || blob.size>16*1024*1024) throw new Error('试听音频大小异常');
+    if (voicePreviewUrl) URL.revokeObjectURL(voicePreviewUrl);
+    voicePreviewUrl=URL.createObjectURL(blob);audio.src=voicePreviewUrl;audio.hidden=false;
+    status.textContent='试听已生成；仅在本页播放，不发送微信。';
+  } catch (error) { status.textContent='试听未完成：'+error.message; }
+  finally { button.disabled=false; }
 }
 
 /** 平台卡片：显式 .is-selected 类驱动选中外观，禁用态置灰 */
@@ -623,6 +742,22 @@ function collectConfig() {
   c.llm.search_model = $('#search-model').value.trim();
   c.llm.context_timezone = $('#context-timezone').value.trim();
 
+  c.voice = c.voice || {};
+  c.voice.enabled = $('#voice-enabled').checked;
+  c.voice.provider = $('#voice-provider').value;
+  c.voice.base_url = $('#voice-base-url').value.trim();
+  c.voice.api_key = $('#voice-api-key').value.trim() || STATE.config.voice?.api_key || '';
+  c.voice.model_id = $('#voice-model-id').value.trim();
+  c.voice.fish_model = $('#voice-fish-model').value;
+  c.voice.reference_audio = $('#voice-reference-audio').value.trim();
+  c.voice.reference_text = $('#voice-reference-text').value.trim();
+  c.voice.prompt_language = $('#voice-prompt-language').value;
+  c.voice.text_language = $('#voice-text-language').value;
+  c.voice.reply_rate = Number($('#voice-reply-percent').value) / 100;
+  c.voice.cooldown_seconds = Number($('#voice-cooldown-seconds').value);
+  c.voice.max_chars = Number($('#voice-max-chars').value);
+  c.voice.timeout_seconds = Number($('#voice-timeout-seconds').value);
+
   // 机器人行为
   c.bot.name = $('#bot-name').value.trim() || '小助手';
   c.bot.persona = $('#bot-persona').value.trim();
@@ -686,7 +821,11 @@ async function saveSection(section, quiet = false) {
     const beforeValues = Object.fromEntries(fields.map(key => [key, all[root][key]]));
     // Send deltas only: setup/login may update tokens/account while a form is open.
     // Unchanged stale fields must not overwrite those fresh backend values.
-    const values = Object.fromEntries(fields.filter(key => JSON.stringify(all[root][key]) !== JSON.stringify(STATE.config[root][key])).map(key => [key, all[root][key]]));
+    const values = Object.fromEntries(fields.filter(key => JSON.stringify(all[root][key]) !== JSON.stringify(STATE.config[root]?.[key])).map(key => [key, all[root][key]]));
+    if (section === 'voice') {
+      if (!$('#voice-api-key').value.trim()) delete values.api_key;
+      if ($('#voice-clear-key').checked) { delete values.api_key; values.clear_api_key = true; beforeValues.api_key = ''; }
+    }
     const saved = await api(`/api/config/section/${section}`, {method:'PATCH',body:JSON.stringify(values)});
     STATE.config = saved.config;
     const latest = collectConfig();
@@ -1356,6 +1495,7 @@ async function saveMemory() {
 /* ══════════ 事件绑定 ══════════ */
 
 function bind() {
+  bindSettingsNavigation();
   bindCompanion();
   bindStatistics();
   $('#btn-storage-backup').addEventListener('click',backupStorage);
@@ -1490,9 +1630,11 @@ function bind() {
   // 设置
   $$('[data-save-section]').forEach(btn=>btn.addEventListener('click',()=>saveSection(btn.dataset.saveSection)));
   $$('[data-settings-section]').forEach(card=>{
-    for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.id && e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
+    for(const event of ['input','change'])card.addEventListener(event,e=>{if(e.target.id && e.target.id!=='voice-preview-text' && e.target.matches('input,select,textarea'))markSectionDirty(card.dataset.settingsSection);});
   });
   $('#search-backend').addEventListener('change', syncSearchBackend);
+  $('#voice-provider').addEventListener('change', () => syncVoiceProvider(true));
+  $('#btn-voice-preview').addEventListener('click', previewVoice);
   $('#btn-phrolova-preset').addEventListener('click', async () => {
     try {
       const data = await api('/api/persona/profiles');
@@ -1662,14 +1804,25 @@ init().catch(e => {
 });
 
 /* v3 optional local surface; all settings remain independently persisted. */
+let companionPopup=null;
 function bindCompanion(){
   $('#companion-enabled').addEventListener('change',async event=>{
-    try{const r=await api('/api/config/section/companion',{method:'PATCH',body:JSON.stringify({enabled:event.target.checked})});STATE.config=r.config;toast('桌面伙伴设置已保存','ok');}
-    catch(error){event.target.checked=!event.target.checked;toast(error.message,'err');}
+    const enabled=event.target.checked;event.target.disabled=true;
+    try{
+      const r=await api('/api/config/section/companion',{method:'PATCH',body:JSON.stringify({enabled})});STATE.config=r.config;
+    }catch(error){event.target.checked=!enabled;event.target.disabled=false;toast(error.message,'err');return;}
+    if(!enabled){
+      try{
+        const bridge=window.wxbotDesktop?.companion;
+        if(bridge?.close)await bridge.close();else if(bridge?.hide)await bridge.hide();
+        if(companionPopup&&!companionPopup.closed)companionPopup.close();
+      }catch(_){toast('设置已保存，请从托盘关闭伙伴窗口','info');event.target.disabled=false;return;}
+    }
+    event.target.disabled=false;toast('桌面伙伴设置已保存','ok');
   });
   $('#btn-companion-open').addEventListener('click',()=>{
     if(!$('#companion-enabled').checked){toast('请先勾选启用桌面会话','info');return;}
-    if(window.wxbotDesktop?.companion)window.wxbotDesktop.companion.show();else window.open('/companion','wxbot-companion','width=380,height=620');
+    if(window.wxbotDesktop?.companion)window.wxbotDesktop.companion.show();else companionPopup=window.open('/companion','wxbot-companion','width=380,height=620');
   });
   $('#btn-open-history').addEventListener('click',()=>switchPage('messages'));
   $('#btn-open-guide').addEventListener('click',()=>switchPage('guide'));

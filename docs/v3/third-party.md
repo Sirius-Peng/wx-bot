@@ -1,6 +1,6 @@
 # v3 第三方来源与发行组件声明
 
-更新：2026-10-25。发行组件说明见根目录 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)。本页保留研究与渲染资源的详细来源；实际运行依赖及版本、许可证原文、SHA256以每个平台构建生成的 `third-party/manifest.json` 及其 `third-party/licenses/` 原文为准，**不表示本页更新时所有平台安装包已发布**。项目作者与仓库仍为[Sirius-Peng / wx-bot](https://github.com/Sirius-Peng/wx-bot)；第三方组件不改列为本项目作者。
+更新：2026-10-28。发行组件说明见根目录 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)。本页保留研究与渲染资源的详细来源；实际运行依赖及版本、许可证原文、SHA256以每个平台构建生成的 `third-party/manifest.json` 及其 `third-party/licenses/` 原文为准，**不表示本页更新时所有平台安装包已发布**。项目作者与仓库仍为[Sirius-Peng / wx-bot](https://github.com/Sirius-Peng/wx-bot)；第三方组件不改列为本项目作者。
 
 ## 已退役模型与训练研究（不进入应用安装包）
 
@@ -30,6 +30,12 @@
 这些是独立第三方条款，不因desktop/package.json中的MIT字段而改为MIT。最终安装包在 `web/live2d/` 保留以上原说明，并在资源根部保留项目 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，实际Python运行依赖原文和清单置于 `third-party/`。具体发行方式及模型使用仍遵循对应上游条款，本说明不替代上游条款，也不宣称整个发行包均为MIT。
 
 默认形象为本项目页面内的静态标记，不分发SDK示例Haru或其他角色模型。开发测试可从已下载的官方SDK中导入示例，测试使用不表示该示例自动成为产品默认资源。用户自行导入的模型存于个人数据目录，模型本身的使用、署名和再分发条件仍来自模型提供者。
+
+## 微信角色语音与外部服务
+
+v3.0.2 可选使用用户配置的 Fish Audio 服务及公开的弗洛洛社区音色；服务 Key、额度与模型引擎独立于聊天 LLM。此音色由社区提供，不是本项目新训练或随包分发的权重，也不表示音色提供者或游戏方为本项目背书。默认音色标识、官方接口及备选语料来源见[语音来源核对](voice-sources.md)。
+
+应用只提供 HTTP 接入、配置和音频附件投递，不在安装包中复制游戏音频、角色参考 WAV、GPT-SoVITS 角色权重或训练框架。可选本地 GPT-SoVITS 连接的是用户另行运行的服务，其代码许可与角色素材条件分别适用，不将第三方素材归为本项目 MIT 资源。真实合成音质、付费调用和微信客户端播放不因打包成功而记为已验证。
 
 ## 机制参考，不引入其托管服务
 

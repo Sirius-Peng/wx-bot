@@ -24,6 +24,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .reality import local_datetime, valid_timezone, valid_timestamp, turn_time_context
+
 log = logging.getLogger(__name__)
 
 # 记忆类别
@@ -49,6 +51,21 @@ MAX_ITEMS = 3000        # 总量上限，超出后淘汰低分项
 RETENTION = {'low': (1.0, 3), 'normal': (2.0, 7), 'important': (7.0, 30)}
 HISTORICAL_QUERY = re.compile(r'以前|曾经|过去|当时|之前|原来|去年|上次|还记得|记不记得')
 SMALL_TALK = re.compile(r'(?:你好|您好|嗨|早安|午安|晚安|早上好|下午好|晚上好|好的?|嗯+|哦+|收到|谢谢|不客气|再见|拜拜)[。！!？?~～\s]*')
+
+
+def _history_source_label(turn, timezone_name):
+    """Display only an original evidence time, never the later reflection clock."""
+    zone=valid_timezone(timezone_name)
+    if any(field in turn for field in ('user_time_source','source_times','received_at')):
+        return turn_time_context({**turn,'assistant':''},zone)
+    at=turn.get('observed_at')
+    if not isinstance(at,bool) and isinstance(at,(int,float)):
+        try:
+            if math.isfinite(at) and at>0:
+                return '[原发言记录时间：'+local_datetime(zone,at).isoformat(timespec='seconds')+'；时区：'+zone+']'
+        except (ValueError,OverflowError,OSError):
+            pass
+    return '[原发言时间未知；不得按整理日期补齐]'
 
 
 @dataclass
@@ -151,6 +168,7 @@ EXTRACT_PROMPT = """从下面这段对话中，抽取值得**长期记住**的�
 category 必须是 fact、preference、relation、event、style 之一。
 必须提供 evidence（逐字摘取一条用户原话，不许使用助手表达或摘要）；临时情绪不要概括成性格。还可以提供 fact_key（具体事实槽，例如 occupation、city、preferred_name、preference:coffee；不同偏好不要共享笼统的key）、expires_at（仅用户明确给出截止时间的事件，Unix秒；不能猜测）。
 同时输出 importance_tier（low/normal/important）和 importance_reason（用 evidence 中的用户原话作为分档依据）：low 是低价值、短期有用的零散细节，normal 是通常有用的偏好或信息，important 是明确的重要约定、重大生活变化、长期重要边界或关键关系。不得只因情绪强烈、重复出现或助手重视就判重要。重要性不等于可信度，也不能把一次陈述变成多次确认；缺少依据默认normal。低/普通/重要分别在3/7/30天无新用户证据后淡化。临时状态最长24小时，未来约定不是临时情绪。
+时间按每条原发言记录的绝对日期与时区理解；没有另设参照的直述“今天、昨天、明天、刚才”等相对词默认以原发言时间为锚，不以后台整理时间为锚；引述、转述或文中另设日期优先，不把引用硬套发送日。能确定时在 content 中写明绝对日期；时间未知或有歧义时保留未知，不编造日期或把旧事写成现在；evidence 始终逐字保留原文，不加日期标记。
 更新职业/城市/称呼时使用同一fact_key；不把相似关键词的不同事实合成同一条。不把助手说过的话当成用户证据。
 
 没有值得记的就输出 []
@@ -508,7 +526,8 @@ class PersonaMemory:
         identity = self.identity_key(platform, user_id)
         revision = self._revisions.get(identity, 0)
         observed_at = max((t.get('observed_at', 0) for t in history[-6:] if isinstance(t.get('observed_at'), (int, float))), default=0) or time.time()
-        convo = "当前时间：" + time.strftime("%Y-%m-%d %H:%M %Z") + "\n" + "\n".join(f"用户({user_name}): {t.get('user', '')}" for t in history[-6:])
+        zone=getattr(self,'context_timezone','Asia/Shanghai')
+        convo = "\n".join(_history_source_label(t,zone)+f"\n用户({user_name}): {t.get('user', '')}" for t in history[-6:])
         raw = await self.llm.complete(EXTRACT_PROMPT.format(conversation=convo), max_tokens=1200)
         if generation != self._generation or revision != self._revisions.get(identity, 0):return []
         extracted = self._parse_json_array(raw, strict=True)
@@ -792,10 +811,11 @@ class PersonaMemory:
             tag = CATEGORIES.get(it.category, "")
             # 低置信度的标注出来，让模型知道这条不一定准
             mark = "（不确定）" if it.confidence < 0.6 else ""
-            stamp=time.strftime('%Y-%m-%d',time.localtime(it.valid_from or it.created_at))
+            recorded_at=valid_timestamp(it.valid_from) or valid_timestamp(it.created_at)
+            stamp=local_datetime(getattr(self,'context_timezone','Asia/Shanghai'),recorded_at).date().isoformat() if recorded_at is not None else '未知'
             old = ('（历史信息，已被更新）' if it.status != 'active' else
                    '（历史事件，已过期）' if not it.pinned and it.expires_at and it.expires_at <= time.time() else '')
-            line=f"- [{tag}，{stamp}] {it.content}{mark}{old}"
+            line=f"- [{tag}，获知/证据记录日：{stamp}（非事件发生日）] {it.content}{mark}{old}"
             if sum(len(l) for l in lines)+len(line)>400:break
             lines.append(line)
             used.append(it.id)

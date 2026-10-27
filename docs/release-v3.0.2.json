@@ -1,0 +1,39 @@
+{
+  "version": "3.0.2",
+  "tag": "v3.0.2",
+  "status": "preparing",
+  "released_date": null,
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": null,
+  "runtime_commit_note": "Populate from verified v3.0.2 build-source checkpoint before publication; historical v3.0.0 evidence is not reused.",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2",
+  "planned_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "published_platforms": [],
+  "artifacts": [],
+  "validation": {},
+  "limitations": [
+    "Fish paid synthesis, real WeChat account receipt and phone playback have not been exercised; tests use local mocks and synthetic PCM.",
+    "WeChat audio is a WAV file attachment, not a verified native voice-message bubble.",
+    "Per-platform native build and test evidence must be recorded before adding artifacts; historical v3.0.0 test results do not validate this release."
+  ],
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-28",
+  "source_checkpoint": {
+    "runtime_source_checkpoint": null,
+    "stable_app_id": "com.siriuspeng.wxbot",
+    "existing_user_data_paths_preserved": true
+  },
+  "release_changes": [
+    "Optional Fish Audio WeChat character voice with independent key and preview; text-first background WAV attachments, cooldown, opt-out and cancellation.",
+    "Absolute history dates and independent user, receive and assistant-delivery times; unknown legacy dates stay unknown.",
+    "Home and settings layout redesign with independent saves and retained drafts.",
+    "Companion-only close via button, keyboard and tray without stopping the backend."
+  ]
+}

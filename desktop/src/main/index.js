@@ -76,7 +76,10 @@ function buildAppMenu() {
       label: '文件',
       submenu: [
         { label: '打开主界面', accelerator: 'CmdOrCtrl+O', click: () => windowMgr.show() },
-        { label: '隐藏窗口', accelerator: 'CmdOrCtrl+W', click: () => windowMgr.hide() },
+        { label: '关闭当前窗口', accelerator: 'CmdOrCtrl+W', click: () => {
+          if (companionMgr.win?.isFocused()) companionMgr.close();
+          else windowMgr.hide();
+        } },
         { type: 'separator' },
         { label: '打开数据目录', click: () => require('electron').shell.openPath(P.userDataDir()) },
         { label: '打开日志目录', click: () => require('electron').shell.openPath(P.logDir()) },
@@ -150,6 +153,7 @@ app.whenReady().then(async () => {
   trayMgr.create({
     onOpen: () => windowMgr.show(),
     onCompanion: () => companionMgr.show(backend.url),
+    onCloseCompanion: () => companionMgr.close(),
     onRestart: async () => {
       trayMgr.setStatus({ backend: 'starting' });
       const r = await backend.restart();

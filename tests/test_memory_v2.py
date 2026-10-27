@@ -188,7 +188,11 @@ class PersistentContextTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OSError):await self.store.compact('k',[original],'s')
         self.assertEqual(await self.store.get_recent('k'),[original]);self.assertEqual(await self.store.get_summary('k'),'')
     async def test_single_oversized_turn_not_all_discarded(self):
-        turns=self.ctx._fit_budget([{'user':'中'*15000,'assistant':'回'*10000}],WINDOW_BUDGET);self.assertEqual(len(turns),2);self.assertIn('省略',turns[0]['content']);self.assertLess(sum(approx_tokens(t['content']) for t in turns),WINDOW_BUDGET)
+        turns=self.ctx._fit_budget([{'user':'中'*15000,'assistant':'回'*10000}],WINDOW_BUDGET)
+        self.assertEqual([t['role'] for t in turns],['system','user','assistant'])
+        self.assertIn('未知',turns[0]['content'])
+        self.assertTrue(all('省略' in t['content'] for t in turns[1:]))
+        self.assertLess(sum(approx_tokens(t['content']) for t in turns),WINDOW_BUDGET)
     async def test_context_has_current_time_and_last_contact(self):
         m=message();await self.ctx.append(m,'你好');m.msg_id='new-turn';messages=await self.ctx.build(m)
         self.assertTrue(any('[会话时间]' in x['content'] for x in messages));self.assertTrue(any('[上次联系]' in x['content'] for x in messages));self.assertEqual(messages[-1]['role'],'user')

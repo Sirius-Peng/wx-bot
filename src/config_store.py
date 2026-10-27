@@ -133,11 +133,31 @@ class CompanionConfig:
 
 
 @dataclass
+class VoiceConfig:
+    """Optional WeChat TTS; independent from language-model and persona settings."""
+    enabled: bool = False
+    provider: str = "fish"
+    base_url: str = "https://api.fish.audio"
+    api_key: str = ""
+    model_id: str = "5b432f747d00419aba7cb12fa50e4af0"
+    fish_model: str = "s2.1-pro"
+    reference_audio: str = ""
+    reference_text: str = ""
+    prompt_language: str = "zh"
+    text_language: str = "zh"
+    reply_rate: float = .25
+    cooldown_seconds: float = 300
+    max_chars: int = 160
+    timeout_seconds: float = 20
+
+
+@dataclass
 class AppConfig:
     adapter: AdapterConfig = field(default_factory=AdapterConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     bot: BotConfig = field(default_factory=BotConfig)
     companion: CompanionConfig = field(default_factory=CompanionConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
 
 
 class ConfigStore:
@@ -254,6 +274,40 @@ class ConfigStore:
         if not isinstance(c.get('window_bounds'),dict):c['window_bounds']={}
         cfg.companion = CompanionConfig(**{k:v for k,v in c.items() if k in CompanionConfig.__dataclass_fields__})
 
+        v = dict(raw.get('voice') or {}) if isinstance(raw.get('voice'),dict) else {}
+        defaults = VoiceConfig()
+        v['enabled'] = v.get('enabled',False) is True
+        provider=v.get('provider',defaults.provider)
+        if isinstance(provider,str) and provider in ('gpt_sovits','fish'):
+            v['provider']=provider
+        else:
+            # A typo in an explicitly stored service is not consent to switch
+            # to the default billable provider. Keep the invalid choice visible.
+            v['provider']=provider if isinstance(provider,str) and len(provider)<=256 else ''
+            v['enabled']=False
+        for key,limit in [('base_url',2048),('api_key',4096),('model_id',256),('reference_audio',4096),('reference_text',4000)]:
+            value=v.get(key,getattr(defaults,key))
+            v[key]=value.strip() if isinstance(value,str) and len(value)<=limit else getattr(defaults,key)
+        engines={'s1','s2-pro','s2.1-pro','s2.1-pro-free','drama-3'}
+        engine=v.get('fish_model',defaults.fish_model)
+        if isinstance(engine,str) and engine in engines:
+            v['fish_model']=engine
+        else:
+            # Especially do not turn a misspelled free engine into paid Pro.
+            # Missing fields retain defaults, but explicit invalid fields fail closed.
+            v['fish_model']=engine if isinstance(engine,str) and len(engine)<=256 else ''
+            v['enabled']=False
+        languages={'zh','en','ja','ko','yue','auto','all_zh','all_ja','all_ko','all_yue'}
+        for key in ('prompt_language','text_language'):
+            value=v.get(key,'zh');v[key]=value if isinstance(value,str) and value in languages else 'zh'
+        for key,lo,hi in [('reply_rate',0,1),('cooldown_seconds',0,3600),('max_chars',20,500),('timeout_seconds',3,60)]:
+            value=v.get(key,getattr(defaults,key))
+            if (isinstance(value,bool) or not isinstance(value,(int,float)) or not lo<=value<=hi
+                    or not math.isfinite(value) or (key=='max_chars' and not isinstance(value,int))):
+                value=getattr(defaults,key)
+            v[key]=int(value) if key=='max_chars' else float(value)
+        cfg.voice = VoiceConfig(**{k:value for k,value in v.items() if k in VoiceConfig.__dataclass_fields__})
+
         return cfg
 
     # ── 写 ────────────────────────────────────────────────────
@@ -267,7 +321,7 @@ class ConfigStore:
         data = copy.deepcopy(previous) if isinstance(previous,dict) else {}
         for key,value in getattr(cfg,'_unknown',{}).items():
             if key not in AppConfig.__dataclass_fields__:data[key]=copy.deepcopy(value)
-        for section in ('adapter','llm','bot','companion'):
+        for section in ('adapter','llm','bot','companion','voice'):
             values=data.get(section) if isinstance(data.get(section),dict) else {}
             original=getattr(cfg,'_unknown',{}).get(section,{})
             if isinstance(original,dict):values.update(copy.deepcopy(original))
@@ -294,9 +348,11 @@ class ConfigStore:
             "llm": asdict(cfg.llm),
             "bot": asdict(cfg.bot),
             "companion": asdict(cfg.companion),
+            "voice": asdict(cfg.voice),
         }
         for k in ("primary_key", "fallback_key", "judge_key", "vision_key", "search_key"):
             d["llm"][k] = _mask(d["llm"].get(k, ""))
+        d["voice"]["api_key"] = _mask(d["voice"].get("api_key", ""))
         d["adapter"]["onebot_token"] = _mask(d["adapter"].get("onebot_token", ""))
         d["adapter"]["napcat_webui_token"] = _mask(
             d["adapter"].get("napcat_webui_token", "")

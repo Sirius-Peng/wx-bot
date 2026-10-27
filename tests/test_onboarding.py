@@ -154,11 +154,53 @@ class ILinkGuideTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r['status'],'failed');self.assertFalse(r['ok'])
 
 class GuideUIContractTests(unittest.TestCase):
+    @staticmethod
+    def _card_button_ids(html, card_id):
+        """Count only descendants, independently of the surrounding card order."""
+        from html.parser import HTMLParser
+
+        class CardParser(HTMLParser):
+            VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img',
+                         'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+                self.cards = 0
+                self.buttons = []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get('id') == card_id:
+                    self.cards += 1
+                if tag == 'button' and any(a.get('id') == card_id for _, a in self.stack):
+                    self.buttons.append(attrs.get('id'))
+                if tag not in self.VOID_TAGS:
+                    self.stack.append((tag, attrs))
+
+            def handle_endtag(self, tag):
+                for i in range(len(self.stack) - 1, -1, -1):
+                    if self.stack[i][0] == tag:
+                        self.stack = self.stack[:i]
+                        break
+
+        parser = CardParser()
+        parser.feed(html)
+        return parser.cards, parser.buttons
+
     def test_home_qq_has_single_button_and_details_remain(self):
         root=Path(__file__).resolve().parents[1];html=(root/'src/web/index.html').read_text(encoding='utf-8')
-        card=html.split('id="home-qq-card"')[1].split('<div class="stat-grid">')[0];self.assertEqual(card.count('<button'),1)
+        cards, buttons = self._card_button_ids(html, 'home-qq-card')
+        self.assertEqual(cards, 1)
+        self.assertEqual(buttons, ['btn-home-qq'])
         for id in ['btn-home-qq','btn-setup-qq','qq-choice-modal','qq-login-modal','page-guide','guide-model-key','btn-guide-wechat']:self.assertEqual(html.count('id="'+id+'"'),1)
         self.assertLess(html.index('/static/guide.js'),html.index('/static/app.js'))
+    def test_home_qq_button_scope_does_not_depend_on_card_order(self):
+        fixture = '''<section><div class="stat-grid"><button id="before"></button></div>
+          <div id="home-qq-card"><div><input type="text"><span>Gateway</span></div>
+            <div><button id="btn-home-qq"><span>Start</span></button></div></div>
+          <div><button id="after"></button></div></section>'''
+        self.assertEqual(self._card_button_ids(fixture, 'home-qq-card'), (1, ['btn-home-qq']))
     def test_tutorial_uses_official_links_and_correct_model(self):
         root=Path(__file__).resolve().parents[1];html=(root/'src/web/index.html').read_text(encoding='utf-8');self.assertIn('https://platform.deepseek.com/api_keys',html);self.assertIn('deepseek-flash',html);self.assertIn('少量 API 用量',html)
 

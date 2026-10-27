@@ -292,6 +292,7 @@ class Orchestrator:
                     else None)
 
         # 流式生成，完整收集后一次发送，避免一个回复被拆成多个聊天气泡
+        voice_eligible=replay is None and not context_error and not image_error
         try:
             send_options={}
             if isinstance(self.sender,HumanLikeSender) and replay is None:
@@ -327,6 +328,7 @@ class Orchestrator:
             log.exception("完整回复投递失败，将保留草稿重试")
             raise
         except Exception as error:
+            voice_eligible=False
             if is_transient_llm_error(error) and hasattr(self.adapter,'get_reply_draft'):
                 if hasattr(self.adapter,'mark_generation_pending'):self.adapter.mark_generation_pending(error)
                 log.warning('Model unavailable; keep incoming message for retry error_type=%s',type(error).__name__)
@@ -347,6 +349,11 @@ class Orchestrator:
             await self.ctx.append(msg, reply)
         for original in members(msg):await self.store.archive(original, direction="in")
         await self.store.archive_reply(msg, reply)
+        # Only accepted, actual model answers are eligible. TTS runs separately
+        # and cannot hold the next turn or turn an accepted text into a retry.
+        if voice_eligible and hasattr(self,'on_voice_reply'):
+            try:self.on_voice_reply(msg,reply)
+            except Exception:log.warning('Optional voice scheduling skipped; text remains accepted')
 
         # 人格知识库：按间隔抽取记忆（每轮都抽太费 token）
         if self.memory is None or not hasattr(self.memory, "learner"):

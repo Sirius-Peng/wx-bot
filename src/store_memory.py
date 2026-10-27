@@ -10,6 +10,7 @@ from typing import Optional
 
 from .core.types import WxMessage
 from .core.session_media import SessionMedia
+from .core.reality import valid_timestamp
 
 
 class MemoryStore:
@@ -351,6 +352,24 @@ class MemoryStore:
             # with an empty assistant must not erase an already delivered reply.
             if not turn.get('assistant') and existing.get('assistant'):
                 turn['assistant'] = existing['assistant']
+            if 'ts' in existing or 'user_at' in turn:turn['ts']=existing.get('ts',0)
+            if 'user_at' in turn and valid_timestamp(existing.get('user_at')) is None:
+                turn['received_at']=existing.get('received_at')
+                if turn.get('user_time_source') not in ('message','partial'):
+                    turn.update(user_at=None,user_end_at=None,user_time_source='legacy')
+            # Delivery and duplicate callbacks must not move a user's original
+            # time or first receipt to 'now'. A growing batch can add new sources.
+            for field in ('ts','user_at','received_at','user_time_source'):
+                if valid_timestamp(existing.get('user_at')) is not None and field in existing:
+                    turn[field]=existing[field]
+            if valid_timestamp(existing.get('user_end_at')) is not None:
+                turn['user_end_at']=max(existing['user_end_at'],valid_timestamp(turn.get('user_end_at')) or 0)
+            if isinstance(existing.get('source_times'),list) and isinstance(turn.get('source_times'),list):
+                sources={row.get('source_id'):row for row in existing['source_times'] if isinstance(row,dict)}
+                turn['source_times']=[copy.deepcopy(sources.get(row.get('source_id'),row)) for row in turn['source_times']]
+            if existing.get('assistant') and existing.get('assistant')==turn.get('assistant'):
+                # Lack of an old delivery clock is not evidence of a delivery now.
+                turn['assistant_at']=existing.get('assistant_at')
             existing.update(turn)
         else:
             turns.append(turn)

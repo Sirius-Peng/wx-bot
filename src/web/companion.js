@@ -8,6 +8,7 @@ function bubble(id,text,user=false,draft=false){
   byId('conversation').scrollTop=byId('conversation').scrollHeight;return node;
 }
 function receive(event){
+  if(closed)return;
   if(event.type==='space_changed'){
     if(changeSpace(event.persona_space))syncCurrentSpace();
     return;
@@ -34,23 +35,43 @@ function syncCurrentSpace(){
 }
 function connect(){
   if(closed)return;socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/companion`);
-  socket.onopen=()=>{lastSeq=0;ids.clear();for(const [id,node] of bubbles){if(node.classList.contains('draft')){node.remove();bubbles.delete(id);}}byId('state').textContent='在这里';byId('error').textContent='';syncCurrentSpace();for(const value of pending.values()){if(value.persona_space===personaSpace)socket.send(JSON.stringify(value));}};
+  socket.onopen=()=>{if(closed){socket.close();return;}lastSeq=0;ids.clear();for(const [id,node] of bubbles){if(node.classList.contains('draft')){node.remove();bubbles.delete(id);}}byId('state').textContent='在这里';byId('error').textContent='';syncCurrentSpace();for(const value of pending.values()){if(value.persona_space===personaSpace)socket.send(JSON.stringify(value));}};
   socket.onmessage=event=>{try{receive(JSON.parse(event.data));}catch(_){byId('error').textContent='收到无效的会话事件';}};
-  socket.onclose=event=>{byId('state').textContent=event.code===1008?'请在主界面启用伙伴并配置模型':'连接已断开，正在重连…';if(event.code!==1008&&!closed)retryTimer=setTimeout(connect,2000);};
+  socket.onclose=event=>{if(closed)return;byId('state').textContent=event.code===1008?'请在主界面启用伙伴并配置模型':'连接已断开，正在重连…';if(event.code!==1008&&!closed)retryTimer=setTimeout(connect,2000);};
 }
-byId('chat').addEventListener('submit',event=>{event.preventDefault();const text=byId('text').value;if(!text.trim())return;
+byId('chat').addEventListener('submit',event=>{event.preventDefault();if(closed)return;const text=byId('text').value;if(!text.trim())return;
   const client_id=crypto.randomUUID(),message={type:'message',client_id,text,persona_space:personaSpace};pending.set(client_id,message);bubble('user:'+client_id,text,true);byId('text').value='';
   if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));else byId('error').textContent='连接恢复后会发送这条消息';
 });
 byId('text').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();byId('chat').requestSubmit();}});
-byId('hide').onclick=()=>window.wxbotDesktop?.companion.hide();
+function stopSession(){
+  if(closed)return;closed=true;clearTimeout(retryTimer);socket?.close();renderer?.dispose();
+}
+async function closeCompanion(){
+  if(closed)return;
+  const bridge=window.wxbotDesktop?.companion;
+  // An older shell can only hide/reopen the same live renderer. Keep that session usable.
+  if(!bridge?.close&&bridge?.hide){
+    try{await bridge.hide();}catch(_){byId('error').textContent='窗口暂未隐藏，请从托盘关闭伙伴。';}
+    return;
+  }
+  stopSession();
+  try{
+    if(bridge?.close){await bridge.close();return;}
+    window.close();
+  }catch(_){/* Keep the session stopped even if the native bridge is no longer available. */}
+  if(!window.closed){byId('text').disabled=true;byId('state').textContent='会话已关闭';byId('error').textContent='请关闭此浏览器标签页；可从首页重新打开伙伴。';}
+}
+byId('hide').onclick=closeCompanion;
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.isComposing){event.preventDefault();closeCompanion();}});
+if(!window.wxbotDesktop?.companion){byId('top').disabled=true;byId('through').disabled=true;}
 byId('top').onclick=()=>window.wxbotDesktop?.companion.top(topmost=!topmost);
 byId('through').onclick=()=>window.wxbotDesktop?.companion.through(true);
 document.addEventListener('visibilitychange',()=>{if(renderer){if(document.hidden)renderer.pause();else renderer.resume();}});
-window.addEventListener('beforeunload',()=>{closed=true;clearTimeout(retryTimer);socket?.close();renderer?.dispose();});
+window.addEventListener('beforeunload',stopSession);
 window.addEventListener('resize',()=>renderer?.resize());
 async function init(){
- const response=await fetch('/api/companion/status');if(!response.ok)throw Error('请先在主界面登录');const status=await response.json();personaSpace=status.persona_space||'';connect();
+ const response=await fetch('/api/companion/status');if(!response.ok)throw Error('请先在主界面登录');const status=await response.json();if(closed)return;personaSpace=status.persona_space||'';connect();
  const model=status.models.find(m=>m.id===status.model_id);if(model&&window.WxBotLive2D){
   renderer=new WxBotLive2D.Renderer(byId('avatar'));
   renderer.onError=error=>{byId('fallback').hidden=false;byId('fallback').style.display='';byId('error').textContent='形象显示中断，文字聊天仍可使用：'+error.message;};

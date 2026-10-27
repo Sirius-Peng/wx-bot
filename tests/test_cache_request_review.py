@@ -121,7 +121,12 @@ class SDKRequestReview(unittest.IsolatedAsyncioTestCase):
         current=message()
         await orch.handle(current)
         persisted=await store.get_session(current.ctx_key)
-        self.assertEqual(persisted['messages'][:-1],self.payloads[0]['messages'])
+        actual=self.payloads[0]['messages']
+        self.assertEqual(persisted['messages'][:len(actual)],actual)
+        self.assertEqual(persisted['messages'][len(actual)],{'role':'assistant','content':'听着呢。'})
+        self.assertEqual(len(persisted['messages']),len(actual)+2)
+        self.assertEqual(persisted['messages'][-1]['role'],'system')
+        self.assertIn('投递时间',persisted['messages'][-1]['content'])
         self.assertEqual(persisted['prompt_tokens'],140)
         self.assertEqual(context.last_budget['cache_hit_tokens'],110)
         self.assertEqual(adapter.sent,['听着呢。'])
