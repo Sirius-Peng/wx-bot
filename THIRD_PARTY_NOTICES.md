@@ -1,6 +1,6 @@
 # WxBot third-party notices / 第三方组件说明
 
-更新：2026-10-25。此文件说明 **v3.0.0 发行组成与来源**，不表示所有平台安装包已完成构建或发布。精确运行依赖版本与所带许可证以每个平台实际构建生成的 `third-party/manifest.json` 和对应原文为准。
+更新：2026-10-28。此文件说明 **v3.0.2 发行组成与来源**，不表示所有平台安装包已完成构建或发布。精确运行依赖版本与所带许可证以每个平台实际构建生成的 `third-party/manifest.json` 和对应原文为准。
 
 WxBot 项目版权与许可保留于根目录 `LICENSE`：Copyright (c) 2026 Yuhan Peng，MIT License。GitHub 作者为 [Sirius-Peng](https://github.com/Sirius-Peng)。第三方组件仍归其作者所有；项目的 MIT 声明**不覆盖整个安装包中的第三方组件、Live2D SDK 或用户导入的模型**。
 
@@ -55,6 +55,12 @@ Live2D 渲染资源来自官方 **Cubism SDK for Web 5-r.5**，Core 标识 **06.
 - SDK 及发行：[Cubism SDK Release License](https://www.live2d.com/en/download/cubism-sdk/release-license/)，适用条件以对应上游条款为准；仓库保留 SDK 附带说明，不宣称已获独立商业授权。
 
 应用默认形象是本项目的静态标记；**不随包分发 Haru 或其他 Live2D 示例/角色模型**。用户自行导入的模型保存在独立用户数据目录，模型、贴图、动作和音乐等资源的许可仍来自模型提供者，不由本项目 MIT 声明替代。
+
+## 可选角色语音与外部 TTS 接入
+
+微信角色语音可选调用 [Fish Audio](https://fish.audio/) API，默认引用公开的[弗洛洛社区音色](https://fish.audio/zh-CN/m/5b432f747d00419aba7cb12fa50e4af0/)。音色由社区提供，不是本项目新训练或随包提供的角色权重；服务使用用户独立配置的 Key、额度与引擎，不属于聊天 LLM 的用量。本项目提供 HTTP 接入、试听和音频附件投递，不将在线服务、音色或游戏素材改列为本项目 MIT 资源。
+
+安装包不包含游戏语料、角色参考音频、角色训练权重、GPT-SoVITS 代码或训练框架。可选 GPT-SoVITS 只是连接用户另行部署的外部 TTS 服务；其软件许可与角色素材条件分别适用。来源核对记录在仓库的 `docs/v3/voice-sources.md`，真实付费合成和微信客户端播放须独立验证。
 
 ## 不进入正式安装包的研究组件
 
