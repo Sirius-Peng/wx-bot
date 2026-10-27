@@ -89,7 +89,7 @@ test('close releases the window, persists bounds and leaves the app running', ()
   assert.equal(win.destroyed, true); assert.equal(h.manager.win, null);
   assert.equal(h.app.isQuitting, false); assert.equal(h.app.quitCalls, 0);
   assert.equal(h.timers.size, 0, 'close cancels deferred bounds writes');
-  const value = h.writes.get('/synthetic-companion-close-profile/companion-window.json');
+  const value = h.writes.get(path.join('/synthetic-companion-close-profile', 'companion-window.json'));
   assert(value, 'closing flushes the latest bounds before destruction');
   assert.deepEqual(JSON.parse(value), win.bounds);
   assert.doesNotThrow(() => h.manager.close(), 'repeated close is idempotent');
