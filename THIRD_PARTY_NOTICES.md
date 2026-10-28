@@ -1,6 +1,6 @@
 # WxBot third-party notices / 第三方组件说明
 
-更新：2026-10-28。此文件说明 **v3.0.2 发行组成与来源**，不表示所有平台安装包已完成构建或发布。精确运行依赖版本与所带许可证以每个平台实际构建生成的 `third-party/manifest.json` 和对应原文为准。
+更新：2026-10-28。此文件说明 **v3.0.3 发行组成与来源**，不表示所有平台安装包已完成构建或发布。精确运行依赖版本与所带许可证以每个平台实际构建生成的 `third-party/manifest.json` 和对应原文为准。
 
 WxBot 项目版权与许可保留于根目录 `LICENSE`：Copyright (c) 2026 Yuhan Peng，MIT License。GitHub 作者为 [Sirius-Peng](https://github.com/Sirius-Peng)。第三方组件仍归其作者所有；项目的 MIT 声明**不覆盖整个安装包中的第三方组件、Live2D SDK 或用户导入的模型**。
 
@@ -9,6 +9,7 @@ WxBot 项目版权与许可保留于根目录 `LICENSE`：Copyright (c) 2026 Yuh
 - 应用资源目录根部的 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`：本项目MIT原文及本说明。
 - `third-party/manifest.json`、`third-party/licenses/<package>/` 与 `third-party/PYTHON-LICENSE.txt`：实际 Python 运行依赖、其随附/补充许可证、组件版本、SHA256清单及Python许可。
 - `web/live2d/`：原始 `CORE-LICENSE.md`、`FRAMEWORK-LICENSE.md`、`SDK-LICENSE.md` 及渲染资源 `manifest.json`，保持上游名称与内容。
+- Windows资源 `napcat/`：未改写的 `NapCat.Shell.Windows.Node.zip`、`NapCatQQ-LICENSE`、`Node-v22.11.0-LICENSE` 与 `UPSTREAM_PROVENANCE.json`，独立于Python依赖清单；macOS本次不含该Windows组件。
 - Electron 原生运行时随附的 `LICENSE`、`LICENSES.chromium.html` 等文件：保留 Electron/Chromium 及其内嵌组件的声明。不同操作系统的原生目录布局不同。
 
 这些文件应与真正分发的应用资源一起保留；不能仅以一个网页链接取代已随组件提供的许可原文。版本清单仅覆盖被收集的运行依赖，不把开发环境中训练或打包工具的全部依赖都当成应用组件。
@@ -56,6 +57,14 @@ Live2D 渲染资源来自官方 **Cubism SDK for Web 5-r.5**，Core 标识 **06.
 
 应用默认形象是本项目的静态标记；**不随包分发 Haru 或其他 Live2D 示例/角色模型**。用户自行导入的模型保存在独立用户数据目录，模型、贴图、动作和音乐等资源的许可仍来自模型提供者，不由本项目 MIT 声明替代。
 
+## Windows 内置 NapCat Node（非项目 MIT 组件）
+
+Windows x64包原封保留官方 [NapCatQQ v4.18.41](https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.41) 的 `NapCat.Shell.Windows.Node.zip`：124,089,498 bytes，SHA256 `51fbb10e7bcd56b0c2a6de86c37811e7518330e48a137ac689ab1e4d8627d3f0`。上游源码提交为 `859eb530c5801577633c2c3ae871d23586edf281`，内含Node 22.11.0及QQ native 9.9.31-49738。本项目不改写上游代码或ZIP，不随包携带账号、登录资料或用户Token；运行时在个人数据目录另建配置与profile。
+
+NapCat采用 **Limited Redistribution License for NapCat (LRL)**，保留Copyright © 2024 Mlikiowa；其条款禁止商用，再分发须包含完整许可、明确来源与版权。原始全文随包位于 `napcat/NapCatQQ-LICENSE`，不以本节摘要替代原文，不将其许可改为本项目MIT，也不暗示上游对本项目的授权背书。
+
+`napcat/Node-v22.11.0-LICENSE` 保留Node及其内嵌依赖的完整声明；QQ native与相关库由腾讯及各自权利人保留版权，不受本项目MIT或NapCat LRL统一覆盖。`napcat/UPSTREAM_PROVENANCE.json`单列上游地址、版本、原始文件与两份独立许可的摘要。原ZIP中的现有声明不删除、改名或覆盖；本次macOS包不分发此Windows运行组件，Python的41组件/65或64份许可统计也不冒充已包含NapCat的这两份独立声明。
+
 ## 可选角色语音与外部 TTS 接入
 
 微信角色语音可选调用 [Fish Audio](https://fish.audio/) API，默认引用公开的[弗洛洛社区音色](https://fish.audio/zh-CN/m/5b432f747d00419aba7cb12fa50e4af0/)。音色由社区提供，不是本项目新训练或随包提供的角色权重；服务使用用户独立配置的 Key、额度与引擎，不属于聊天 LLM 的用量。本项目提供 HTTP 接入、试听和音频附件投递，不将在线服务、音色或游戏素材改列为本项目 MIT 资源。
@@ -68,4 +77,4 @@ Chinese-Jev / Laya 流程、历史权重、Torch、Transformers、ONNX Runtime�
 
 ## 机制参考与外部服务
 
-SillyTavern、Open-LLM-VTuber、LangMem、Letta、Graphiti 与 OpenClaw 作为人格/上下文/记忆和队列机制参考，不表示其维护者认可本项目。腾讯 iLink、NapCat/OneBot 网关及 DeepSeek 等云接口属于外部接入，不把它们的服务或品牌归入本项目 MIT 许可；外部网关和服务的获取、账号与条款仍由各上游提供。
+SillyTavern、Open-LLM-VTuber、LangMem、Letta、Graphiti 与 OpenClaw 作为人格/上下文/记忆和队列机制参考，不表示其维护者认可本项目。腾讯 iLink、外部 OneBot 网关及 DeepSeek 等云接口属于外部接入；Windows内置NapCat另按上节声明保留来源，不把它们的服务或品牌归入本项目 MIT 许可；外部网关和服务的获取、账号与条款仍由各上游提供。

@@ -52,10 +52,10 @@ class AdapterConfig:
     onebot_http_url: str = "http://127.0.0.1:3000"
     onebot_token: str = ""
     bot_qq: str = ""
-    # NapCat WebUI Token：一键部署时自动生成并写进容器，
-    # 保存下来是为了重启后还能登录同一个容器的 WebUI 拿二维码
+    # NapCat WebUI Token：本机内置网关首次启动时生成，更新保持原值。
     napcat_webui_token: str = ""
-    napcat_image_mirror: str = "docker.m.daocloud.io"
+    napcat_image_mirror: str = "docker.m.daocloud.io"  # legacy, unused by native gateway
+    napcat_mode: str = "native"  # native (bundled Windows x64) | external OneBot
 
 
 @dataclass
@@ -198,6 +198,11 @@ class ConfigStore:
                 a["qq_enabled"] = False
             a["wechat_type"] = "ilink"
 
+        # Keep pre-existing gateway installations external until explicitly selected.
+        if 'napcat_mode' not in a and (a.get('qq_enabled') is True or a.get('napcat_webui_token') or a.get('onebot_token') or a.get('bot_qq') or
+                (a.get('onebot_http_url') and a['onebot_http_url']!='http://127.0.0.1:3000')):
+            a['napcat_mode']='external'
+        if a.get('napcat_mode','native') not in ('native','external'): a['napcat_mode']='external'
         cfg.adapter = AdapterConfig(**{k: v for k, v in a.items()
                                        if k in AdapterConfig.__dataclass_fields__})
 

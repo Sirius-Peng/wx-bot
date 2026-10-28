@@ -121,8 +121,7 @@ class NapCatTests(unittest.IsolatedAsyncioTestCase):
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.store=ConfigStore(Path(self.tmp.name)/'config.json');cfg=AppConfig();cfg.adapter.qq_enabled=True;self.store.save(cfg);self.rt=BotRuntime(self.store,Path(self.tmp.name))
-        self.rt.docker.detect=lambda:DockerState(installed=True,running=True)
-        self.rt.docker.napcat_status=lambda *a:{'running':True}
+        self.rt.native_napcat.status=lambda mode:{'running':True,'mode':mode}
         self.rt.probe_qq=AsyncMock(return_value={'loggedIn':True,'httpReachable':True})
     async def asyncTearDown(self):
         await self.rt.close_onebot_ingress();self.tmp.cleanup()
@@ -133,11 +132,13 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_events_visible_pre_start(self):
         self.rt.note_onebot_event('http');r=await self.rt.qq_status();self.assertEqual(r['messageTransport'],'http_post');self.assertGreater(r['lastHttpEventAt'],0);self.assertFalse(r['reverseWsConnected'])
     async def test_callback_port_authoritative(self):
-        self.rt.set_http_port(8959);self.rt._onebot_ingress=SimpleNamespace(port=43210,close=AsyncMock());self.assertEqual(self.rt._napcat_ws_url(),'ws://host.docker.internal:43210/ws/onebot')
+        self.rt.set_http_port(8959);self.rt._onebot_ingress=SimpleNamespace(port=43210,close=AsyncMock());self.assertEqual(self.rt._napcat_ws_url(),'ws://127.0.0.1:43210/ws/onebot')
     async def test_runtime_awaits_ready_qr(self):
+        self.rt.native_napcat.process=SimpleNamespace(running=True,stop=AsyncMock())
         c=SimpleNamespace(check_login=AsyncMock(return_value={'loggedIn':False}),qrcode=AsyncMock(side_effect=[{'ok':False,'pending':True},{'ok':True,'image':'data'}]));self.rt._webui_client=lambda:c
         r=await self.rt.qq_login_qrcode();self.assertEqual(r['image'],'data');self.assertEqual(c.qrcode.call_count,2)
     async def test_no_qr_for_already_logged(self):
+        self.rt.native_napcat.process=SimpleNamespace(running=True,stop=AsyncMock())
         c=SimpleNamespace(check_login=AsyncMock(return_value={'loggedIn':True}),qrcode=AsyncMock());self.rt._webui_client=lambda:c
         self.assertTrue((await self.rt.qq_login_qrcode())['loggedIn']);c.qrcode.assert_not_called()
 

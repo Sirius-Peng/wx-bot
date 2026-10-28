@@ -24,7 +24,7 @@
 - 源资料校验ZIP：`.backups/wxbot-import-...zip`；导入前的活动数据ZIP：`.backups/wxbot-preimport-...zip`。取消任务不删除已校验的源ZIP。
 - 旧配置的绝对微信路径若位于所选目录（或其已记录的自动迁移来源且该资料确实在本目录），会重新指向新数据目录；其他外部路径保持不变。
 
-目录外的微信资料、QQ NapCat Docker持久卷、模型供应商账号及模型权重不在所选目录内，本次不复制它们。具体目录与Docker备份边界见[用户数据](user-data-persistence.md)。
+v3.0.3原生网关位于活动目录内的 `napcat/`，作为所选目录的普通内容保留；不把Linux容器登录凭证自动转换为Windows免扫码登录。目录外的微信资料、历史QQ NapCat Docker卷、外部OneBot账号目录、模型供应商账号及模型权重不在所选目录内，不复制它们。旧卷不删改，具体目录与备份边界见[用户数据](user-data-persistence.md)。
 
 ## 失败与恢复
 

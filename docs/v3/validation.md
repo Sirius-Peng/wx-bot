@@ -168,3 +168,7 @@ Windows使用`.venv\Scripts\python.exe`及PowerShell逐项运行Node套件。训
 - 冻结后端3次重启验证鉴权、统计、Jieba、时区、引导、备份、记忆保留及正常shutdown；随后冻结后端2循环、Unpacked和Portable各1次实际HTTP验证六项资源逐字节一致、独立配置保存、未知文件保留与模拟TTS试听。付费外部API调用为0，测试资料与真实用户资料隔离。
 - 本次单机启动样本：冻结后端约2.9—3.3秒、Unpacked 4.03秒、Portable首次冷展开40.41秒。Portable包含自解压，常用用户建议安装版；数字不是LLM响应延迟，也不泛化为所有硬件的承诺。
 - Windows未执行交互界面、系统IME组合输入和NSIS完整安装/卸载；Unpacked/Portable测试结束按隔离进程树清理，不写成手动或优雅GUI退出验收。两端均未真实账号登录、Fish付费合成或微信手机端播放；包未配置代码签名/公证。
+
+## 2026-10-28：v3.0.3 原生网关开发验收
+
+v3.0.3本轮记录独立于上述v3.0.2：Windows内置NapCat Node、托管进程、显式native/external、旧配置保持external与持久账号均须按本轮验证，不借用旧Docker成绩。当前NativeManager 28项、进程管理43项专项通过；新增原生前端26项、既有引导11项通过，本地23组Node阶段性通过。上述是源码/隔离桩验证，Windows实际进程、WebUI、打包资源与客户端登录结果继续按[准备清单](../release-v3.0.3.json)补录。

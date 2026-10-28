@@ -46,7 +46,7 @@ foreach ($module in @('uvicorn','fastapi','starlette','pydantic','anyio','httpx'
  $arguments += @('--collect-all',$module)
 }
 # Exclude retired local inference even when the developer environment still has it.
-foreach ($module in @('src.core.local_decision','src.core.local_decision_worker','src.core.local_decision_cpu',
+foreach ($module in @('src.core.docker', 'src.core.local_decision','src.core.local_decision_worker','src.core.local_decision_cpu',
  'onnxruntime','onnx','tokenizers','numpy','torch','transformers')) {
  $arguments += @('--exclude-module',$module)
 }

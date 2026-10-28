@@ -86,6 +86,9 @@ dmg:
 
 # ── Windows ──────────────────────────────────────────────────
 win:
+  extraResources:
+    - from: resources/napcat
+      to: napcat
   icon: assets/icon.ico
   target:
     - target: nsis

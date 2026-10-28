@@ -1,8 +1,12 @@
-# v3.0.2：轻量陪伴内核
+# v3.0.3：原生QQ与轻量陪伴内核
 
-更新：2026-10-28。当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，Windows x64 Setup/Portable及macOS arm64 DMG的平台、摘要与本轮结果见[发布清单](../release-v3.0.2.json)。[v3.0.0历史清单](../release-v3.0.0.json)及v2.1.7附件保持不变，不将旧验收记为新版结果。
+更新：2026-10-28。v3.0.3正在构建与验收，Windows x64内置原生QQ，macOS本次仍用外部OneBot；进度见[准备清单](../release-v3.0.3.json)。当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，Windows x64 Setup/Portable及macOS arm64 DMG的平台、摘要与本轮结果见[发布清单](../release-v3.0.2.json)。[v3.0.0历史清单](../release-v3.0.0.json)及v2.1.7附件保持不变，不将旧验收记为新版结果。
 
-## v3.0.2 更新
+## v3.0.3 原生网关（开发中）
+
+Windows x64由后端管理随包的NapCat Node与运行环境，不要求另装QQ、Node.js或Docker；保持首页单按钮、快速登录、真实二维码弹窗。新配置默认native；已有QQ/Token/非默认接口且无mode的旧配置保留external，不自动接管。配置与完整账号仍位于原数据根下的napcat/，旧卷不迁入或删改。macOS不包含此Windows组件，只连接外部OneBot；详见[原生网关](native-napcat.md)。
+
+## 保留的 v3.0.2 更新
 
 - 微信角色语音：独立 Fish Audio Key、引擎选择与试听；文字先行，部分短回复后台合成为 WAV 文件附件。具备冷却、退订、抢占取消和原凭据续投，不是微信原生语音条；真实付费合成与手机端播放未验收。见[语音设置](wechat-voice.md)与[资源来源](voice-sources.md)。
 - 历史日期：区分用户发送、首次接收和助手投递时间；历史相对日期参照原发言时点，无依据的日期保持未知，不以升级时间给旧事续日期。见[历史时间说明](history-time.md)。

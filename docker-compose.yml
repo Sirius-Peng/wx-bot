@@ -8,8 +8,8 @@
 #  说明：
 #      主程序使用本地 JSON/文件，无需额外数据库；聊天依赖所配置的模型服务。
 #      微信走腾讯官方 iLink，扫码即用，**不需要任何网关容器**。
-#      QQ 通道的 NapCat 网关由程序在界面上「一键部署」，
-#      因此只有用 QQ 时才需要挂载 Docker socket（见下方注释）。
+#      内置原生 QQ 网关仅随 Windows x64 桌面包提供。
+#      本容器部署可连接外部 OneBot 网关，无需 Docker socket。
 # ═══════════════════════════════════════════════════════════════
 
 services:
@@ -35,9 +35,4 @@ services:
       - ${WXBOT_HOST_DATA_DIR:-${HOME}/.local/share/wxbot/user-data}:/app/data
       # 旧版数据只读挂载，首次启动复制迁移；原目录不删除。
       - ./data:/app/legacy-data:ro
-      # ── 要用「一键部署 QQ 网关」时再打开下面这行 ──────────────
-      # 程序需要调用宿主机的 Docker 来启动 NapCat 容器。
-      # 挂载 Docker socket 等同于把宿主机 root 权限交给该容器，
-      # 请自行评估；不想挂就用桌面版或命令行方式运行。
-      # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

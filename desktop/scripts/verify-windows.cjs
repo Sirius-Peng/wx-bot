@@ -28,6 +28,8 @@ function verify(root, backendOnly=false) {
  const asar=require(path.join(desktop,'node_modules','@electron','asar'));
  const pkg=JSON.parse(asar.extractFile(path.join(unpacked,'resources','app.asar'),'package.json').toString('utf8'));
  assert.strictEqual(pkg.version,version);
+ require('./prepare-napcat.cjs').verify({resourceDir:path.join(unpacked,'resources','napcat')});
+ for(const f of tree(path.join(desktop,'resources','napcat')))assert(fs.readFileSync(path.join(desktop,'resources','napcat',f)).equals(fs.readFileSync(path.join(unpacked,'resources','napcat',f))),'Bundled NapCat differs: '+f);
  for(const name of ['Setup','Portable']) {
   const file=path.join(desktop,'dist',`WxBot-${version}-Windows-x64-${name}.exe`);
   assert([0x14c,0x8664].includes(peMachine(file)),'Invalid Windows bootstrap executable');

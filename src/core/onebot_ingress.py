@@ -1,4 +1,4 @@
-"""Windows Docker ingress: callback-only port, never exposes management routes."""
+"""Windows native gateway ingress: callback-only port, never exposes management routes."""
 from contextlib import nullcontext
 import asyncio,socket,secrets
 from fastapi import FastAPI,Request,WebSocket
@@ -23,7 +23,7 @@ class OneBotIngress:
             if not allowed(request.headers):return JSONResponse({'status':'failed','retcode':403},status_code=403)
             return await http_handler(request)
         self.sock=socket.socket();self.sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-        self.sock.bind(('0.0.0.0',0));self.sock.listen(128);self.sock.setblocking(False);self.port=self.sock.getsockname()[1]
+        self.sock.bind(('127.0.0.1',0));self.sock.listen(128);self.sock.setblocking(False);self.port=self.sock.getsockname()[1]
         self.server=uvicorn.Server(uvicorn.Config(app,lifespan='off',log_level='warning',timeout_graceful_shutdown=2))
         if hasattr(self.server,'capture_signals'):self.server.capture_signals=lambda:nullcontext()
         self.server.install_signal_handlers=lambda:None

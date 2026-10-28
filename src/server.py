@@ -99,6 +99,7 @@ async def lifespan(app: FastAPI):
     cfg = config_store.load()
     if cfg.adapter.qq_enabled and cfg.adapter.onebot_token:
         await runtime.ensure_onebot_ingress()
+    await runtime.resume_gateway()
     setup_completed = onboarding_store.load(cfg)['completed']
     if setup_completed and cfg.llm.primary_key and cfg.bot.memory_enabled:
         runtime.start_learning()
@@ -110,6 +111,7 @@ async def lifespan(app: FastAPI):
             log.warning("自动启动失败，用户可检查配置后手动启动", exc_info=True)
     yield
     await runtime.stop()
+    await runtime.close_gateway()
     await runtime.close_onebot_ingress()
 
 
@@ -384,19 +386,19 @@ async def api_qq_detect() -> dict:
 # ═══════════════════════════════════════════════════════════════════
 #  QQ / NapCat 一键部署 + 扫码登录
 #
-#  点一个按钮，程序拉镜像、灌配置、起容器、出二维码。
+#  点一个按钮，程序校验内置网关、写配置、启动原生进程、等待二维码。
 #  部署是**非阻塞**的，前端轮询 /api/qq/status 看进度。
 # ═══════════════════════════════════════════════════════════════════
 
 @app.get("/api/qq/status")
 async def api_qq_status() -> dict:
-    """QQ 通道状态：Docker + NapCat 容器 + 登录态。前端轮询它。"""
+    """QQ 通道状态：本机进程、外部接入、登录态分别显示。"""
     return await runtime.qq_status()
 
 
 @app.post("/api/qq/setup")
 async def api_qq_setup() -> dict:
-    """一键部署 QQ 网关（NapCat Docker）。"""
+    """启动后端托管的内置 QQ 网关。"""
     return await runtime.qq_setup()
 
 
@@ -572,18 +574,18 @@ async def api_memory_clear(scope: str = "", owner_id: str = "") -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Docker 环境（QQ 网关一键部署要用）
+#  旧 Docker API 兼容入口（已停用，不执行 Docker）
 # ═══════════════════════════════════════════════════════════════════
 
 @app.get("/api/docker/status")
 async def api_docker_status() -> dict:
-    """Docker 环境状态，前端轮询它来展示安装进度。"""
+    """兼容旧客户端；当前网关不需要 Docker。"""
     return runtime.docker_status()
 
 
 @app.post("/api/docker/prepare")
 async def api_docker_prepare() -> dict:
-    """一键准备 Docker：未装则下载安装包，装了没启动则启动。"""
+    """兼容旧客户端；不下载、安装或启动 Docker。"""
     return await runtime.docker_prepare()
 
 
@@ -768,7 +770,7 @@ CONFIG_SECTIONS={
  'reply':('bot',{'chat_mode','reply_mode','late_reply_enabled','group_reply_at_sender','message_merge_window','message_merge_max_wait','humanized_wait','typing_indicator','message_pause_timeout'}),
  'companion':('companion',{'enabled','model_id','owner_id','always_on_top','click_through'}),
  'memory':('bot',{'memory_enabled','memory_inject','memory_extract_interval'}),
- 'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror'})}
+ 'channels':('adapter',{'wechat_enabled','qq_enabled','wechat_type','onebot_http_url','onebot_token','bot_qq','bot_nickname','napcat_image_mirror','napcat_mode'})}
 
 def _validate_session_settings(values):
     if 'search_backend' in values and (not isinstance(values['search_backend'],str) or values['search_backend'] not in ('tools','native')):
@@ -848,6 +850,7 @@ async def api_config_section(section:str,request:Request):
             if not is_valid_timezone(value):raise HTTPException(400,'请填写有效的 IANA 时区，如 Asia/Shanghai')
         if key=='reply_mode' and value not in ('natural','always'):raise HTTPException(400,'回复方式需要 natural 或 always')
         if key=='search_model' and not value:raise HTTPException(400,'搜索模型名称不能为空')
+        if key=='napcat_mode' and value not in ('native','external'):raise HTTPException(400,'QQ 网关方式需要 native 或 external')
         if key=='napcat_image_mirror':
             import re
             if value and not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]{1,5})?',value):raise HTTPException(400,'镜像源请填写域名，可附端口，不含协议或路径')
@@ -860,7 +863,9 @@ async def api_config_section(section:str,request:Request):
         from .core.voice import validate_voice_config
         try:validate_voice_config(cfg.voice,require_ready=cfg.voice.enabled)
         except (ValueError,TypeError) as error:raise HTTPException(400,str(error))
-    config_store.save(cfg);restart=runtime.apply_config(cfg)
+    config_store.save(cfg)
+    await runtime.reconcile_gateway(cfg)
+    restart=runtime.apply_config(cfg)
     return {'ok':True,'section':section,'requires_restart':restart,'config':config_store.masked(cfg),
             'message':'本区设置已保存'+('，通道需重启机器人生效' if restart else '并应用')}
 
@@ -884,6 +889,7 @@ async def api_put_config(request: Request) -> dict:
         try:validate_voice_config(cfg.voice,require_ready=cfg.voice.enabled)
         except (ValueError,TypeError) as error:raise HTTPException(400,str(error))
     config_store.save(cfg)
+    await runtime.reconcile_gateway(cfg)
     requires_restart = runtime.apply_config(cfg)
     return {"ok": True, "requires_restart": requires_restart,
             "message": ("配置已保存，通道设置将在重启机器人后生效"
@@ -922,6 +928,7 @@ def _merge_config(old: AppConfig, incoming: dict) -> AppConfig:
     for f in ("onebot_token", "napcat_webui_token"):
         setattr(cfg.adapter, f,
                 keep_masked(inc_ad.get(f, ""), getattr(old.adapter, f, "")))
+    if 'napcat_mode' not in inc_ad:cfg.adapter.napcat_mode=old.adapter.napcat_mode
     return cfg
 
 

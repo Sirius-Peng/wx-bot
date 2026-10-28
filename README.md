@@ -2,15 +2,15 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v3.0.2 · 当前发布：v3.0.2 · 文档更新：2026-10-28。**
+**当前版本：v3.0.3 · 当前发布：v3.0.2 · 文档更新：2026-10-28。**
 
-> **v3.0.2 已构建 Windows x64 安装版/便携版与 macOS arm64 DMG。** 本次包含微信角色语音、历史日期修正、首页/设置重排与伙伴关闭修复；平台、SHA256及实际验收见[发布清单](docs/release-v3.0.2.json)。历史[v3.0.0清单](docs/release-v3.0.0.json)与附件不变。
+> **v3.0.3 正在构建与验收。** Windows x64 改为后端托管内置 NapCat，无需另装 QQ、Node.js 或 Docker；macOS 保留外部 OneBot。新版进度见[发布准备记录](docs/release-v3.0.3.json)；当前下载仍为[v3.0.2](docs/release-v3.0.2.json)，历史[v3.0.0清单](docs/release-v3.0.0.json)与附件不变。
 
 微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等待、长期记忆、联网搜索、主动联系和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
 [下载 v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
-## v3.0.2 更新与轻量陪伴内核
+## v3.0.3 源码与轻量陪伴内核
 
 - **一个对话内核**：微信、QQ 与新增桌面文字伙伴共用收集、接话、记忆、生成和投递逻辑；桌面账号默认独立，不自动关联微信/QQ。保留首启引导、QQ 一键启动/快速登录、识图、联网总结、当前时间和旧资料导入。
 - **首页与设置重排**：侧栏仅保留「首页」「接入设置」「人格与记忆」「设置」。首页按运行状态、指标、连接与陪伴、最近动态排列；设置分为模型接入、对话行为、数据与应用，各卡独立保存，分类切换保留草稿。人格、了解和简要词频/话题气泡放到同页，移除完整拓扑界面。
@@ -25,9 +25,13 @@
 
 现有数据目录、文件名、自定义路径、凭证和应用 ID `com.siriuspeng.wxbot` 保持不变。功能与使用见 [v3 总览](docs/v3/README.md)，原生验证结果单独记录，不用源码回归代替安装验收。
 
+### 开发中的 v3.0.3：QQ 不再要求 Docker
+
+Windows x64 源码改为由后端管理应用内置 NapCat 与运行环境，首页仍为单按钮，保留快速登录和真实二维码弹窗；无需另装 QQ、Node.js 或 Docker。macOS 本次不提供内置网关，仍可连接外部 OneBot。资料新增于原活动目录的 `napcat/`，旧Docker卷不删改；[原生网关说明](docs/v3/native-napcat.md)。此段是开发状态，下面v3.0.2下载不因此自动更新。
+
 ## 下载与平台
 
-本次附件仅包含下表实际构建并验证的平台；历史[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)与[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)保持不变。
+下表为当前已发布 v3.0.2，开发中的内置网关不自动写入这些附件；历史[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)与[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)保持不变。
 
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
@@ -50,14 +54,14 @@ v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行�
 
 ## 零基础开始
 
-v3沿用现有平台登录与Key流程，配置入口收敛为四个主页面；以下按v3菜单说明，旧v2.1.7用户以其版本菜单为准。
+v3沿用现有平台登录与Key流程，配置入口收敛为四个主页面；以下QQ原生步骤对应v3.0.3源码。旧v3.0.2及v2.1.7安装包仍按各自版本运行，不因仓库更新自动改变。
 
 1. **安装并打开**应用，首次配置进入「上手引导」，选择微信、QQ 或两者。引导进度保存在本地，暂时跳过后可继续。
 2. **配置模型**：默认地址 `https://api.deepseek.com`，API 模型名 `deepseek-flash`。在 [DeepSeek 开放平台](https://platform.deepseek.com/)登录，到 [API keys](https://platform.deepseek.com/api_keys) 创建 Key，检查余额后粘贴到引导中并点击「保存并测试模型」。测试会产生少量 API 用量；聊天网页版登录不等于已经配置 API。费用以[官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)为准，不作固定预算或免费承诺。
-3. **连接平台**：微信 iLink 使用手机微信扫码，无需独立网关或手填平台 Token。QQ 点首页「一键启动 QQ 网关」，按提示准备 Docker/NapCat；已保存账号可快速登录，首次或失效时扫码。二维码实际准备好且图片解码后才弹窗。
+3. **连接平台**：微信 iLink 使用手机微信扫码，无需独立网关或手填平台 Token。Windows x64 点首页「一键启动 QQ 网关」，后台使用内置 NapCat 与运行环境；无需另装 QQ、Node.js 或 Docker。已保存账号可快速登录，首次或失效时扫码；macOS或已有其他网关在连接页选择外部 OneBot。二维码实际准备好且图片解码后才弹窗。
 4. **完成并启动**机器人，发送「你好」或图片验证。已有登录会话尽量复用，是否需要重新确认由平台决定。
 
-首次安装 Docker/启动服务可能需要系统确认；应用显示当前进度。网关的一键启动不会替用户完成手机确认。详细 URL、Token、镜像、快速登录账号及日志仍在「接入设置」；模型、识图、搜索、人格、行为与记忆各有自己的保存按钮。
+内置网关准备与启动由后台显示真实进度；一键启动不会替用户完成手机确认。详细模式、外部 URL/Token、快速登录账号与日志仍在「接入设置」；模型、识图、搜索、人格、行为与记忆各有自己的保存按钮。
 
 1017联网更新：默认使用官方直接 Search / Fetch，不再为检索额外调用辅助搜索模型；保留兼容选项与原Key/模型配置。工具按次收费，不承诺免费或省费比例，见[联网升级说明](docs/v3/search-1017.md)。
 
@@ -127,7 +131,7 @@ v3沿用现有平台登录与Key流程，配置入口收敛为四个主页面；
 | macOS | `~/Library/Application Support/WxBot/user-data` |
 | Linux | `$XDG_DATA_HOME/wxbot/user-data`；未配置时 `~/.local/share/wxbot/user-data` |
 
-目录包含配置、人格设置、记忆、上下文、消息记录、引导进度、主动联系计划与近期互动、微信凭证与待处理状态；v3视觉会话另有本地私有媒体sidecar，主上下文JSON保留引用，整套迁移需一并保留；桌面后端日志在其 `logs/backend.log`。QQ 登录资料另外由 NapCat 持久卷管理。显式 `WXBOT_DATA_DIR` 优先；`WXBOT_USER_DATA_DIR` 对应 `<指定目录>/data`。
+目录包含配置、人格设置、记忆、上下文、消息记录、引导进度、主动联系计划与近期互动、微信凭证与待处理状态；v3视觉会话另有本地私有媒体sidecar，主上下文JSON保留引用，整套迁移需一并保留；桌面后端日志在其 `logs/backend.log`。v3.0.3内置QQ配置与完整账号资料保存在同目录的 `napcat/`；外部网关资料由外部网关管理，旧Docker卷不自动迁移或删除。显式 `WXBOT_DATA_DIR` 优先；`WXBOT_USER_DATA_DIR` 对应 `<指定目录>/data`。
 
 首次使用默认新目录时自动复制可识别旧数据，保留来源和迁移备份；已有目标文件不覆盖。卸载/更新不主动删除默认独立目录；若自定义到安装目录内则不适用同样的保留前提。手动删除、磁盘故障或误覆盖仍需备份恢复。POSIX 敏感文件按私有权限创建，Windows 依用户目录 ACL。在「设置 → 本地数据与备份」（v2.1.7 为「模型与行为」）查看实际目录并创建本地 ZIP；备份包含密钥和聊天资料，不自动上传。
 
@@ -165,7 +169,7 @@ $env:WXBOT_HOST_DATA_DIR = "$env:LOCALAPPDATA\WxBot\user-data"
 docker compose up -d
 ```
 
-微信无需单独网关容器。QQ 的自动容器部署需 Docker，并按 Compose 注释提供 Docker socket；也可使用已配置的外部 OneBot 网关。本程序无需额外数据库，但 LLM、微信及 QQ 网关仍是外部服务。
+微信无需单独网关容器。主程序Docker部署的QQ请连接已配置的外部 OneBot；内置原生运行环境仅面向Windows x64，不通过挂载Docker socket再创建QQ容器。本程序无需额外数据库，但LLM与平台服务仍需网络。
 
 ### 环境变量
 
@@ -181,7 +185,7 @@ docker compose up -d
 | `WXBOT_MIGRATE_LEGACY` / `WXBOT_LEGACY_DATA_DIRS` | 控制旧数据复制迁移；后者为 JSON 路径数组 |
 | `WXBOT_SKIP_NAPCAT_SYNC=1` | 离线测试跳过网关配置同步，不是正常使用默认值 |
 
-本机打开主页可建立 HttpOnly 管理会话；远程/容器使用管理登录页或 Bearer Token。OneBot `/ws/onebot`、`/onebot/event` 使用独立 OneBot Token。Windows 桌面 Docker 回调使用单独的 callback-only 动态端口，管理页面仍只监听本机；仅配置 OneBot HTTP 地址不代表消息推送已连接。
+本机打开主页可建立 HttpOnly 管理会话；远程/容器使用管理登录页或 Bearer Token。OneBot `/ws/onebot`、`/onebot/event` 使用独立 OneBot Token。原生网关在本机回环地址连接后端；外部网关继续使用其实际反向WS/HTTP上报地址。管理页面仅监听本机，仅配置OneBot HTTP地址不代表推送已连接。
 
 ## 构建与验证
 

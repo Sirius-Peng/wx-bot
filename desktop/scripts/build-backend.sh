@@ -82,6 +82,7 @@ SEP=":"   # macOS / Linux 用冒号分隔 add-data
   --collect-all httpcore \
   --collect-all certifi \
   --collect-all tzdata \
+  --exclude-module src.core.docker \
   --exclude-module src.core.local_decision \
   --exclude-module src.core.local_decision_worker \
   --exclude-module src.core.local_decision_cpu \

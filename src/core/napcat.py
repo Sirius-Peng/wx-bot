@@ -1,29 +1,9 @@
-"""NapCat WebUI 客户端 —— 让 QQ 网关的部署与扫码登录也能"一键完成"。
+"""NapCat WebUI authentication, QR readiness, quick login and scoped config.
 
-═══════════════════════════════════════════════════════════════════
-为什么需要这个模块？
-
-GeWe 那边 Docker 一起来，用户点「获取二维码」就完事了；
-NapCat 不一样：
-
-  · 二维码要通过 **WebUI 的 HTTP API** 拿，而 WebUI 需要鉴权；
-  · NapCat 的 OneBot 配置有 "Not Login" 前置检查，
-    必须**在登录前**把配置写好（这正是 `DockerManager.seed_napcat_config()` 的原因）；
-  · 每条扫码链接是一段文本，得自己转成二维码图片
-    （用 `src/core/qr.py`，离线生成，不依赖第三方接口）。
-
-鉴权算法（已对真实 NapCat 容器核验）：
-    hash = sha256_hex(WEBUI_TOKEN + ".napcat")
-    POST /api/auth/login  {"hash": hash}
-    → {"code":0, "data":{"Credential": "<base64 json>"}}
-    之后请求带 `Authorization: Bearer <Credential>`，有效期 1 小时。
-
-登录相关接口：
-    POST /api/QQLogin/GetQQLoginQrcode  → {code:0, data:{qrcode:"<URL>"}}
-    POST /api/QQLogin/CheckLoginStatus  → {code:0, data:{isLogin, loginPhase, ...}}
-
-失败响应统一是 {code:非0, message:"..."}，例如 "QQ Is Logined"、"Unauthorized"。
-═══════════════════════════════════════════════════════════════════
+NativeNapCatManager seeds the complete OneBot schema before login. This client
+is transport-only: it neither installs Docker nor starts or owns a gateway.
+Authentication follows sha256(WEBUI_TOKEN + ".napcat"), with one bounded refresh
+when a gateway restart invalidates the cached Credential.
 """
 from __future__ import annotations
 
@@ -105,7 +85,7 @@ class NapCatWebUI:
                 "ok": False, "stage": "auth",
                 "message": "NapCat 拒绝了 WebUI Token",
                 "detail": f"HTTP {r.status_code} {body.get('message') or ''}".strip(),
-                "hint": "Token 是我们自动生成并写进容器的，出现这个提示通常说明"
+                "hint": "Token 由本机网关配置独立保存，出现这个提示时"
                         "请检查网关 WebUI Token 与本地部署配置是否一致。",
             }
 

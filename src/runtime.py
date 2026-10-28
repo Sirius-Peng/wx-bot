@@ -42,8 +42,7 @@ from .adapters.ilink import ILinkAdapter, derive_bot_id
 from .adapters.onebot import OneBotAdapter
 from .config_store import AppConfig, ConfigStore
 from .core.context import ContextManager,LLMCompactor, build_system_prompt
-from .core.docker import (NAPCAT_CONTAINER, NAPCAT_HTTP_PORT,
-                          NAPCAT_WEBUI_PORT, DockerManager)
+from .core.native_napcat import NativeNapCatManager, WEBUI_PORT as NAPCAT_WEBUI_PORT
 from .core.http import explain_error, make_client
 from .core.llm import JudgeLLM, LLMGateway, ProviderCfg
 from .core.web_search import configured_search
@@ -241,7 +240,7 @@ class BotRuntime:
         self.data_dir = Path(data_dir)
         self.log = MessageLog(self.data_dir / "messages.jsonl")
         self.analytics = ConversationAnalytics(self.log.path)
-        self.docker = DockerManager()
+        self.native_napcat = NativeNapCatManager(self.data_dir)
         self._napcat_webui_token = ""
         self._napcat_webui: Optional[NapCatWebUI] = None
         self.memory: Optional[PersonaMemory] = None
@@ -587,6 +586,18 @@ class BotRuntime:
         async with self._lifecycle_lock:
             await self._stop()
             return await self._start()
+
+    async def reconcile_gateway(self, cfg: AppConfig):
+        """Finish owned process cleanup before exposing changed channel settings."""
+        old=self.cfg.adapter;new=cfg.adapter
+        if old.napcat_webui_token!=new.napcat_webui_token:self._napcat_webui=None
+        owned=self.native_napcat.process.running or self.native_napcat.task.get('running')
+        if new.napcat_mode=='external' or (old.qq_enabled and not new.qq_enabled):
+            if owned or self.native_napcat.autostart:await self.native_napcat.stop()
+        elif owned and (old.onebot_token!=new.onebot_token or old.napcat_webui_token!=new.napcat_webui_token):
+            await self.native_napcat.stop(remember=False)
+            # Files have already been saved; setup reads only the newly saved tokens.
+            await self.qq_setup()
 
     def apply_config(self, cfg: AppConfig) -> bool:
         """行为/模型设置热更新；接入通道设置变更明确要求重启。"""
@@ -1314,19 +1325,15 @@ class BotRuntime:
         """
         return "group" if chat_id.startswith("g_") else "private"
 
-    # ══ Docker 环境（QQ 一键部署前置条件）══════════════════════
-
+    # Deprecated API shims: never discover, install or launch Docker.
     def docker_status(self) -> dict:
-        """Docker 与安装方案快照。前端轮询它来展示进度与指引。"""
-        return {
-            "docker": self.docker.detect().to_dict(),
-            "plan": self.docker.install_plan(),
-            "task": dict(self.docker.task),
-        }
+        return {'deprecated': True, 'required': False, 'docker': {'required': False},
+                'manager': self.native_napcat.status(self.cfg.adapter.napcat_mode),
+                'task': dict(self.native_napcat.task), 'plan': {'needed': False, 'message': 'QQ 网关已改为本机内置运行'}}
 
     async def docker_prepare(self) -> dict:
-        """一键准备 Docker：未装则下载安装包，装了没启动则启动。"""
-        return await self.docker.prepare()
+        return {'ok': True, 'deprecated': True, 'required': False,
+                'message': '无需 Docker，请使用 QQ 网关启动按钮'}
 
     # ══ QQ / OneBot 连接测试 ═══════════════════════════════════
 
@@ -1426,15 +1433,10 @@ class BotRuntime:
     # ══ QQ / NapCat 一键部署 ══════════════════════════════════
 
     def _napcat_ws_url(self) -> str:
-        """NapCat 反向连过来的地址。
-
-        容器内访问宿主机必须用 `host.docker.internal`（127.0.0.1 是容器自己）。
-        ⚠️ 端口必须用**实际监听的那个**：`_pick_port()` 在端口被占用时会顺延，
-        只用环境变量会写错地址。
-        """
+        """Native gateway only connects to the actual loopback listener."""
         port = self.http_port or int(os.environ.get("WXBOT_PORT", "8000"))
         port = getattr(self._onebot_ingress, "port", 0) or port
-        return f"ws://host.docker.internal:{port}/ws/onebot"
+        return f"ws://127.0.0.1:{port}/ws/onebot"
 
     def set_http_port(self, port: int) -> None:
         """由 server.main() 告知实际监听端口（供 QQ 网关注册地址使用）。"""
@@ -1454,7 +1456,7 @@ class BotRuntime:
     def _webui_client(self) -> NapCatWebUI:
         if self._napcat_webui is None:
             self._napcat_webui = NapCatWebUI(
-                token=self._ensure_napcat_webui_token(), port=NAPCAT_WEBUI_PORT)
+                token=self._ensure_napcat_webui_token(), port=self.native_napcat.webui_port)
         return self._napcat_webui
 
     def attach_onebot_ws(self,socket):
@@ -1492,18 +1494,13 @@ class BotRuntime:
 
     async def qq_status(self):
         cfg=self.config_store.load()
-        # Docker subprocesses do not block message callbacks or status requests.
-        try:
-            docker=await asyncio.wait_for(asyncio.to_thread(self.docker.detect),timeout=6)
-            napcat=await asyncio.wait_for(asyncio.to_thread(self.docker.napcat_status,docker),timeout=6)
-            d=docker.to_dict()
-        except (TimeoutError, OSError):
-            d={'installed':None,'running':None};napcat={'running':False,'message':'Docker检测暂未完成'}
+        manager=self.native_napcat.status(cfg.adapter.napcat_mode)
+        napcat={**manager, 'running':manager['running'] if cfg.adapter.napcat_mode=='native' else False}
         live=await self.probe_qq() if cfg.adapter.onebot_http_url else {'loggedIn':False,'httpReachable':False}
         adapter=self.qq_adapter
         connected=bool(self.onebot_ws or getattr(adapter,'reverse_ws_connected',False))
         transport='reverse_ws' if connected else ('http_post' if self._qq_http_event_at else 'waiting')
-        return {'docker':d,'napcat':napcat,'task':dict(self.docker.task),'onebotUrl':cfg.adapter.onebot_http_url,
+        return {'manager':manager,'docker':{'required':False},'napcat':napcat,'task':dict(self.native_napcat.task),'onebotUrl':cfg.adapter.onebot_http_url,
                 'botQq':live.get('qq') or cfg.adapter.bot_qq,'stage':'ready' if live['loggedIn'] else 'waiting_login',
                 'loginMessage':'QQ已在线' if live['loggedIn'] else '等待登录或重新上线','wsUrl':self._napcat_ws_url(),
                 'reverseWsConnected':connected,'wsConnections':len(self.onebot_ws),'messageTransport':transport,
@@ -1523,55 +1520,74 @@ class BotRuntime:
     async def close_onebot_ingress(self):
         if self._onebot_ingress is not None:await self._onebot_ingress.close()
 
+    def _native_ports(self, http_port, webui_port, expected=None):
+        cfg=self.config_store.load()
+        current=(cfg.adapter.napcat_mode,cfg.adapter.qq_enabled,cfg.adapter.napcat_webui_token,cfg.adapter.onebot_token)
+        if cfg.adapter.napcat_mode!='native' or (expected is not None and current!=expected):
+            raise RuntimeError('网关启动已取消：连接配置已经改变')
+        cfg.adapter.onebot_http_url=f'http://127.0.0.1:{http_port}'
+        self.config_store.save(cfg);self.cfg=cfg;self._napcat_webui=None
+        if self.qq_adapter is not None:
+            self.qq_adapter.http_url=cfg.adapter.onebot_http_url
+            self.qq_adapter.access_token=cfg.adapter.onebot_token
+            self._active_adapter_config.update(onebot_http_url=cfg.adapter.onebot_http_url,
+                                               onebot_token=cfg.adapter.onebot_token)
+
     async def qq_setup(self) -> dict:
-        """一键部署 QQ 网关（非阻塞，前端轮询 `/api/qq/status`）。"""
-        token = self._ensure_napcat_webui_token()
-        cfg = self.config_store.load()
+        """Start the bundled, backend-owned gateway without a Docker dependency."""
+        cfg=self.config_store.load()
+        if cfg.adapter.napcat_mode=='external':
+            return {'ok':False,'stage':'external','message':'当前为外部 OneBot 模式；本机内置启动请先切换接入方式'}
+        if not cfg.adapter.qq_enabled:
+            return {'ok':False,'stage':'disabled','message':'请先启用 QQ 通道再启动内置网关'}
+        token=self._ensure_napcat_webui_token()
+        cfg=self.config_store.load()
         if not cfg.adapter.onebot_token:
-            cfg.adapter.onebot_token = secrets.token_urlsafe(32)
+            cfg.adapter.onebot_token=secrets.token_urlsafe(32)
             self.config_store.save(cfg);self.cfg=cfg
-        self.docker.image_mirror=cfg.adapter.napcat_image_mirror
         await self.ensure_onebot_ingress()
-        ws = self._napcat_ws_url()
-        cfg = self.config_store.load()
-        if not cfg.adapter.onebot_http_url:
-            cfg.adapter.onebot_http_url = f"http://127.0.0.1:{NAPCAT_HTTP_PORT}"
-            self.config_store.save(cfg)
-            self.cfg = cfg
-        return await self.docker.ensure_napcat(token, ws,access_token=cfg.adapter.onebot_token)
+        expected=(cfg.adapter.napcat_mode,cfg.adapter.qq_enabled,cfg.adapter.napcat_webui_token,cfg.adapter.onebot_token)
+        return await self.native_napcat.ensure(token,self._napcat_ws_url(),
+            access_token=cfg.adapter.onebot_token,on_ports=lambda p,w:self._native_ports(p,w,expected))
+
+    async def resume_gateway(self):
+        cfg=self.config_store.load()
+        if (cfg.adapter.qq_enabled and cfg.adapter.napcat_mode=='native'
+                and self.native_napcat.autostart and os.environ.get('WXBOT_SKIP_NAPCAT_SYNC')!='1'):
+            return await self.qq_setup()
+        return {'ok':True,'skipped':True}
+
+    async def close_gateway(self):
+        await self.native_napcat.close()
 
     async def qq_sync_ws_url(self) -> dict:
-        """让 NapCat 的反向 WS 指向当前后端端口（幂等，可反复调用）。
-
-        ⚠️ 它会**改真实容器里的配置**（必要时重启容器）。自动化测试请设
-        `WXBOT_SKIP_NAPCAT_SYNC=1`，否则跑一次测试就会把用户网关的地址
-        改到测试端口上。
-        """
-        if os.environ.get("WXBOT_SKIP_NAPCAT_SYNC") == "1":
-            return {"ok": True, "changed": False, "skipped": True,
-                    "message": "已跳过网关地址同步（测试模式）"}
+        """Update only this application's owned config; never mutate external gateways."""
+        if os.environ.get('WXBOT_SKIP_NAPCAT_SYNC')=='1':
+            return {'ok':True,'changed':False,'skipped':True,'message':'已跳过网关地址同步（测试模式）'}
         cfg=self.config_store.load()
-        if cfg.adapter.napcat_webui_token and not cfg.adapter.onebot_token:
+        if cfg.adapter.napcat_mode=='external':
+            return {'ok':True,'changed':False,'skipped':True,'message':'外部网关由用户管理，本程序未修改其配置'}
+        if not cfg.adapter.napcat_webui_token:
+            return {'ok':True,'changed':False,'message':'内置网关将在首次启动时写入连接配置'}
+        if not cfg.adapter.onebot_token:
             cfg.adapter.onebot_token=secrets.token_urlsafe(32)
             self.config_store.save(cfg);self.apply_config(cfg)
-        self.docker.image_mirror=cfg.adapter.napcat_image_mirror
         await self.ensure_onebot_ingress()
-        url = self._napcat_ws_url()
-        cfg=self.config_store.load()
-        if cfg.adapter.napcat_webui_token:
-            template=self.docker.napcat_config_files(cfg.adapter.napcat_webui_token,url,cfg.adapter.onebot_token)[1]
-            result=await self._webui_client().sync_onebot(template)
-            if result.get('ok'):return result
-        try:
-            r = await self.docker.sync_napcat_ws_url(url,cfg.adapter.onebot_token)
-        except Exception as e:
-            log.warning("同步 QQ 网关地址失败", exc_info=True)
-            return {"ok": False, "changed": False, "message": f"同步失败：{e}"}
-        if r.get("changed"):
-            log.info("QQ 网关地址已同步：%s", r.get("message"))
-        return r
+        return await self.native_napcat.sync_config(cfg.adapter.napcat_webui_token,
+                                                   self._napcat_ws_url(),cfg.adapter.onebot_token)
+
+    def _native_login_guard(self):
+        if self.config_store.load().adapter.napcat_mode!='native':
+            return {'ok':False,'stage':'external','message':'外部网关请在其管理端登录，本程序未访问外部 WebUI'}
+        if self.native_napcat.task.get('running') or not self.native_napcat.process.running:
+            pending=bool(self.native_napcat.task.get('running'))
+            return {'ok':False,'pending':pending,'stage':'starting' if pending else 'stopped',
+                    'message':'内置网关正在准备，请稍候' if pending else '请先启动内置 QQ 网关'}
+        return None
 
     async def qq_login_qrcode(self):
+        blocked=self._native_login_guard()
+        if blocked:return blocked
         client=self._webui_client()
         status=await client.check_login()
         if status.get('loggedIn'):return {'ok':True,'loggedIn':True,'message':'QQ已登录，无需重复扫码'}
@@ -1583,9 +1599,13 @@ class BotRuntime:
             await asyncio.sleep(.35)
 
     async def qq_quick_accounts(self):
+        blocked=self._native_login_guard()
+        if blocked:return {**blocked,'accounts':[]}
         return await self._webui_client().quick_accounts()
 
     async def qq_quick_login(self,qq,remember=False):
+        blocked=self._native_login_guard()
+        if blocked:return blocked
         async with self._qq_login_lock:
             previous,until=self._qq_quick_pending
             if time.monotonic()<until:
@@ -1595,6 +1615,8 @@ class BotRuntime:
             return result
 
     async def qq_login_check(self) -> dict:
+        blocked=self._native_login_guard()
+        if blocked:return {**blocked,'loggedIn':False}
         r = await self._webui_client().check_login()
         if r.get("loggedIn"):
             self._qq_quick_pending=("",0.0)
@@ -1605,10 +1627,16 @@ class BotRuntime:
         return r
 
     async def qq_stop(self) -> dict:
-        return await self.docker.stop_napcat()
+        if self.cfg.adapter.napcat_mode=='external':
+            if self.native_napcat.process.running or self.native_napcat.task.get('running'):
+                await self.native_napcat.stop()
+            return {'ok':True,'message':'外部网关由用户管理，本程序未停止该进程'}
+        return await self.native_napcat.stop()
 
     async def qq_logs(self, lines: int = 100) -> dict:
-        return await self.docker.napcat_logs(lines)
+        if self.cfg.adapter.napcat_mode=='external':
+            return {'ok':True,'log':'外部网关日志请在其管理端查看'}
+        return await self.native_napcat.logs(lines)
 
     # ══ 人格知识库 ════════════════════════════════════════════
 

@@ -1,0 +1,68 @@
+{
+  "version": "3.0.3",
+  "tag": "v3.0.3",
+  "status": "preparing",
+  "released_date": null,
+  "timezone": "Asia/Shanghai",
+  "runtime_commit": null,
+  "runtime_commit_note": "Populate from the verified v3.0.3 source checkpoint. v3.0.2 validation does not validate this release.",
+  "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3",
+  "planned_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "published_platforms": [],
+  "artifacts": [],
+  "validation": {
+    "native_manager_unit_tests": 33,
+    "native_process_unit_tests": 43,
+    "native_napcat_frontend_checks": 26,
+    "onboarding_frontend_checks": 11,
+    "source_node_suites_stage_passed": 23
+  },
+  "embedded_windows_gateway": {
+    "mode": "native",
+    "component": "NapCat.Shell.Windows.Node",
+    "version": "4.18.41",
+    "archive": "NapCat.Shell.Windows.Node.zip",
+    "bytes": 124089498,
+    "sha256": "51fbb10e7bcd56b0c2a6de86c37811e7518330e48a137ac689ab1e4d8627d3f0",
+    "source_commit": "859eb530c5801577633c2c3ae871d23586edf281",
+    "node": "22.11.0",
+    "qq_native": "9.9.31-49738",
+    "archive_unmodified": true,
+    "licenses": [
+      "NapCatQQ-LICENSE",
+      "Node-v22.11.0-LICENSE"
+    ],
+    "provenance": "UPSTREAM_PROVENANCE.json",
+    "requires_installed_qq_node_or_docker": false,
+    "macos_bundle_included": false,
+    "immutable_runtime_files": 705,
+    "files_manifest_sha256": "2fbab136ceb8095aa4df92c22c59a07d4861722b7ddbfeac700497b8e8861ef0",
+    "native_generated_diagnostic": "Only root beacon_report.log is a permitted non-executable generated log; archived to work after owned process exits. All other additional files and symlinks are rejected."
+  },
+  "limitations": [
+    "Release preparation: actual platform builds, native tests and artifact hashes are pending; do not reuse v3.0.2 results.",
+    "Bundled native gateway targets Windows x64 only. macOS uses external OneBot with no implicit Docker fallback.",
+    "NapCat LRL forbids commercial use and requires full license/source attribution for redistribution; QQ native and Node bundled dependencies retain their separate rights.",
+    "Existing user data root and application ID remain unchanged. Old Docker volumes are not deleted, modified or automatically converted into Windows login credentials."
+  ],
+  "default_model": {
+    "base_url": "https://api.deepseek.com",
+    "api_name": "deepseek-flash"
+  },
+  "documentation_updated": "2026-10-28",
+  "source_checkpoint": {
+    "runtime_source_checkpoint": null,
+    "stable_app_id": "com.siriuspeng.wxbot",
+    "existing_user_data_paths_preserved": true
+  },
+  "release_changes": [
+    "Backend-owned bundled NapCat Node on Windows x64, no separate QQ, Node.js, Docker or WSL2 installation.",
+    "Explicit native/external mode, conservative legacy configuration migration, durable profile and owned-process recovery.",
+    "Preserved single homepage button, saved-account quick login and QR ready/decode/cancel protections.",
+    "Separate upstream ZIP, NapCat/Node license originals and provenance; macOS external OneBot compatibility."
+  ]
+}

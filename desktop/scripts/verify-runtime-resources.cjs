@@ -65,8 +65,9 @@ function verifyRuntimeResources(root = path.resolve(__dirname, '../..'), {backen
   return {decision: 'cloud', modelRequired: false, backendFilesScanned: scanned, backendRequired, scanBackend};
 }
 
-module.exports = async () => {
+module.exports = async (context) => {
   const result = verifyRuntimeResources(undefined, {backendRequired: true});
+  if (context?.electronPlatformName === 'win32') require('./prepare-napcat.cjs').verify();
   console.log(`RUNTIME_RESOURCES PASS: decision=cloud; model_required=false; backend_files_scanned=${result.backendFilesScanned}`);
 };
 module.exports.verifyRuntimeResources = verifyRuntimeResources;

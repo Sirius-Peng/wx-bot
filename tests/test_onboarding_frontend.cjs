@@ -18,13 +18,13 @@ async function tests(){
   // Repeated clicks share one gateway launch; online session does not fetch QR.
   {
     const f=fixture();f.context.apiCalls=0;f.context.done=0;
-    f.run(`refreshQQStatus=async()=>({docker:{installed:true,running:true},napcat:{running:true},task:{},loggedIn:true});pollQQStatus=refreshQQStatus;finishQQLogin=async()=>done++;api=async(path)=>{apiCalls++;return await new Promise(resolve=>releaseSetup=()=>resolve({ok:true}));};`);
+    f.run(`refreshQQStatus=async()=>({manager:{mode:'native',supported:true,installed:true,running:true},napcat:{running:true},task:{},loggedIn:true});pollQQStatus=refreshQQStatus;finishQQLogin=async()=>done++;api=async(path)=>{apiCalls++;return await new Promise(resolve=>releaseSetup=()=>resolve({ok:true}));};`);
     const a=f.run('setupQQ({saveForm:false})'),b=f.run('setupQQ({saveForm:false})');await tick();assert.equal(f.context.apiCalls,1);f.context.releaseSetup();await Promise.all([a,b]);assert.equal(f.context.done,1);assert.equal(f.context.imageCount,0);count++;
   }
   // Homepage saves only the QQ enable delta, never hidden model/persona drafts.
   {
     const f=fixture();f.context.patchBody=null;
-    f.run(`STATE.config.adapter.qq_enabled=false;refreshQQStatus=async()=>({docker:{installed:true,running:true},napcat:{running:true},task:{},loggedIn:true});pollQQStatus=refreshQQStatus;finishQQLogin=async()=>{};api=async(path,opts)=>{if(path.includes('/section/')){patchBody=JSON.parse(opts.body);return {config:{adapter:{qq_enabled:true}}}}return {ok:true};};`);
+    f.run(`STATE.config.adapter.qq_enabled=false;refreshQQStatus=async()=>({manager:{mode:'native',supported:true,installed:true,running:true},napcat:{running:true},task:{},loggedIn:true});pollQQStatus=refreshQQStatus;finishQQLogin=async()=>{};api=async(path,opts)=>{if(path.includes('/section/')){patchBody=JSON.parse(opts.body);return {config:{adapter:{qq_enabled:true}}}}return {ok:true};};`);
     assert.equal(await f.run('setupQQ({saveForm:false})'),true);assert.deepEqual(JSON.parse(JSON.stringify(f.context.patchBody)),{qq_enabled:true});count++;
   }
   // QR modal stays closed through API wait AND actual image decoding.

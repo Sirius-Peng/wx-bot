@@ -1,6 +1,6 @@
 {
   "name": "wxbot-desktop",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "description": "微信 AI 助手 · 桌面版（Electron 外壳 + Python 引擎 sidecar）",
   "main": "src/main/index.js",
   "author": {
@@ -19,14 +19,15 @@
     "verify:arch": "bash scripts/verify-arch.sh",
     "pack:mac": "npm run verify:resources && npm run build:backend && electron-builder --mac --arm64 && npm run verify:arch arm64",
     "pack:mac:x64": "npm run verify:resources && npm run build:backend && electron-builder --mac --x64 && npm run verify:arch x64",
-    "pack:win": "npm run verify:resources && npm run build:backend:win && electron-builder --win --x64 && npm run verify:win",
+    "pack:win": "npm run verify:resources && npm run prepare:napcat && npm run build:backend:win && electron-builder --win --x64 && npm run verify:win",
     "pack:all": "npm run verify:resources && node scripts/pack-native.cjs",
     "verify:win": "node scripts/verify-windows.cjs",
     "test:windows": "node ../tests/test_windows_desktop.cjs && node ../tests/test_windows_lifecycle.cjs && node ../tests/test_storage_paths.cjs && node ../tests/test_input_focus.cjs",
     "verify:model": "node scripts/verify-decision-model.cjs",
     "prepack": "npm run verify:resources",
     "test:pack-gate": "node ../tests/test_model_pack_gate.cjs && node ../tests/test_cloud_package.cjs",
-    "verify:resources": "node scripts/verify-runtime-resources.cjs --source-only"
+    "verify:resources": "node scripts/verify-runtime-resources.cjs --source-only",
+    "prepare:napcat": "node scripts/prepare-napcat.cjs"
   },
   "devDependencies": {
     "electron": "^36.9.5",

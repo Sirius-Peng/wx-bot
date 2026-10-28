@@ -154,7 +154,8 @@ function reportQQProgress(message) {
 }
 function renderHomeQQ(st) {
   if(!st)return;
-  let text=st.task?.running?(st.task.message||'网关正在启动…'):(st.loggedIn?'QQ 已在线'+(st.messageReceiverStarted?' · 机器人已启动':' · 机器人待启动'):(st.napcat?.running?'网关已运行，等待 QQ 登录':'网关尚未运行，点击右侧按钮即可启动'));
+  const manager=qqManager(st), external=manager.mode==='external';
+  let text=st.task?.running?(st.task.message||'网关正在启动…'):(st.loggedIn?'QQ 已在线'+(st.messageReceiverStarted?' · 机器人已启动':' · 机器人待启动'):(external?(st.httpReachable?'外部网关已响应，请在该网关登录 QQ':'外部 OneBot 尚未连接，请在连接页配置地址'):(manager.supported===false?(manager.message||'内置网关仅支持 Windows x64；请在连接页选择外部 OneBot'):(manager.running||st.napcat?.running?'网关已运行，等待 QQ 登录':'网关尚未运行，点击下方按钮即可启动'))));
   if(st.loggedIn&&(st.reverseWsConnected||st.messageTransport==='http_post'))text+=' · 消息链路已到达';
   $('#home-qq-status').textContent=text;
   if(!qqStartPending&&!STATE.qqLoginPending)$('#guide-qq-status').textContent=text;
@@ -162,18 +163,33 @@ function renderHomeQQ(st) {
 }
 
 async function finishQQLogin() {
+  if (qqStopPending) return false;
+  const generation=qqLifecycleGeneration;
+  const current=()=>generation===qqLifecycleGeneration && !qqStopPending;
   stopQQLoginPolling();$('#qq-login-modal').hidden=true;$('#qq-choice-modal').hidden=true;
-  if(STATE.config.adapter.napcat_webui_token)await syncQQWsUrl();
-  await loadConfig();await refreshStatus();
+  if(STATE.config.adapter.napcat_mode!=='external'&&STATE.config.adapter.napcat_webui_token)await syncQQWsUrl();
+  if (!current()) return false;
+  await loadConfig();
+  if (!current()) return false;
+  await refreshStatus();
+  if (!current()) return false;
   if(STATE.status?.running&&!STATE.status.qq_running){const r=await api('/api/bot/restart',{method:'POST'});if(!r.ok)reportQQProgress(r.message);}
-  await refreshQQStatus();await refreshOnboarding();
+  if (!current()) return false;
+  await refreshQQStatus();
+  if (!current()) return false;
+  await refreshOnboarding();
+  if (!current()) return false;
   reportQQProgress('QQ 已登录，网关可继续复用');
 }
 
 async function beginQQLogin() {
+  if (qqStopPending) return false;
+  const generation=qqLifecycleGeneration;
+  const current=()=>generation===qqLifecycleGeneration && !qqStopPending;
   const accounts=await loadQQAccounts();
+  if (!current()) return false;
   if(STATE.qqAutoLoginQq&&accounts.some(a=>a.qq===STATE.qqAutoLoginQq)) {
-    const ok=await quickLoginQQ({qq:STATE.qqAutoLoginQq,remember:false});if(ok)return;
+    const ok=await quickLoginQQ({qq:STATE.qqAutoLoginQq,remember:false});if(!current()||ok)return;
   }
   if(accounts.length) {
     $('#qq-choice-account').innerHTML=accounts.map(a=>`<option value="${esc(a.qq)}">${esc(a.nickname||'QQ')} · ${esc(a.qq)}</option>`).join('');

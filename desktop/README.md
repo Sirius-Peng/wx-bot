@@ -1,10 +1,14 @@
-# WxBot 桌面版 · v3.0.2
+# WxBot 桌面版 · v3.0.3
 
-v3.0.2 包含微信角色语音、历史日期修正、重新设计的首页与分组设置，以及桌面伙伴关闭修复。v3.0.1 仅为此前本地构建，未单独公开发布；历史发布附件保持原版本。
+v3.0.3 正在构建与验收，新增Windows x64后端托管的内置NapCat；继续保留v3.0.2微信角色语音、历史日期、首页/设置与桌面伙伴修复。v3.0.1 仅为此前本地构建，未单独公开发布；历史发布附件保持原版本。
 
-当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)。本次平台、真实摘要、资源及未执行项目见[发布清单](../docs/release-v3.0.2.json)。已弃用本地判定模型，运行与安装包不使用ONNX。文档更新：2026-10-28。历史[v3.0.0清单](../docs/release-v3.0.0.json)与附件保留原版本。
+当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)。本次平台、真实摘要、资源及未执行项目见[发布清单](../docs/release-v3.0.2.json)。已弃用本地判定模型，运行与安装包不使用ONNX。文档更新：2026-10-28。新版见[发布准备记录](../docs/release-v3.0.3.json)。历史[v3.0.0清单](../docs/release-v3.0.0.json)与附件保留原版本。
 
 v3复用微信/QQ内核增加独立桌面文字会话、默认静态形象和本地Live2D导入；桌面伙伴仍仅文字；v3.0.2 可选的微信角色语音使用独立 Fish Audio Key、页内试听与后台 WAV 文件附件，见[语音说明](../docs/v3/wechat-voice.md)；它不等同于桌面语音或微信原生语音条。管理界面收敛为首页、接入设置、人格与记忆、设置；原数据路径、凭证、应用ID保持不变。详见[v3总览](../docs/v3/README.md)、[接话策略与历史研究](../docs/v3/local-decision.md)及[验收状态](../docs/v3/validation.md)。
+
+## v3.0.3 原生 QQ 网关（开发中）
+
+Windows x64 源码使用应用内置的 NapCat 和运行环境，无需另外安装 QQ、Node.js 或 Docker；首页一键启动、快速登录与真实二维码弹窗保留。macOS 当前只提供外部 OneBot 连接，不自动准备 Docker。配置和账号新增于既有活动目录的 `napcat/`；旧容器/持久卷不删改，跨系统登录可能需首次重新确认。详见[原生网关](../docs/v3/native-napcat.md)。以下v3.0.2附件仍保持原发布内容。
 
 ## v3桌面开发入口
 
@@ -158,14 +162,14 @@ python tools/verify_windows_backend.py --binary "BACKEND.exe" --report "BACKEND_
 | macOS | `~/Library/Application Support/WxBot/user-data` |
 | Linux源码 | `$XDG_DATA_HOME/wxbot/user-data`，默认 `~/.local/share/wxbot/user-data` |
 
-Electron 自身 profile/cache 与应用长期数据不是同一个目录。普通卸载保留长期数据，`deleteAppDataOnUninstall: false` 同时保留旧 profile；新版本复制迁移可识别的旧数据，不覆盖现有目标。自定义目录优先，实际路径从界面查看；自行放回安装目录时需先备份，不能沿用默认独立目录的保留前提。NapCat 登录状态属于独立 Docker 卷。恢复与备份见[持久化说明](../docs/user-data-persistence.md)。
+Electron 自身 profile/cache 与应用长期数据不是同一个目录。普通卸载保留长期数据，`deleteAppDataOnUninstall: false` 同时保留旧 profile；新版本复制迁移可识别的旧数据，不覆盖现有目标。自定义目录优先，实际路径从界面查看；自行放回安装目录时需先备份，不能沿用默认独立目录的保留前提。v3.0.3内置NapCat的配置与完整QQ账号保存在原数据目录的 `napcat/`；外部网关和历史Docker卷不接管、不删改。恢复与备份见[持久化说明](../docs/user-data-persistence.md)。
 
 ## 故障排查
 
 | 现象 | 检查 |
 |---|---|
 | 后台启动失败 | 错误页重试、帮助菜单重启；检查数据目录日志、完整 sidecar 资源和匹配架构 |
-| QQ在线但收不到消息 | 区分QQ登录、机器人启动和反向WS/HTTP上报；Windows Docker使用独立callback-only端口及OneBot Token |
+| QQ在线但收不到消息 | 区分QQ登录、机器人启动和反向WS/HTTP上报；原生网关使用本机回环和OneBot Token；外部网关核对其实际推送地址 |
 | 设置没有生效 | 使用对应卡片保存按钮；通道变化依接口提示重启机器人，其他支持的配置热更新 |
 | 记忆似乎丢失 | 查看实际数据路径/自定义环境变量、迁移报告与本地备份，不要先覆盖旧目录 |
 | 首次打开系统拦截 | 包未配置代码签名，按系统对本次下载的验证/打开流程处理；不要把文件存在当成校验成功 |

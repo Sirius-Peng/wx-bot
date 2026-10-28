@@ -31,6 +31,12 @@
 
 默认形象为本项目页面内的静态标记，不分发SDK示例Haru或其他角色模型。开发测试可从已下载的官方SDK中导入示例，测试使用不表示该示例自动成为产品默认资源。用户自行导入的模型存于个人数据目录，模型本身的使用、署名和再分发条件仍来自模型提供者。
 
+## Windows 原生 NapCat Node
+
+v3.0.3的Windows x64包使用官方 [NapCatQQ v4.18.41](https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.41) 原始 `NapCat.Shell.Windows.Node.zip`（124,089,498 bytes，SHA256 `51fbb10e7bcd56b0c2a6de86c37811e7518330e48a137ac689ab1e4d8627d3f0`），上游源码提交 `859eb530c5801577633c2c3ae871d23586edf281`；内含Node 22.11.0及QQ native 9.9.31-49738。ZIP与上游代码不改写，账号资料不随包提供。Mac本次不附该Windows运行组件，仍可连接外部OneBot。
+
+NapCat使用 **Limited Redistribution License for NapCat (LRL)**，保留Mlikiowa版权；条款禁止商用，再分发须带完整原文及明确来源。资源 `napcat/` 中分别保留 `NapCatQQ-LICENSE`、`Node-v22.11.0-LICENSE` 与 `UPSTREAM_PROVENANCE.json`；ZIP内原有声明不删改。这两份独立许可不计入原Python 41组件与65/64份许可计数，也不以项目MIT或NapCat LRL覆盖QQ native和Node内嵌库各自版权。本说明不代替完整条款，不构成上游授权或背书。
+
 ## 微信角色语音与外部服务
 
 v3.0.2 可选使用用户配置的 Fish Audio 服务及公开的弗洛洛社区音色；服务 Key、额度与模型引擎独立于聊天 LLM。此音色由社区提供，不是本项目新训练或随包分发的权重，也不表示音色提供者或游戏方为本项目背书。默认音色标识、官方接口及备选语料来源见[语音来源核对](voice-sources.md)。

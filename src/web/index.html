@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>微信 AI 助手</title>
-<link rel="stylesheet" href="/static/style.css?v=3.0.2">
+<link rel="stylesheet" href="/static/style.css?v=3.0.3">
 </head>
 <body>
 
@@ -109,7 +109,7 @@
           </div>
           <div class="card home-qq-card home-tool-card" id="home-qq-card">
             <div class="home-tool-heading"><span class="tool-symbol qq-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 8V6a4 4 0 0 1 8 0v2"/><rect x="4" y="8" width="16" height="13" rx="4"/><circle cx="9" cy="14" r=".7"/><circle cx="15" cy="14" r=".7"/><path d="M9 17h6"/></svg></span><div><h3>QQ 网关</h3><p>一次启动，继续熟悉的对话。</p></div></div>
-            <div class="gateway-body"><p id="home-qq-status" role="status">点击即可启动网关；已登录的账号会直接复用。</p><p class="hint">账号登录、二维码和连接详情可在「连接」中查看。</p></div>
+            <div class="gateway-body"><p id="home-qq-status" role="status">点击即可启动网关；已登录的账号会直接复用。</p><p class="hint">Windows x64 无需另装 QQ 或 Docker；账号与连接详情在「连接」。</p></div>
             <div class="card-foot"><button class="btn btn-primary" id="btn-home-qq">一键启动 QQ 网关</button></div>
           </div>
         </div>
@@ -142,8 +142,8 @@
         </div>
         <div class="card guide-panel" data-guide-panel="3" hidden>
           <div class="card-head"><h3>连接 QQ：先启动，再登录</h3></div>
-          <div class="guide-body"><p>点击下面的按钮，应用会检查 Docker、启动或复用 NapCat，再带你登录 QQ。首次安装 Docker 时，请按系统安装窗口完成操作，再回到这里点击继续。</p>
-            <details class="guide-help"><summary>第一次安装 Docker 怎么操作？</summary><ol><li>按安装程序完成 Docker Desktop 安装；Windows 按提示启用 WSL2，需要重启时先重启电脑。</li><li>打开 Docker Desktop，按界面提示完成首次启动，等它显示引擎已运行。</li><li>回到这里再次点「启动 QQ 网关并登录」。应用会继续，不会清空已有 QQ 登录数据。</li></ol></details>
+          <div class="guide-body"><p>Windows x64 版直接使用应用内置的 NapCat 和运行环境，无需另装 QQ、Node.js 或 Docker。点击后由后台准备并启动网关，再带你登录 QQ。macOS 请到「连接」选择已部署的外部 OneBot 网关。</p>
+            <details class="guide-help"><summary>已有网关或不是 Windows x64？</summary><p>在「连接 → QQ → 运行方式」选择外部 OneBot，保存 HTTP 地址与 Token，然后在外部网关中完成 QQ 登录。本应用不会安装 Docker，也不会启动或结束外部 QQ 进程。</p></details>
             <button class="btn btn-primary" id="btn-guide-qq">启动 QQ 网关并登录</button>
             <p id="guide-qq-status" class="guide-status" role="status">二维码真正准备好后才会弹出；保存过的 QQ 可快速登录。</p>
             <p class="hint">扫码后在手机 QQ 上确认。遇到额外验证时，请按手机提示完成。网关地址、Token、快速登录与日志仍保留在「连接」。</p>
@@ -239,14 +239,14 @@
 
             <!-- 环境检查 -->
             <div class="checklist" id="qq-checklist">
-              <div class="check-item" data-key="qq-docker">
+              <div class="check-item" data-key="qq-runtime">
                 <span class="check-icon">○</span>
                 <div class="check-main">
-                  <div class="check-title">Docker 环境</div>
-                  <div class="check-desc" id="qchk-docker">正在检测…</div>
+                  <div class="check-title">运行环境</div>
+                  <div class="check-desc" id="qchk-runtime">正在检测…</div>
                 </div>
               </div>
-              <div class="check-item" data-key="qq-container">
+              <div class="check-item" data-key="qq-gateway">
                 <span class="check-icon">○</span>
                 <div class="check-main">
                   <div class="check-title">NapCat 网关</div>
@@ -278,7 +278,7 @@
               </button>
               <button class="btn btn-ghost" id="btn-detect-qq">探测已有网关</button>
               <span class="setup-hint" id="qq-detect-hint">
-                自动拉取 NapCat 镜像、写好网络配置并启动，全程无需你操作
+                使用应用内置网关，自动写好网络配置并启动；账号资料保存在独立数据目录
               </span>
             </div>
 
@@ -288,21 +288,21 @@
               <div class="progress-text" id="qq-progress-text">准备中…</div>
             </div>
 
-            <div class="quick-login-panel">
+            <div class="quick-login-panel" id="qq-native-login">
               <label class="field"><span>已保存的 QQ 账号</span><select id="qq-quick-account"><option value="">先启动网关，再刷新账号</option></select></label>
               <div class="quick-login-actions"><button class="btn btn-ghost" id="btn-qq-qr">扫码登录</button><button class="btn btn-primary" id="btn-qq-quick">快速登录</button><button class="btn btn-ghost" id="btn-qq-accounts">刷新账号</button></div>
               <label class="quick-remember"><input type="checkbox" id="qq-quick-remember"> 下次网关启动时自动登录此账号</label>
               <p class="hint" id="qq-login-hint" role="status">首次请扫码；之后可选择保存过的账号快速登录。手机验证或会话失效时仍可扫码。</p>
             </div>
-            <label class="field mirror-field"><span>容器镜像源</span><input type="text" id="napcat-image-mirror" placeholder="docker.m.daocloud.io"><em>默认大陆 DaoCloud 镜像，失败自动回退官方源；留空只用官方源。已下载的镜像优先复用。</em></label>
+            <label class="field"><span>运行方式</span><select id="napcat-mode"><option value="native">应用内置（Windows x64）</option><option value="external">外部 OneBot 网关</option></select><em id="qq-mode-hint">Windows x64 无需另装 QQ、Node.js 或 Docker；macOS 请使用外部 OneBot。</em></label>
 
             <!-- 手动覆盖 -->
-            <details class="help-panel help-panel-sm">
+            <details class="help-panel help-panel-sm" id="qq-external-settings">
               <summary>网关已在别处运行？手动指定地址</summary>
               <div class="help-body">
                 <p class="help-lead">
                   如果你已经把 NapCat / Lagrange 等网关部署在其他机器或端口上，
-                  在这里填地址即可跳过自动部署。
+                  先在上方选择「外部 OneBot 网关」，再填写地址并保存。应用只负责连接，不管理外部进程。
                 </p>
                 <div class="field-grid">
                   <label class="field field-full">
@@ -338,8 +338,10 @@
 
             <div class="wz-foot">
               <button class="btn btn-ghost" id="btn-qq-logs">查看网关日志</button>
+              <button class="btn btn-ghost" id="btn-qq-stop-native" hidden disabled>停止内置网关</button>
               <span class="save-state" data-save-status="channels">未修改</span><button class="btn btn-primary" id="btn-save-qq" data-save-section="channels">保存通道设置</button>
             </div>
+            <p class="hint">停止仅关闭本应用内置网关，账号资料仍保留；手动停止后不再自动恢复，再次启动网关后重新启用恢复。外部网关需在其所属程序中停止。</p>
             <pre class="log-view" id="qq-logview" hidden></pre>
           </div>
         </div>
@@ -707,7 +709,7 @@
             <p>记忆、人格、模型设置、聊天上下文与微信登录状态默认保存在独立用户目录，不随应用更新或普通卸载清理。</p>
             <label class="field"><span>实际数据目录</span><input type="text" id="storage-path" readonly aria-label="实际数据目录"></label>
             <p class="hint" id="storage-status" role="status">正在读取数据位置…</p>
-            <p class="hint">备份包含 API Key、登录凭证和聊天内容，请保存在你自己的设备。QQ 登录资料仍由 NapCat 的持久卷管理，应用卸载不会删除这些卷。</p>
+            <p class="hint">备份包含 API Key、登录凭证和聊天内容，请保存在你自己的设备。内置 NapCat 的配置与账号资料保存在当前数据目录的 napcat/；旧版 Docker 卷仍需单独备份，不会被应用删除。</p>
           </div>
           <div class="card-foot">
             <div class="head-actions"><button class="btn btn-ghost" id="btn-copy-storage">复制路径</button><button class="btn btn-ghost" id="btn-open-storage" hidden>打开目录</button><a class="btn btn-ghost" id="storage-download" hidden>下载刚创建的备份</a></div>
@@ -723,7 +725,7 @@
             <p class="hint" id="import-status" role="status" aria-live="polite">支持已配置过的新版；导入前自动备份当前数据，旧目录保持不变。</p>
             <div id="import-preview" hidden>
               <p id="import-summary"></p>
-              <p class="hint">采用整套替换，不混合两套记忆。历史日志与备份保留在独立子目录；内部锁和迁移控制文件不作为配置导入。QQ Docker 卷和目录外的微信资料不包含在本次导入中。</p>
+              <p class="hint">采用整套替换，不混合两套记忆。历史日志与备份保留在独立子目录；内部锁和迁移控制文件不作为配置导入。当前目录内的 napcat/ 随所选目录导入；旧版 QQ Docker 卷和目录外的微信资料不包含在本次导入中。</p>
               <label class="field"><span><input type="checkbox" id="import-confirm"> 我确认替换当前配置与记忆，并已退出旧版本</span></label>
             </div>
           </div>
@@ -836,9 +838,9 @@
 </dialog>
 <div id="toasts" class="toasts"></div>
 
-<script src="/static/guide.js?v=20261013-guide1"></script>
+<script src="/static/guide.js?v=3.0.3"></script>
 <script src="/static/statistics.js?v=20261014-stats2"></script>
 <script src="/static/confirmation.js?v=20261014-focus1"></script>
-<script src="/static/app.js?v=3.0.2"></script>
+<script src="/static/app.js?v=3.0.3"></script>
 </body>
 </html>

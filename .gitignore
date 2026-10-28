@@ -74,3 +74,6 @@ resources/decision-model/
 
 # Native-build license inventory is generated from the packaged runtime.
 desktop/resources/third-party/
+
+# Pinned native QQ archive is downloaded/verified at Windows package time.
+desktop/resources/napcat/*.zip

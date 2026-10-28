@@ -1,8 +1,10 @@
 # WxBot 文档索引
 
-文档同步日期：2026-10-28。当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，平台及摘要见[本次清单](release-v3.0.2.json)；[v3.0.0历史清单](release-v3.0.0.json)保留原验收。历史v2验收不挪用为v3结论。
+文档同步日期：2026-10-28。当前源码v3.0.3，正在准备原生QQ网关；当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，平台及摘要见[本次清单](release-v3.0.2.json)；[v3.0.0历史清单](release-v3.0.0.json)保留原验收。历史v2验收不挪用为v3结论。
 
 ## v3优先阅读
+
+- [内置NapCat与外部OneBot](v3/native-napcat.md)：v3.0.3开发中的Windows x64内置运行环境、明确模式、快速登录、旧数据与macOS外部接入；[发布准备](release-v3.0.3.json)。
 
 - [微信角色语音](v3/wechat-voice.md)：Fish独立Key、显式引擎、页内试听与文字先行的WAV附件；[语音资源来源](v3/voice-sources.md)区分在线音色、语料和本地权重。
 - [历史消息日期](v3/history-time.md)：保留原发言时点，分开记录收发时间，不以当前日期补齐旧内容。
@@ -25,7 +27,7 @@
 |---|---|
 | 下载、功能总览、源码/Docker运行 | [项目首页](../README.md) |
 | Key教程、平台登录、完成首启配置 | [上手引导](onboarding.md) |
-| QQ快速登录、网关推送、Windows回调、镜像与分区保存 | [NapCat](napcat-fixes.md) |
+| QQ快速登录、Windows内置网关、外部OneBot、旧镜像兼容与分区保存 | [NapCat](napcat-fixes.md) |
 | 图片、连续输入、明确等待、输入提示 | [识图与轮流说话](image-turn-taking.md) |
 | 微信角色语音、试听、音色与发送形式 | [语音功能](v3/wechat-voice.md)、[来源核对](v3/voice-sources.md) |
 | 旧消息相对日期、历史时间与摘要来源 | [历史时间](v3/history-time.md) |

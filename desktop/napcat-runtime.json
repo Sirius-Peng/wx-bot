@@ -1,0 +1,74 @@
+{
+  "component": "NapCat.Shell.Windows.Node",
+  "version": "4.18.41",
+  "source_commit": "859eb530c5801577633c2c3ae871d23586edf281",
+  "source": "https://github.com/NapNeko/NapCatQQ/tree/v4.18.41",
+  "release": "https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.41",
+  "published_at": "2026-10-21T08:41:30Z",
+  "asset": {
+    "name": "NapCat.Shell.Windows.Node.zip",
+    "url": "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.41/NapCat.Shell.Windows.Node.zip",
+    "bytes": 124089498,
+    "sha256": "51fbb10e7bcd56b0c2a6de86c37811e7518330e48a137ac689ab1e4d8627d3f0",
+    "members": 833,
+    "unpacked_bytes": 361466126
+  },
+  "runtime": {
+    "node": "22.11.0",
+    "QQ_native_package": "9.9.31-49738",
+    "entry": "node.exe index.js",
+    "requires_installed_QQ": false
+  },
+  "licenses": [
+    {
+      "component": "NapCatQQ",
+      "license_name": "Limited Redistribution License for NapCat",
+      "file": "NapCatQQ-LICENSE",
+      "source": "https://github.com/NapNeko/NapCatQQ/blob/v4.18.41/LICENSE",
+      "sha256": "2bbc0dba0c62fcde4adfe38ebadad0b7d4e23b06b88d9551904bbe07769dc46f"
+    },
+    {
+      "component": "Node.js 22.11.0 and bundled third-party notices",
+      "file": "Node-v22.11.0-LICENSE",
+      "source": "https://github.com/nodejs/node/blob/v22.11.0/LICENSE",
+      "sha256": "f0cb1ad806ba5d681f378a8cc2e539fe4b54839290eda3c814ec8994af2b8422"
+    }
+  ],
+  "QQ_native_notice": "Includes original upstream Tencent QQ native runtime files. Tencent and its licensors retain their respective rights; these files are not relicensed under wx-bot MIT or NapCat terms.",
+  "schema": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "provenance_file": "UPSTREAM_PROVENANCE.json",
+  "required_files": {
+    "node.exe": {
+      "bytes": 80511640,
+      "sha256": "7447c4ece014aa41fb2ff866c993c708e5a8213a00913cc2ac5049ea3ffc230d"
+    },
+    "index.js": {
+      "bytes": 639,
+      "sha256": "5de31bef6cc1b48cef0229a8b22b32b3211e41253c3e75a9547e996becf9b388"
+    },
+    "wrapper.node": {
+      "bytes": 104663600,
+      "sha256": "a1e59891e743c271d641ee011f47aa887d9f7dfae6b3bb9292a03af759dec203"
+    },
+    "QQNT.dll": {
+      "bytes": 481280,
+      "sha256": "2f9ae01c30fa624535439cab9ccc2ba56d95e5f2ec85e6182789cb3c9089f3b7"
+    },
+    "package.json": {
+      "bytes": 486,
+      "sha256": "56387b6ec1b4d129d3790c09fb5c5949a6e92f01cae162d7def4a49d9ed402e3"
+    },
+    "config.json": {
+      "bytes": 159,
+      "sha256": "0b4e7719005a7065be522c943b351a20f5d30182f719f7e2db9925d5a71273e8"
+    },
+    "napcat/napcat.mjs": {
+      "bytes": 3134858,
+      "sha256": "7c66d0239d7effe73ab6e4920eddef732a8066fb47cd19539541c72055c5f0aa"
+    }
+  },
+  "files_manifest_sha256": "2fbab136ceb8095aa4df92c22c59a07d4861722b7ddbfeac700497b8e8861ef0",
+  "runtime_files": 705
+}
