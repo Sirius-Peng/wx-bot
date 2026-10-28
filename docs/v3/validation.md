@@ -169,6 +169,15 @@ Windows使用`.venv\Scripts\python.exe`及PowerShell逐项运行Node套件。训
 - 本次单机启动样本：冻结后端约2.9—3.3秒、Unpacked 4.03秒、Portable首次冷展开40.41秒。Portable包含自解压，常用用户建议安装版；数字不是LLM响应延迟，也不泛化为所有硬件的承诺。
 - Windows未执行交互界面、系统IME组合输入和NSIS完整安装/卸载；Unpacked/Portable测试结束按隔离进程树清理，不写成手动或优雅GUI退出验收。两端均未真实账号登录、Fish付费合成或微信手机端播放；包未配置代码签名/公证。
 
-## 2026-10-28：v3.0.3 原生网关开发验收
+## 2026-10-28：v3.0.3 原生网关本轮验收
 
-v3.0.3本轮记录独立于上述v3.0.2：Windows内置NapCat Node、托管进程、显式native/external、旧配置保持external与持久账号均须按本轮验证，不借用旧Docker成绩。当前NativeManager 28项、进程管理43项专项通过；新增原生前端26项、既有引导11项通过，本地23组Node阶段性通过。上述是源码/隔离桩验证，Windows实际进程、WebUI、打包资源与客户端登录结果继续按[准备清单](../release-v3.0.3.json)补录。
+本轮运行时固定于 `2356227307c2f3eb426251b4f4bad8d7c3e91fc5`，与v3.0.2记录分开。
+
+- macOS源码Python1696项（跳过3）、23.484秒通过；23组Node全部通过。NativeManager/API33项、进程43项、前端原生网关26项、下载准备18项均单独覆盖。
+- Windows同源码完整Python1696项重跑通过（跳过30，255.339秒），Node23组通过。首轮只有旧的0.2秒硬时限夹具 `test_background_memory_does_not_block_next_reply` 在typing清理处超时；原断言不变，单项连跑三次及相同全套重跑均通过。首轮日志保留，不将重跑写成从未失败，也不由此承诺200ms性能。30项跳过包括平台专属与导出源码缺历史Git；时间线另行记录。
+- Windows真实自有Job测试覆盖正常停止父子孙、启动器先退出、强杀宿主后清理；未收养的独立对照保持运行。进程模块Windows43项中21项为POSIX平台跳过。
+- Windows原生Manager未登录三周期通过：完整705份发行文件及固定索引、鉴权、真实二维码仅获取未扫码、profile及未知文件保留、close保留恢复、手动stop关闭恢复、监听清理。QQ native产生唯一非执行beacon日志，已单独收集，不放宽其他额外代码文件与链接。
+- macOS最终DMG验证VALID，9份ASAR、外层与CArchive各29份web字节一致；含原生管理Python模块但不含WindowsZIP或旧Docker部署模块。41个Python依赖、65份许可校验通过。实际冻结HTTP六资源、外部模式/不启动Docker、配置重启/未知文件保留和模拟语音试听两循环通过；冻结伙伴HTTP/WS单气泡、去重、重连和人格空间通过。原生窗口显示平台边界与连接控件；自动化下拉键盘选择不确定，不记为成功。
+- 完整Windows安装包和冻结QQ API验收、精确摘要见[本轮清单](../release-v3.0.3.json)，不用源码成绩冒充真实账号收发。未登录真实QQ或向联系人发消息；Windows交互IME、NSIS安装/卸载、Fish付费与微信手机播放不记为已验证。
+
+最终Windows冻结后端实际setup→Node/705全hash→WebUI鉴权与二维码→stop→再setup→shutdown退出并清Node→后端重启自动恢复→再次shutdown全部通过。两个安装器解出原始载荷，ASAR9/web29/冻结web29/固定官方NodeZIP及许可来源均一致。原有冻结后端两循环、Unpacked、Portable实际HTTP、配置/未知资料保留及四次本地模拟TTS通过；20时间线补跑通过。单机启动：Unpacked4.29秒、Portable冷展开46.76秒，QQ完整准备的三次观察16.42/9.63/11.42秒包含校验与轮询，不是LLM延迟。

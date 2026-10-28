@@ -1,25 +1,122 @@
 {
   "version": "3.0.3",
   "tag": "v3.0.3",
-  "status": "preparing",
-  "released_date": null,
+  "status": "published",
+  "released_date": "2026-10-28",
   "timezone": "Asia/Shanghai",
-  "runtime_commit": null,
-  "runtime_commit_note": "Populate from the verified v3.0.3 source checkpoint. v3.0.2 validation does not validate this release.",
+  "runtime_commit": "2356227307c2f3eb426251b4f4bad8d7c3e91fc5",
+  "runtime_commit_note": "All packaged runtime fixed at 2356227307c2f3eb426251b4f4bad8d7c3e91fc5. Final release commit only adds release documentation and measured artifact manifests.",
   "release_url": "https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3",
   "planned_platforms": [
     "windows-x64-setup",
     "windows-x64-portable",
     "macos-arm64-dmg"
   ],
-  "published_platforms": [],
-  "artifacts": [],
+  "published_platforms": [
+    "windows-x64-setup",
+    "windows-x64-portable",
+    "macos-arm64-dmg"
+  ],
+  "artifacts": [
+    {
+      "name": "WxBot-3.0.3-Windows-x64-Setup.exe",
+      "bytes": 254218637,
+      "sha256": "f78cbba28db7f3248654f40dc08f6d858f148c62c5808b18d0a12624ff0e2644",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-Windows-x64-Setup.exe"
+    },
+    {
+      "name": "WxBot-3.0.3-Windows-x64-Portable.exe",
+      "bytes": 253983675,
+      "sha256": "dba2a440d11db86978e0faa842a01930271833f8d65bb4f0e7ccaebceed6ceab",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-Windows-x64-Portable.exe"
+    },
+    {
+      "name": "WxBot-3.0.3-macOS-arm64.dmg",
+      "bytes": 158911708,
+      "sha256": "391550293a25c4f29d25eb10abd408d749c8560f81571a50143cb015742b28c4",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-macOS-arm64.dmg"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 297,
+      "sha256": "d67ea41cb80e12552620d709a9dbc1c6b81f17af2914f531c00d8a7f32ba84f9",
+      "url": "https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/SHA256SUMS.txt"
+    }
+  ],
   "validation": {
     "native_manager_unit_tests": 33,
     "native_process_unit_tests": 43,
     "native_napcat_frontend_checks": 26,
     "onboarding_frontend_checks": 11,
-    "source_node_suites_stage_passed": 23
+    "source_node_suites_stage_passed": 23,
+    "python_macos": 1696,
+    "python_macos_skipped": 3,
+    "python_macos_seconds": 23.484,
+    "node_suites_macos": 23,
+    "node_macos_all_passed": true,
+    "macos_dmg_arch": "arm64",
+    "macos_hdiutil_verify": "VALID",
+    "macos_asar_source_files": 9,
+    "macos_outer_web_files": 29,
+    "macos_frozen_carchive_web_files": 29,
+    "python_dependency_components_macos": 41,
+    "python_license_files_macos": 65,
+    "macos_external_mode_and_no_docker_frozen_API": true,
+    "macos_old_voice_preview_and_config_restart_loops": 2,
+    "macos_frozen_companion_single_bubble_duplicate_reconnect_persona_passed": true,
+    "macos_native_platform_boundary_UI_visible": true,
+    "macos_native_mode_dropdown_selection_UI_tested": false,
+    "real_qq_account_login_or_message_delivery_tested": false,
+    "fish_paid_synthesis_tested": false,
+    "interactive_windows_ime_tested": false,
+    "nsis_interactive_install_uninstall_tested": false,
+    "windows_native_manager_real_cycles": 3,
+    "windows_native_manager_source_sha256": "2eb382cb377a1641d3cf895cf2c89961393d5961db46999a8826c7607794ae44",
+    "windows_native_process_source_sha256": "db46d3bf0873a0d0d10e79eda96bb3c3d4d1ce4d5fb25668520e14cd940b5353",
+    "windows_manager_ready_ms": [
+      1738.8,
+      4162.07,
+      4277.9
+    ],
+    "windows_manager_qr_only_no_login": true,
+    "windows_profile_unknown_file_preserved": true,
+    "windows_manager_autostart_and_stop_semantics_passed": true,
+    "windows_job_stop_launcher_exit_host_crash_tree_tests_passed": true,
+    "python_windows": 1696,
+    "python_windows_skipped": 30,
+    "python_windows_seconds": 255.339,
+    "python_windows_all_passed_on_rerun": true,
+    "node_suites_windows": 23,
+    "node_windows_all_passed": true,
+    "windows_first_run_flaky_test": "DeliveryTests.test_background_memory_does_not_block_next_reply: original 0.2s fixture deadline interrupted typing cleanup under full-suite load; unchanged single test passed three times and identical full suite rerun passed. First log retained; no runtime/test relaxation.",
+    "windows_native_process_tests": 43,
+    "windows_native_process_platform_skips": 21,
+    "windows_final_frozen_QQ_API_setup_auth_real_QR_stop_restart_shutdown_autoresume": true,
+    "windows_frozen_QQ_backend_shutdown_no_owned_node_left": true,
+    "windows_native_QQ_api_no_real_login": true,
+    "windows_full_payloads_extracted_and_matched": true,
+    "windows_asar_source_files": 9,
+    "windows_frozen_internal_web_files": 29,
+    "windows_outer_web_files": 29,
+    "windows_node_zip_hash_matched_in_both_installers": true,
+    "python_dependency_components_windows": 41,
+    "python_license_files_windows": 64,
+    "napcat_additional_license_originals": 2,
+    "windows_twenty_timelines_separately_passed": true,
+    "windows_frozen_Unpacked_Portable_local_TTS_and_config_passed": true,
+    "windows_startup_ms": {
+      "frozen": [
+        3195.08,
+        2883.41
+      ],
+      "unpacked": 4290.34,
+      "portable_first_cold": 46756.69
+    },
+    "windows_frozen_QQ_ready_observation_ms": [
+      16422.56,
+      9628.91,
+      11421.39
+    ]
   },
   "embedded_windows_gateway": {
     "mode": "native",
@@ -44,10 +141,14 @@
     "native_generated_diagnostic": "Only root beacon_report.log is a permitted non-executable generated log; archived to work after owned process exits. All other additional files and symlinks are rejected."
   },
   "limitations": [
-    "Release preparation: actual platform builds, native tests and artifact hashes are pending; do not reuse v3.0.2 results.",
     "Bundled native gateway targets Windows x64 only. macOS uses external OneBot with no implicit Docker fallback.",
     "NapCat LRL forbids commercial use and requires full license/source attribution for redistribution; QQ native and Node bundled dependencies retain their separate rights.",
-    "Existing user data root and application ID remain unchanged. Old Docker volumes are not deleted, modified or automatically converted into Windows login credentials."
+    "Existing user data root and application ID remain unchanged. Old Docker volumes are not deleted, modified or automatically converted into Windows login credentials.",
+    "No real QQ login or contact send/receive; QR generation and WebUI readiness only. No real Fish paid calls or WeChat phone playback.",
+    "Windows OS IME and NSIS interactive installation/uninstallation not exercised. Packages unsigned/not notarized.",
+    "One pre-existing 0.2-second timeout fixture failed on initial full Windows run; unchanged target passed three times and the identical full rerun passed. Logs retained.",
+    "Startup measurements are single-machine samples, not LLM reply latency or performance guarantees. Portable cold self-extraction measured 46.76s; frozen QQ preparation observations include extraction, verification and status polling.",
+    "Mac native-dropdown automation was inconclusive; external mode was verified by frozen HTTP API and frontend behavior tests."
   ],
   "default_model": {
     "base_url": "https://api.deepseek.com",
@@ -55,9 +156,10 @@
   },
   "documentation_updated": "2026-10-28",
   "source_checkpoint": {
-    "runtime_source_checkpoint": null,
+    "runtime_source_checkpoint": "2356227307c2f3eb426251b4f4bad8d7c3e91fc5",
     "stable_app_id": "com.siriuspeng.wxbot",
-    "existing_user_data_paths_preserved": true
+    "existing_user_data_paths_preserved": true,
+    "runtime_source_archive_sha256": "018ecb8492afc8b2988e05294593ef31033dc0218ed6dfe0322555b3d55bfdec"
   },
   "release_changes": [
     "Backend-owned bundled NapCat Node on Windows x64, no separate QQ, Node.js, Docker or WSL2 installation.",

@@ -1,10 +1,10 @@
 # WxBot 文档索引
 
-文档同步日期：2026-10-28。当前源码v3.0.3，正在准备原生QQ网关；当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，平台及摘要见[本次清单](release-v3.0.2.json)；[v3.0.0历史清单](release-v3.0.0.json)保留原验收。历史v2验收不挪用为v3结论。
+文档同步日期：2026-10-28。当前源码及发布[v3.0.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3)，平台及摘要见[本次清单](release-v3.0.3.json)；[v3.0.0历史清单](release-v3.0.0.json)保留原验收。历史v2验收不挪用为v3结论。
 
 ## v3优先阅读
 
-- [内置NapCat与外部OneBot](v3/native-napcat.md)：v3.0.3开发中的Windows x64内置运行环境、明确模式、快速登录、旧数据与macOS外部接入；[发布准备](release-v3.0.3.json)。
+- [内置NapCat与外部OneBot](v3/native-napcat.md)：v3.0.3的Windows x64内置运行环境、明确模式、快速登录、旧数据与macOS外部接入；[发布记录](release-v3.0.3.json)。
 
 - [微信角色语音](v3/wechat-voice.md)：Fish独立Key、显式引擎、页内试听与文字先行的WAV附件；[语音资源来源](v3/voice-sources.md)区分在线音色、语料和本地权重。
 - [历史消息日期](v3/history-time.md)：保留原发言时点，分开记录收发时间，不以当前日期补齐旧内容。
@@ -42,7 +42,7 @@
 | 原生构建、资源布局、托盘、退出、故障检查 | [桌面开发](../desktop/README.md) |
 | Windows v2.1.3改进与原生验收 | [Windows专项](windows-v2.1.3.md) |
 | v3验收与历史发布边界 | [v3状态](v3/validation.md)、[历史验证矩阵](validation.md) |
-| 精确发布大小、SHA256、版本与验收快照 | [当前发布清单](release-v3.0.2.json)、[v3.0.0历史清单](release-v3.0.0.json)、[v2.1.7历史清单](release-v2.1.7.json)、[v2.1.6历史清单](release-v2.1.6.json)、[v2.1.5历史清单](release-v2.1.5.json)、[v2.1.4历史清单](release-v2.1.4.json)、[v2.1.3历史清单](release-v2.1.3.json) |
+| 精确发布大小、SHA256、版本与验收快照 | [当前发布清单](release-v3.0.3.json)、[v3.0.0历史清单](release-v3.0.0.json)、[v2.1.7历史清单](release-v2.1.7.json)、[v2.1.6历史清单](release-v2.1.6.json)、[v2.1.5历史清单](release-v2.1.5.json)、[v2.1.4历史清单](release-v2.1.4.json)、[v2.1.3历史清单](release-v2.1.3.json) |
 | 版本历史 | [CHANGELOG](../CHANGELOG.md) |
 | 弗洛洛角色卡与合成资料 | [人格卡](../personas/phrolova/PERSONA.md)、[评估与迭代](../personas/phrolova/EVALUATION.md) |
 

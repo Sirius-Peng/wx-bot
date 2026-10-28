@@ -2,13 +2,13 @@
 
 [![最新发布](https://img.shields.io/github/v/release/Sirius-Peng/wx-bot)](https://github.com/Sirius-Peng/wx-bot/releases/latest)
 
-**当前版本：v3.0.3 · 当前发布：v3.0.2 · 文档更新：2026-10-28。**
+**当前版本：v3.0.3 · 当前发布：v3.0.3 · 文档更新：2026-10-28。**
 
-> **v3.0.3 正在构建与验收。** Windows x64 改为后端托管内置 NapCat，无需另装 QQ、Node.js 或 Docker；macOS 保留外部 OneBot。新版进度见[发布准备记录](docs/release-v3.0.3.json)；当前下载仍为[v3.0.2](docs/release-v3.0.2.json)，历史[v3.0.0清单](docs/release-v3.0.0.json)与附件不变。
+> **v3.0.3 已发布。** Windows x64 后端托管内置 NapCat，无需另装 QQ、Node.js 或 Docker；macOS 使用外部 OneBot。平台、摘要和验证范围见[本次清单](docs/release-v3.0.3.json)；[v3.0.2历史清单](docs/release-v3.0.2.json)与旧附件保持不变。
 
 微信私聊 + QQ 私聊 / 群聊 @ 的 AI 角色聊天机器人。自带 Web 管理界面、Electron 桌面版和弗洛洛人格预设，支持识图、连续消息合并、自然等待、长期记忆、联网搜索、主动联系和对话气泡统计。配置与记忆默认保存在安装目录以外。
 
-[下载 v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
+[下载 v3.0.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3) · [新手引导](docs/onboarding.md) · [完整文档](docs/README.md) · [变更记录](CHANGELOG.md)
 
 ## v3.0.3 源码与轻量陪伴内核
 
@@ -25,30 +25,30 @@
 
 现有数据目录、文件名、自定义路径、凭证和应用 ID `com.siriuspeng.wxbot` 保持不变。功能与使用见 [v3 总览](docs/v3/README.md)，原生验证结果单独记录，不用源码回归代替安装验收。
 
-### 开发中的 v3.0.3：QQ 不再要求 Docker
+### v3.0.3：QQ 不再要求 Docker
 
-Windows x64 源码改为由后端管理应用内置 NapCat 与运行环境，首页仍为单按钮，保留快速登录和真实二维码弹窗；无需另装 QQ、Node.js 或 Docker。macOS 本次不提供内置网关，仍可连接外部 OneBot。资料新增于原活动目录的 `napcat/`，旧Docker卷不删改；[原生网关说明](docs/v3/native-napcat.md)。此段是开发状态，下面v3.0.2下载不因此自动更新。
+Windows x64 安装包改为由后端管理应用内置 NapCat 与运行环境，首页仍为单按钮，保留快速登录和真实二维码弹窗；无需另装 QQ、Node.js 或 Docker。macOS 本次不提供内置网关，仍可连接外部 OneBot。资料新增于原活动目录的 `napcat/`，旧Docker卷不删改；[原生网关说明](docs/v3/native-napcat.md)。
 
 ## 下载与平台
 
-下表为当前已发布 v3.0.2，开发中的内置网关不自动写入这些附件；历史[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)与[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)保持不变。
+下表为当前已发布 v3.0.3（Windows已内置原生QQ网关）；历史[v3.0.0](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.0)与[v2.1.7](https://github.com/Sirius-Peng/wx-bot/releases/tag/v2.1.7)保持不变。
 
 | 平台 | 下载 | 发布大小 |
 |---|---|---|
-| Windows x64安装版 | [WxBot-3.0.2-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-Windows-x64-Setup.exe) | 125.6 MiB |
-| Windows x64便携版 | [WxBot-3.0.2-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-Windows-x64-Portable.exe) | 125.4 MiB |
-| macOS Apple Silicon | [WxBot-3.0.2-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/WxBot-3.0.2-macOS-arm64.dmg) | 151.5 MiB |
-| SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.2/SHA256SUMS.txt) | 对应本次实际发布平台 |
+| Windows x64安装版 | [WxBot-3.0.3-Windows-x64-Setup.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-Windows-x64-Setup.exe) | 242.4 MiB |
+| Windows x64便携版 | [WxBot-3.0.3-Windows-x64-Portable.exe](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-Windows-x64-Portable.exe) | 242.2 MiB |
+| macOS Apple Silicon | [WxBot-3.0.3-macOS-arm64.dmg](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/WxBot-3.0.3-macOS-arm64.dmg) | 151.6 MiB |
+| SHA256 | [SHA256SUMS.txt](https://github.com/Sirius-Peng/wx-bot/releases/download/v3.0.3/SHA256SUMS.txt) | 对应本次实际发布平台 |
 
-常用 Windows 用户建议选择安装版；便携版首次冷启动需要自解压。本次实机单次便携冷启动约40.41秒，不是模型回复耗时，也不代表所有机器。
+常用 Windows 用户建议选择安装版；便携版首次冷启动需要自解压。本次实机单次便携冷启动约46.76秒，不是模型回复耗时，也不代表所有机器。
 
-安装包自带运行时，无需Python / Node.js。未列出的架构没有本次桌面包；Linux可用源码/Docker。未配置代码签名，首次打开流程见[桌面说明](desktop/README.md)。精确摘要与本次验收范围见[发布清单](docs/release-v3.0.2.json)。
+安装包自带运行时，无需Python / Node.js。未列出的架构没有本次桌面包；Linux可用源码/Docker。未配置代码签名，首次打开流程见[桌面说明](desktop/README.md)。精确摘要与本次验收范围见[发布清单](docs/release-v3.0.3.json)。
 
 ## 升级与旧数据
 
-v3继续使用原数据位置和应用ID。覆盖前先备份并退出旧应用；本次实际验收范围与未执行项目见[发布清单](docs/release-v3.0.2.json)。
+v3继续使用原数据位置和应用ID。覆盖前先备份并退出旧应用；本次实际验收范围与未执行项目见[发布清单](docs/release-v3.0.3.json)。
 
-macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「设置 → 本地数据与备份」（v2.1.7 为「模型与行为」）创建备份。Windows先退出旧应用，再使用v3.0.2安装版覆盖安装；便携版退出后替换旧程序。两种方式均继续使用独立用户数据目录。
+macOS先从托盘退出旧应用，再将新App拖到「应用程序」替换。独立用户数据目录保持不变；建议先到「设置 → 本地数据与备份」（v2.1.7 为「模型与行为」）创建备份。Windows先退出旧应用，再使用v3.0.3安装版覆盖安装；便携版退出后替换旧程序。两种方式均继续使用独立用户数据目录。
 
 v2.1.4起支持「设置 → 导入旧版数据」（v2.1.7 为「模型与行为」）：选择包含 `config.json` 的旧目录，预览并确认整套替换，准备导入后重启后台。导入前自动备份当前资料，旧目录不修改；保留配置、人格、记忆、上下文、聊天记录及普通文件，QQ Docker卷另行备份。详见[导入与恢复](docs/data-import.md)。
 

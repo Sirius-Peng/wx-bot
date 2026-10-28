@@ -1,8 +1,8 @@
 # v3.0.3：原生QQ与轻量陪伴内核
 
-更新：2026-10-28。v3.0.3正在构建与验收，Windows x64内置原生QQ，macOS本次仍用外部OneBot；进度见[准备清单](../release-v3.0.3.json)。当前发布[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)，Windows x64 Setup/Portable及macOS arm64 DMG的平台、摘要与本轮结果见[发布清单](../release-v3.0.2.json)。[v3.0.0历史清单](../release-v3.0.0.json)及v2.1.7附件保持不变，不将旧验收记为新版结果。
+更新：2026-10-28。当前发布[v3.0.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3)，Windows x64内置原生QQ，macOS仍用外部OneBot；平台、摘要与本轮结果见[发布清单](../release-v3.0.3.json)。[v3.0.2历史清单](../release-v3.0.2.json)与旧附件保持不变。
 
-## v3.0.3 原生网关（开发中）
+## v3.0.3 原生网关
 
 Windows x64由后端管理随包的NapCat Node与运行环境，不要求另装QQ、Node.js或Docker；保持首页单按钮、快速登录、真实二维码弹窗。新配置默认native；已有QQ/Token/非默认接口且无mode的旧配置保留external，不自动接管。配置与完整账号仍位于原数据根下的napcat/，旧卷不迁入或删改。macOS不包含此Windows组件，只连接外部OneBot；详见[原生网关](native-napcat.md)。
 

@@ -1,14 +1,14 @@
 # 变更记录
 
-当前源码：v3.0.3；当前发布：[v3.0.2](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.2)。日期使用 Asia/Shanghai。
+当前源码：v3.0.3；当前发布：[v3.0.3](https://github.com/Sirius-Peng/wx-bot/releases/tag/v3.0.3)。日期使用 Asia/Shanghai。
 
-## v3.0.3 · 开发与发布准备（2026-10-28）
+## v3.0.3 · 2026-10-28
 
 - Windows x64 内置官方 NapCat Node v4.18.41 与独立运行环境，后端直接托管，不要求用户安装 QQ、Node.js、Docker 或 WSL2；首页仍为单启动按钮，快速登录与实际二维码解码后弹窗保留。
 - 新增独立保存的 `napcat_mode=native|external`。新安装默认native；缺少mode但已存在QQ账号、OneBot Token或非默认接口的旧配置保留external，不静默接管旧Docker或其他网关。显式选择native后使用新本机资料，首次可能需扫码。
 - 自建运行资料保存在原活动数据目录的 `napcat/`，成功就绪后下次后端启动可恢复；手动停止关闭自动恢复，后端退出只清理自己拥有的进程树、不清账号资料或恢复标记。旧Docker卷不删改，外部模式不启动/结束外部QQ。
 - 连接页改为原生运行环境、网关、登录与消息推送分别显示，显式识别内外部模式，不再根据HTTP可达猜测；移除镜像源/WSL安装前置，旧镜像字段仅保留兼容。macOS本次只接外部OneBot，不隐式安装Docker。
-- Windows原始上游ZIP、NapCat LRL、Node原文与来源记录随包；不改上游代码，不把QQ native或其依赖归入本项目MIT。实际安装包、原生验收与SHA256待[发布准备清单](docs/release-v3.0.3.json)补录，不沿用v3.0.2结果。
+- Windows原始上游ZIP、NapCat LRL、Node原文与来源记录随包；不改上游代码，不把QQ native或其依赖归入本项目MIT。实际安装包、原生验收与SHA256见[发布清单](docs/release-v3.0.3.json)，不沿用v3.0.2结果。
 
 ## v3.0.2 · 2026-10-28
 
